@@ -11,7 +11,7 @@ const map = L.map('map', {
     maxZoom: maxZoom,
 });
 
-map.attributionControl.addAttribution('<a href="https://github.com/jaluebbe/OfflineMap">Source on GitHub</a>');
+map.attributionControl.addAttribution('<a href="https://github.com/jaluebbe/HVVMap">Source on GitHub</a>');
 map.attributionControl.addAttribution('<a href="https://www.hvv.de/" target="_blank">Fahrplandaten: Hamburger Verkehrsverbund GmbH</a>');
 
 function addPrivacyStatement() {

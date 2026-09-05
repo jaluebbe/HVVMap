@@ -6,19 +6,55 @@
     <link rel="apple-touch-icon" href="/static/hvv/favicon-180x180.png">
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-    <meta name="apple-mobile-web-app-title" content="OfflineMap HVV Live">
+    <meta name="apple-mobile-web-app-title" content="HVVMap Live">
     <meta name="theme-color" content="#1e64a0">
     <link rel="icon" href="/static/hvv/favicon.svg" type="image/svg+xml">
     <link rel="alternate icon" href="/static/hvv/favicon.ico">
-    <title>OfflineMap HVV Live</title>
+    <title>HVVMap Live</title>
     <meta http-equiv="X-UA-Compatible" content="IE=edge" />
     <meta charset="utf-8" />
     <meta name="format-detection" content="telephone=no">
     <meta name="viewport" content="width=device-width,initial-scale=1.0,user-scalable=no,viewport-fit=cover">
     <link rel="stylesheet" href="leaflet/leaflet.css">
     <link rel="stylesheet" href="maplibre-gl/maplibre-gl.css">
-    <link rel="stylesheet" href="/static/leaflet_map_common.css">
     <style>
+        /* ── Layout ──────────────────────────────────────────────────────── */
+        body {
+            margin: 0;
+            font-family: Arial, Helvetica, sans-serif;
+            background-color: #000;
+        }
+
+        #map {
+            position: fixed;
+            height: 100%;
+            width: 100%;
+            min-height: 285px;
+        }
+
+        /* ── Safe-area / PWA ─────────────────────────────────────────────── */
+        .leaflet-bottom {
+            padding-bottom: calc(env(safe-area-inset-bottom, 0px) * 0.25);
+        }
+
+        .leaflet-left {
+            padding-left: calc(env(safe-area-inset-left, 0px) * 0.75);
+        }
+
+        .leaflet-right {
+            padding-right: calc(env(safe-area-inset-right, 0px) * 0.75);
+        }
+
+        .leaflet-top {
+            padding-top: calc(env(safe-area-inset-top, 0px) * 0.75);
+        }
+
+        .leaflet-control-attribution {
+            -webkit-text-size-adjust: 100%;
+            text-size-adjust: 100%;
+        }
+
+        /* ── HVV markers ─────────────────────────────────────────────────── */
         /* Icon centers on the coordinate via its own transform; the label
            sits at a fixed offset independent of icon width. */
         .geojson-svg-icon {
