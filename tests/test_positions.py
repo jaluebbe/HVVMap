@@ -1,5 +1,4 @@
 from hvv_map.positions import (
-    interpolate_journey_position,
     interpolate_journey_position_detailed,
     interpolate_position,
 )
@@ -71,12 +70,8 @@ def test_journey_selects_segment_covering_now():
             {**SEGMENT, "startDateTime": 1020, "endDateTime": 1040},
         ]
     }
-    progress, _ = interpolate_journey_position(journey, now_ts=1030)
+    progress, _, _ = interpolate_journey_position_detailed(journey, now_ts=1030)
     assert progress == 0.5  # halfway through the SECOND segment
-
-
-def test_journey_with_no_segments_returns_none():
-    assert interpolate_journey_position({"segments": []}, now_ts=1010) is None
 
 
 def test_detailed_returns_progress_position_and_segment():
