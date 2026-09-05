@@ -7,11 +7,8 @@ from hvv_map.lines import (
     fetch_sublines,
     is_line_of_interest,
     lines_of_interest,
-    load_lines,
     simple_types_used,
-    store_lines,
 )
-from hvv_map.redis_client import get_redis_client
 
 FAKE_RESPONSE = {
     "lines": [
@@ -100,23 +97,6 @@ def test_lines_of_interest_filters_the_full_list():
     ]
     selected = lines_of_interest(lines)
     assert {line.id for line in selected} == {"a", "c"}
-
-
-def test_store_and_load_lines_roundtrip():
-    redis_client = get_redis_client()
-    lines = [
-        LineInfo(id="a", name="U1", carrier_short="Hochbahn", simple_type="U_BAHN"),
-        LineInfo(id="c", name="61", carrier_short="HADAG", simple_type="SCHIFF"),
-    ]
-    store_lines(redis_client, lines)
-    loaded = load_lines(redis_client)
-    assert loaded == lines
-
-
-def test_load_lines_returns_empty_list_when_nothing_stored():
-    redis_client = get_redis_client()
-    redis_client.delete("hvv:lines")
-    assert load_lines(redis_client) == []
 
 
 FAKE_SUBLINE_RESPONSE = {

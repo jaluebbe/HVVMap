@@ -4,15 +4,11 @@ Basis for deciding: icon lineKeys, which vehicleTypes to request from
 getAnnouncements/getVehicleMap, and (later) per-line validity windows.
 """
 
-import json
 import re
-import time
-from dataclasses import asdict, dataclass
+from dataclasses import dataclass
 
-import redis
 
 from hvv_map.gti_client import GtiClient
-from hvv_map.redis_client import get_redis_client
 
 # U/S/AKN by name prefix (matches replacement buses too, e.g. "U1-ERSATZ",
 # "S3-SEV", via the trailing ".*"). Ferries by carrier instead of name, since
@@ -69,9 +65,6 @@ LINE_COLORS = {
     "A1-SEV": "E2001A", "A2-SEV": "E2001A", "A3-Bus": "E2001A",
     "S3-SEV": "E2001A", "S5-SEV": "E2001A", "S7-SEV": "E2001A",
 }  # fmt: skip
-
-REDIS_KEY = "hvv:lines"
-REDIS_TTL = 24 * 60 * 60  # seconds; catalog changes rarely, generous headroom
 
 
 @dataclass(frozen=True)
@@ -173,30 +166,16 @@ def fetch_sublines(client: GtiClient) -> list[SublineInfo]:
     return sublines
 
 
-def store_lines(redis_client: redis.Redis, lines: list[LineInfo]) -> None:
-    payload = json.dumps(
-        {"fetched_at": int(time.time()), "data": [asdict(line) for line in lines]}
-    )
-    redis_client.set(REDIS_KEY, payload, ex=REDIS_TTL)
-
-
-def load_lines(redis_client: redis.Redis) -> list[LineInfo]:
-    payload = redis_client.get(REDIS_KEY)
-    if not payload:
-        return []
-    return [LineInfo(**entry) for entry in json.loads(payload)["data"]]
-
-
 def main() -> None:
-    """CLI: fetch lines of interest, store them in Redis, and print them -
-    optionally narrowed further by a name substring."""
+    """CLI: fetch lines of interest and print them - a lookup tool, not
+    read by the running system, so nothing gets stored in Redis. Narrow the
+    output with a name substring, e.g. `hvvmap-lines A1`."""
     import sys
 
     client = GtiClient()
     lines = fetch_lines(client)
     selected = lines_of_interest(lines)
-    store_lines(get_redis_client(), selected)
-    print(f"{len(lines)} lines total, {len(selected)} of interest (stored in Redis)")
+    print(f"{len(lines)} lines total, {len(selected)} of interest")
 
     needle = sys.argv[1].upper() if len(sys.argv) > 1 else None
     for line in selected:
