@@ -6,7 +6,8 @@ organically-grown geometry + line/mode tracking (see fetcher.py's
 _inject_tracks) - a section nobody has driven through yet (e.g. a closure)
 simply has no entry.
 
-Refreshed periodically by the fetcher, could also be run standalone if needed.
+Not part of the per-second fetch loop - reference geometry doesn't need
+that freshness. Run standalone (main()) periodically instead.
 """
 
 import json
@@ -27,7 +28,7 @@ from hvv_map.segment_cache import (
     all_segments_with_lines,
     open_cache,
 )
-from hvv_map.stations import StationInfo, by_id, fetch_stations
+from hvv_map.stations import StationInfo, by_id, fetch_stations, store_stations
 
 STOPS_REDIS_KEY = "hvv:reference_stops"
 LINES_REDIS_KEY = "hvv:reference_lines"
@@ -136,10 +137,16 @@ def finish_reference_rebuild(
     """Second half of build_and_store_reference - takes sublines already
     fetched (see fetch_sublines) and does the remaining API call
     (listStations) plus building/storing both layers. Split out so the two
-    API calls can land in separate fetcher cycles instead of back-to-back
-    (see chat: keeps the continuous loop within its 1 req/s budget even
-    during a rebuild)."""
-    stations = by_id(fetch_stations(client))
+    API calls land in separate fetcher cycles instead of back-to-back.
+
+    Also persists the station list to hvv:stations - reusing this call
+    rather than a separate one keeps hvv:stations self-healing on every
+    periodic rebuild, so disruptions never depend on a manual
+    hvvmap-stations run staying in sync with a fresh deployment.
+    """
+    all_stations = fetch_stations(client)
+    store_stations(redis_client, all_stations)
+    stations = by_id(all_stations)
     active_names = active_station_names(conn)
     stops_geojson = build_stops_geojson(sublines, stations, active_names)
     _store(redis_client, STOPS_REDIS_KEY, stops_geojson)

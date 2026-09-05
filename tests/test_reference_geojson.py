@@ -1,3 +1,5 @@
+import tempfile
+
 from hvv_map.lines import SublineInfo
 from hvv_map.reference_geojson import (
     build_lines_geojson,
@@ -125,8 +127,8 @@ def test_build_stops_geojson_empty_active_names_drops_all():
     assert result["features"] == []
 
 
-def test_build_lines_geojson_converts_flat_track_to_coordinates(tmp_path):
-    conn = open_cache(str(tmp_path / "cache.db"))
+def test_build_lines_geojson_converts_flat_track_to_coordinates():
+    conn = open_cache(tempfile.mktemp(suffix=".db"))
     store(conn, ("A", "B"), [10.0, 53.5, 10.01, 53.51])
     record_line_usage(conn, ("A", "B"), "U1", "U")
 
@@ -137,8 +139,8 @@ def test_build_lines_geojson_converts_flat_track_to_coordinates(tmp_path):
     }
 
 
-def test_build_lines_geojson_properties_list_lines_and_modes(tmp_path):
-    conn = open_cache(str(tmp_path / "cache.db"))
+def test_build_lines_geojson_properties_list_lines_and_modes():
+    conn = open_cache(tempfile.mktemp(suffix=".db"))
     store(conn, ("A", "B"), [10.0, 53.5, 10.01, 53.51])
     record_line_usage(conn, ("A", "B"), "U1", "U")
     record_line_usage(conn, ("A", "B"), "U1-ERSATZ", "U")
@@ -151,32 +153,65 @@ def test_build_lines_geojson_properties_list_lines_and_modes(tmp_path):
     }
 
 
-def test_build_lines_geojson_skips_segments_without_recorded_lines(tmp_path):
-    conn = open_cache(str(tmp_path / "cache.db"))
+def test_build_lines_geojson_skips_segments_without_recorded_lines():
+    conn = open_cache(tempfile.mktemp(suffix=".db"))
     store(conn, ("A", "B"), [10.0, 53.5, 10.01, 53.51])  # geometry only
     result = build_lines_geojson(conn)
     assert result["features"] == []
 
 
-def test_build_lines_geojson_skips_degenerate_single_point_tracks(tmp_path):
-    conn = open_cache(str(tmp_path / "cache.db"))
+def test_build_lines_geojson_skips_degenerate_single_point_tracks():
+    conn = open_cache(tempfile.mktemp(suffix=".db"))
     store(conn, ("A", "B"), [10.0, 53.5])  # only one point
     record_line_usage(conn, ("A", "B"), "U1", "U")
     result = build_lines_geojson(conn)
     assert result["features"] == []
 
 
-def test_build_lines_geojson_color_matches_known_line(tmp_path):
-    conn = open_cache(str(tmp_path / "cache.db"))
+def test_build_lines_geojson_color_matches_known_line():
+    conn = open_cache(tempfile.mktemp(suffix=".db"))
     store(conn, ("A", "B"), [10.0, 53.5, 10.01, 53.51])
     record_line_usage(conn, ("A", "B"), "S1", "S")
     feature = build_lines_geojson(conn)["features"][0]
     assert feature["properties"]["color"] == "#1a962b"
 
 
-def test_build_lines_geojson_color_falls_back_for_unknown_line(tmp_path):
-    conn = open_cache(str(tmp_path / "cache.db"))
+def test_build_lines_geojson_color_falls_back_for_unknown_line():
+    conn = open_cache(tempfile.mktemp(suffix=".db"))
     store(conn, ("A", "B"), [10.0, 53.5, 10.01, 53.51])
     record_line_usage(conn, ("A", "B"), "Metrobus 5", "")
     feature = build_lines_geojson(conn)["features"][0]
     assert feature["properties"]["color"] == "#888888"
+
+
+def test_finish_reference_rebuild_persists_stations_for_self_healing():
+    from unittest.mock import patch
+
+    from hvv_map.gti_client import GtiClient
+    from hvv_map.redis_client import get_redis_client
+    from hvv_map.reference_geojson import finish_reference_rebuild
+    from hvv_map.stations import load_stations
+
+    redis_client = get_redis_client()
+    redis_client.delete("hvv:stations")
+
+    def fake_send(self, endpoint, request):
+        if endpoint == "listStations":
+            return {
+                "stations": [
+                    {
+                        "id": "Master:1",
+                        "name": "Ohlstedt",
+                        "city": "Hamburg",
+                        "coordinate": {"x": 10.1, "y": 53.7},
+                    }
+                ]
+            }
+        raise ValueError(endpoint)
+
+    conn = open_cache(tempfile.mktemp(suffix=".db"))
+    with patch.object(GtiClient, "send", fake_send):
+        finish_reference_rebuild(GtiClient(), redis_client, conn, sublines=[])
+
+    loaded = load_stations(redis_client)
+    assert [s.name for s in loaded] == ["Ohlstedt"]

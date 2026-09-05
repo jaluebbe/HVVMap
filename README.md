@@ -38,6 +38,16 @@ GTI_USER=... GTI_HMAC_SECRET=... hvvmap-fetcher
 ```
 (or via `credentials.json`, see `hvv_map.gti_client`)
 
+`SEGMENT_CACHE_PATH` defaults to a bare relative filename, resolved against
+whatever directory a command happens to run in - if you invoke `hvvmap-*`
+commands from outside a container (own venv, not `docker exec`), set it to
+an absolute path once in your shell profile, or every run from a different
+directory silently creates a fresh, empty database instead of using the
+real one:
+```
+export SEGMENT_CACHE_PATH=/absolute/path/to/segment_cache.db
+```
+
 Run the API:
 ```
 REDIS_HOST=127.0.0.1 uvicorn hvv_map.api:app --reload
@@ -47,27 +57,31 @@ Run the tests:
 ```
 pytest
 ```
+Tests default to `REDIS_DB=15` (see `tests/conftest.py`) so they never
+touch production data on a shared Redis instance.
 
 ### First run
 
-`hvvmap-fetcher` needs one manual one-time step before disruptions show up
-correctly - it never does this on its own:
+`hvv:stations` (needed to resolve disruption coordinates) self-heals within
+`REFERENCE_REBUILD_INTERVAL` (30 min by default) of a fresh start -
+`finish_reference_rebuild()` persists it as a side effect of station data it
+already fetches. If you don't want to wait, run once manually:
 
 ```
 hvvmap-stations
 ```
 
-Without it, `hvv:disruptions` stays empty forever (announcements have no
-station coordinates to resolve against). Everything else self-starts:
-`hvv:positions`, `hvv:announcements`/`hvv:disruptions`, and the reference
-layers (`hvv:reference_lines`/`hvv:reference_stops`) all begin populating
-within the fetcher's first few loop cycles - though the reference layers
-start out empty (or nearly so) and fill in gradually as the fetcher
-observes real vehicle movement, not instantly.
+Everything else self-starts too: `hvv:positions`, `hvv:announcements`/
+`hvv:disruptions`, and the reference layers (`hvv:reference_lines`/
+`hvv:reference_stops`) all begin populating within the fetcher's first few
+loop cycles - though the reference layers start out empty (or nearly so)
+and fill in gradually as the fetcher observes real vehicle movement, not
+instantly.
 
 ### One-off CLI commands
 
-- `hvvmap-stations` - see "First run" above; safe to re-run any time
+- `hvvmap-stations` - immediate `hvv:stations` refresh instead of waiting
+  for the next automatic reference rebuild; safe to re-run any time
 - `hvvmap-lines` - a lookup tool for line names/ids (`hvvmap-lines A1`
   filters by name); not read by the running system, purely diagnostic
 - `hvvmap-reference` - (re)build `hvv:reference_lines`/`hvv:reference_stops`
@@ -98,8 +112,8 @@ and, mounted as a volume at runtime:
 - any single `*.mbtiles` file under `/osm/` - filename doesn't matter, the
   API picks up whatever's there
 
-Both images read `REDIS_HOST` (default `127.0.0.1`); only the fetcher needs
-`GTI_USER`/`GTI_HMAC_SECRET`.
+Both images read `REDIS_HOST`/`REDIS_DB` (default `127.0.0.1`/`0`); only the
+fetcher needs `GTI_USER`/`GTI_HMAC_SECRET`.
 
 ## Notable data quirks
 
