@@ -293,7 +293,7 @@
         return refreshReferenceLayer(
             '/api/hvv/live/lines.geojson',
             'lines',
-            (f, mode) => (f.properties.modes || []).includes(mode),
+            (f, mode) => (f.properties?.modes || []).includes(mode),
         );
     }
 
@@ -301,7 +301,7 @@
         return refreshReferenceLayer(
             '/api/hvv/live/stops.geojson',
             'stops',
-            (f, mode) => (f.properties.modes || []).includes(mode),
+            (f, mode) => (f.properties?.modes || []).includes(mode),
         );
     }
 
@@ -392,10 +392,10 @@
                 // Show only if at least one of its modes is active (an
                 // empty modes array is never hidden, as a safe default).
                 features: disruptionRawData.features.filter(function(f) {
-                    if (f.properties.category !== c.key) {
+                    if (f.properties?.category !== c.key) {
                         return false;
                     }
-                    const modes = f.properties.modes || [];
+                    const modes = f.properties?.modes || [];
                     return modes.length === 0 || modes.some(mode => activeModes.has(mode));
                 }),
             };
