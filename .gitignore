@@ -219,3 +219,6 @@ __marimo__/
 
 # HVV API credentials
 credentials.json
+
+# Segment cache
+segment_cache.db
