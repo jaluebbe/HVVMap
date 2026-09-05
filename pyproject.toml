@@ -1,0 +1,35 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "hvvmap"
+version = "0.1.0"
+description = "HVV live transit data: GTI API fetcher and (later) map backend"
+readme = "README.md"
+license = { file = "LICENSE" }
+requires-python = ">=3.11"
+dependencies = [
+    "requests",
+    "redis",
+]
+
+[project.scripts]
+hvvmap-fetcher = "hvv_map.fetcher:main"
+hvvmap-lines = "hvv_map.lines:main"
+hvvmap-stations = "hvv_map.stations:main"
+hvvmap-reference = "hvv_map.reference_geojson:main"
+hvvmap-fetch-announcements = "hvv_map.fetcher:fetch_once_announcements"
+hvvmap-fetch-vehiclemap = "hvv_map.fetcher:fetch_once_vehicle_map"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/hvv_map"]
+
+[tool.ruff]
+# line-length: default (88)
+
+[tool.ruff.lint]
+select = ["E", "W", "F"]  # match flake8's default scope
+
+[tool.ruff.format]
+quote-style = "double"  # like black
