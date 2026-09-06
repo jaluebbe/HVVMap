@@ -2,15 +2,15 @@
 <html lang="en">
 
 <head>
-    <link rel="manifest" href="/static/manifest_hvv.json">
+    <link rel="manifest" href="/static/manifest_hvv_realtime.json">
     <link rel="apple-touch-icon" href="/static/hvv/favicon-180x180.png">
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-    <meta name="apple-mobile-web-app-title" content="HVVMap Live">
+    <meta name="apple-mobile-web-app-title" content="HVVMap Realtime">
     <meta name="theme-color" content="#1e64a0">
     <link rel="icon" href="/static/hvv/favicon.svg" type="image/svg+xml">
     <link rel="alternate icon" href="/static/hvv/favicon.ico">
-    <title>HVVMap Live</title>
+    <title>HVVMap Realtime</title>
     <meta http-equiv="X-UA-Compatible" content="IE=edge" />
     <meta charset="utf-8" />
     <meta name="format-detection" content="telephone=no">
@@ -128,10 +128,10 @@
 </body>
 <script src="/static/leaflet_map_hvv_base.js"></script>
 <script>
-    // --- HVV vehicle positions: polling /api/hvv/live/positions.geojson ---
+    // --- HVV vehicle positions: polling /api/hvv/realtime/positions.geojson ---
     // Reads from Redis, populated by the separate hvvmap-fetcher process.
     const HVV_POLL_INTERVAL_MS = 1_000;
-    const HVV_ENDPOINT = '/api/hvv/live/positions.geojson';
+    const HVV_ENDPOINT = '/api/hvv/realtime/positions.geojson';
 
     // Explicit panes for a deterministic stacking order: lines/stops load
     // asynchronously via fetch(), so their arrival order isn't guaranteed.

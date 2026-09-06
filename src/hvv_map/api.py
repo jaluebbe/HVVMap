@@ -166,6 +166,11 @@ def get_live_positions():
     return _read_geojson("hvv:positions")
 
 
+@app.get("/api/hvv/realtime/positions.geojson", tags=["hvv_realtime"])
+def get_realtime_positions():
+    return _read_geojson("hvv:positions_realtime")
+
+
 @app.get("/api/hvv/live/disruptions.geojson", tags=["hvv_live"])
 def get_live_disruptions():
     return _read_geojson("hvv:disruptions")

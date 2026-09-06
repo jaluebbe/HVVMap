@@ -10,7 +10,9 @@ a cycle instead of adding to it, keeping the combined rate within 1 req/s.
 getVehicleMap alternates realtime=True/False on successive fetches. Each
 variant is stored under its own key (hvv:vehiclemap:realtime /
 hvv:vehiclemap:no_realtime) and published to a same-named channel.
-hvv:positions is built from the no_realtime variant only.
+hvv:positions is built from the no_realtime variant; hvv:positions_realtime
+mirrors it from the realtime variant instead, for a separate live/realtime
+endpoint pair (see api.py).
 
 hvv:reference_stops/hvv:reference_lines are rebuilt periodically here
 (every REFERENCE_REBUILD_INTERVAL), replacing a vehicle-map cycle, since
@@ -67,6 +69,7 @@ gti = GtiClient()
 segment_cache_conn = open_cache()
 
 _last_no_realtime_response: dict | None = None
+_last_realtime_response: dict | None = None
 
 
 def _store(key: str, data: dict, ttl: int, publish: bool = False) -> None:
@@ -113,7 +116,7 @@ def _inject_tracks(response: dict) -> None:
 
 
 def fetch_vehicle_map(ttl: int = VEHICLE_MAP_TTL, realtime: bool = True) -> None:
-    global _last_no_realtime_response
+    global _last_no_realtime_response, _last_realtime_response
     now = int(time.time())
     request = {
         "version": 63,
@@ -134,6 +137,9 @@ def fetch_vehicle_map(ttl: int = VEHICLE_MAP_TTL, realtime: bool = True) -> None
     if not realtime:
         _last_no_realtime_response = response
         _rebuild_positions(ttl)
+    else:
+        _last_realtime_response = response
+        _rebuild_positions_realtime(ttl)
 
 
 def _rebuild_positions(ttl: int = VEHICLE_MAP_TTL) -> None:
@@ -149,6 +155,22 @@ def _rebuild_positions(ttl: int = VEHICLE_MAP_TTL) -> None:
     _store(
         "hvv:positions",
         build_positions_geojson(_last_no_realtime_response, now_ts=now),
+        ttl,
+        publish=True,
+    )
+
+
+def _rebuild_positions_realtime(ttl: int = VEHICLE_MAP_TTL) -> None:
+    """Same idea as _rebuild_positions(), but from the realtime variant -
+    powers the separate /api/hvv/realtime/positions.geojson endpoint, whose
+    positions move as delay estimates change rather than along the fixed
+    schedule."""
+    if _last_realtime_response is None:
+        return
+    now = int(time.time())
+    _store(
+        "hvv:positions_realtime",
+        build_positions_geojson(_last_realtime_response, now_ts=now),
         ttl,
         publish=True,
     )
@@ -222,6 +244,7 @@ def main() -> None:
                 last_vehicle_map_fetch = cycle_start
             else:
                 _rebuild_positions()
+                _rebuild_positions_realtime()
         except Exception as e:  # keep the loop alive on transient API/network errors
             print(f"[hvvmap-fetcher] error: {e}", flush=True)
 

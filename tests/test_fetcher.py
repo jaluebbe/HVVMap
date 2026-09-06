@@ -130,3 +130,47 @@ def test_rebuild_positions_reinterpolates_without_new_fetch():
     second = json.loads(fetcher.redis_client.get("hvv:positions"))
     second_progress = second["data"]["features"][0]["properties"]["progress"]
     assert second_progress > first_progress
+
+
+def test_rebuild_positions_realtime_does_nothing_without_prior_fetch():
+    fetcher._last_realtime_response = None
+    redis_client = get_redis_client()
+    redis_client.delete("hvv:positions_realtime")
+
+    fetcher._rebuild_positions_realtime()
+
+    assert redis_client.get("hvv:positions_realtime") is None
+
+
+def test_fetch_vehicle_map_realtime_populates_positions_realtime():
+    now = int(time.time())
+    with patch.object(fetcher.gti, "send", return_value=_fake_response(now)):
+        fetcher.fetch_vehicle_map(realtime=True)
+
+    stored = json.loads(fetcher.redis_client.get("hvv:positions_realtime"))
+    assert len(stored["data"]["features"]) == 1
+
+
+def test_fetch_vehicle_map_no_realtime_does_not_touch_realtime_cache():
+    fetcher._last_realtime_response = None
+    now = int(time.time())
+    with patch.object(fetcher.gti, "send", return_value=_fake_response(now)):
+        fetcher.fetch_vehicle_map(realtime=False)
+
+    assert fetcher._last_realtime_response is None
+
+
+def test_rebuild_positions_realtime_reinterpolates_without_new_fetch():
+    now = int(time.time())
+    with patch.object(fetcher.gti, "send", return_value=_fake_response(now)):
+        fetcher.fetch_vehicle_map(realtime=True)
+
+    first = json.loads(fetcher.redis_client.get("hvv:positions_realtime"))
+    first_progress = first["data"]["features"][0]["properties"]["progress"]
+
+    with patch.object(time, "time", return_value=now + 10):
+        fetcher._rebuild_positions_realtime()
+
+    second = json.loads(fetcher.redis_client.get("hvv:positions_realtime"))
+    second_progress = second["data"]["features"][0]["properties"]["progress"]
+    assert second_progress > first_progress
