@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="de">
+
+<head>
+    <link rel="apple-touch-icon" href="/static/hvv/favicon-180x180.png">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="HVVMap">
+    <meta name="theme-color" content="#1e64a0">
+    <link rel="icon" href="/static/hvv/favicon.svg" type="image/svg+xml">
+    <link rel="alternate icon" href="/static/hvv/favicon.ico">
+    <title>HVVMap</title>
+    <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+    <meta charset="utf-8" />
+    <meta name="format-detection" content="telephone=no">
+    <meta name="viewport" content="width=device-width,initial-scale=1.0,viewport-fit=cover">
+    <style>
+        body {
+            margin: 0;
+            font-family: Arial, Helvetica, sans-serif;
+            background-color: #1e64a0;
+            color: #fff;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            min-height: 100vh;
+            padding: env(safe-area-inset-top, 0px) env(safe-area-inset-right, 0px) env(safe-area-inset-bottom, 0px) env(safe-area-inset-left, 0px);
+            box-sizing: border-box;
+        }
+
+        h1 {
+            margin: 40px 0 24px;
+            font-size: 1.5rem;
+        }
+
+        .options {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+            width: 100%;
+            max-width: 320px;
+            padding: 0 16px;
+        }
+
+        .options a {
+            display: block;
+            background: #fff;
+            color: #1e64a0;
+            text-decoration: none;
+            text-align: center;
+            padding: 16px;
+            border-radius: 8px;
+            box-shadow: 0 2px 6px rgba(0, 0, 0, 0.2);
+        }
+
+        .options a:active {
+            background: #e6f0f8;
+        }
+
+        .options .label {
+            display: block;
+            font-weight: bold;
+            margin-bottom: 4px;
+        }
+
+        .options .description {
+            display: block;
+            font-size: 0.8rem;
+            font-weight: normal;
+            color: #45688a;
+        }
+
+        footer {
+            margin-top: auto;
+            padding: 16px;
+            font-size: 0.75rem;
+            text-align: center;
+        }
+
+        footer a {
+            color: #fff;
+        }
+
+        footer span {
+            margin: 0 4px;
+        }
+    </style>
+</head>
+
+<body>
+    <h1>HVVMap</h1>
+    <div class="options">
+        <a href="/static/leaflet_map_hvv_live.html">
+            <span class="label">Live</span>
+            <span class="description">Fahrplanbasierte Position, mit Verspätungsanzeige</span>
+        </a>
+        <a href="/static/leaflet_map_hvv_realtime.html">
+            <span class="label">Realtime</span>
+            <span class="description">Prognosebasierte Position, kann springen</span>
+        </a>
+        <a href="/static/leaflet_map_hvv_gtfs.html">
+            <s><span class="label">GTFS</span>
+            <span class="description">Fahrplanbasierte Position, ohne Störungsmeldungen</span></s>
+        </a>
+    </div>
+    <footer>
+        <a href="https://github.com/jaluebbe/HVVMap" target="_blank">Source on GitHub</a>
+        <span>·</span>
+        <a href="https://www.hvv.de/" target="_blank">Fahrplandaten: Hamburger Verkehrsverbund GmbH</a>
+        <span id="privacy-link-wrapper"></span>
+    </footer>
+    <script>
+        // Only link the privacy page if it's actually there - kept
+        // consistent with the map pages' own check.
+        fetch('/static/datenschutz.html', { method: 'HEAD' }).then(function(response) {
+            if (!response.ok) {
+                return;
+            }
+            const wrapper = document.getElementById('privacy-link-wrapper');
+            wrapper.innerHTML =
+                '<span>·</span><a href="/static/datenschutz.html" target="_blank">Impressum &amp; Datenschutzerkl&auml;rung</a>';
+        });
+    </script>
+</body>
+
+</html>
