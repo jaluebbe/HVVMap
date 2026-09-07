@@ -1,0 +1,24 @@
+{
+  "name": "HVV Map MapLibre",
+  "short_name": "HVV MapLibre",
+  "start_url": "/static/maplibre_map_hvv_live.html",
+  "scope": "/static/maplibre_map_hvv_live.html",
+  "display": "standalone",
+  "orientation": "any",
+  "lang": "de",
+  "background_color": "#1e64a0",
+  "theme_color": "#1e64a0",
+  "categories": ["navigation", "utilities"],
+  "icons": [
+    {
+      "src": "/static/hvv/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "/static/hvv/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ]
+}
