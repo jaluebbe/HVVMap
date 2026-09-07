@@ -14,8 +14,7 @@ body {
     min-height: 285px;
 }
 
-/* Compact hover popups (vehicles/stops/disruptions) - MapLibre's own
-   defaults leave a lot of vertical whitespace and square corners. */
+/* MapLibre's popup defaults are too roomy/square - tightened here. */
 .maplibregl-popup-content {
     padding: 4px 8px;
     border-radius: 6px;
@@ -23,8 +22,7 @@ body {
     line-height: 1.3;
 }
 
-/* U/S/AKN/Fähre checkbox control (ModeToggleControl) - MapLibre's
-   maplibregl-ctrl-group only styles buttons, not this checkbox layout. */
+/* Checkbox layout for ModeToggleControl - maplibregl-ctrl-group only styles buttons. */
 .hvv-mode-control {
     padding: 4px 8px;
     display: flex;
@@ -67,10 +65,7 @@ body {
     padding-right: calc(env(safe-area-inset-right, 0px) * 0.75);
 }
 
-/* Icon centers on the coordinate via its own transform (marker anchor is
-   'top-left', i.e. the wrapper's own origin IS the coordinate - matches
-   Leaflet's iconAnchor:[0,0]); the label sits at a fixed offset from that
-   same origin, independent of icon width. */
+/* anchor:'top-left' = wrapper origin is the coordinate; label offset is relative to that. */
 .hvv-marker-wrapper {
     cursor: pointer;
 }
@@ -80,8 +75,7 @@ body {
     transform: translate(-50%, -50%);
 }
 
-/* Invisible, generously-sized hover target - a sibling of the icon/label,
-   positioned relative to the same wrapper origin (see buildMarkerElement). */
+/* Invisible hover target, sibling of icon/label, same origin (see buildMarkerElement). */
 .hvv-marker-hitbox {
     position: absolute;
 }
@@ -105,13 +99,22 @@ body {
     font-weight: bold;
 }
 
+/* Highlights only the newest model per category; older ones stay unstyled. */
+.hvv-vehicle-batteriegelenkbus {
+    background: #c8e6c9;
+}
+
+.hvv-vehicle-dt5 {
+    /* Blood-orange ends, stainless-steel grey middle - echoes the real DT5 livery. */
+    background: linear-gradient(90deg, #ffab91, #e0e0e0 20%, #e0e0e0 80%, #ffab91);
+}
+
 /* Toggle: class on the map container hides all labels */
 .hvv-labels-hidden .hvv-marker-label {
     display: none;
 }
 
-/* Standalone delay display, independent of the label toggle - only shown
-   once labels are hidden (the embedded version covers the normal case). */
+/* Shown only once labels are hidden - the embedded delay badge covers the normal case. */
 .hvv-marker-delay-standalone {
     display: none;
     position: absolute;

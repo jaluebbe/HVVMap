@@ -1,9 +1,4 @@
-/* Minimal MapLibre GL JS base map for the HVV live vehicle page - a
- * parallel, independent structure to leaflet_map_hvv_base.js, so future
- * work isn't tied to Leaflet if that's ever needed. Live page only for now;
- * everything the Leaflet page's layer control offers (U/S/AKN/Fähre modes,
- * Sperrung/Aufzüge disruption categories) is ported (see initHvvVehicleLayers).
- */
+/* Minimal MapLibre GL JS base map for the HVV live vehicle page. */
 
 const HAMBURG_CENTER = [9.9937, 53.5511]; // MapLibre wants [lon, lat]
 const HAMBURG_DEFAULT_ZOOM = 12;
@@ -21,8 +16,7 @@ const map = new maplibregl.Map({
 map.addControl(new maplibregl.NavigationControl(), 'top-left');
 map.addControl(new maplibregl.ScaleControl({ unit: 'metric' }), 'bottom-left');
 
-// compact:true gives the same collapsible "i" toggle the Leaflet page builds
-// by hand (setupAttribution()) - built into MapLibre, no custom JS needed.
+// compact:true mirrors the Leaflet page's collapsible "i" toggle, built in here.
 const attributionControl = new maplibregl.AttributionControl({
     compact: true,
     customAttribution: [
@@ -81,8 +75,7 @@ class LabelToggleControl {
         this._map = undefined;
     }
 }
-// Added to the map later, after the mode selector (see setupSourcesAndLayers)
-// so it stacks below it in the top-right corner, matching the Leaflet page.
+// Added after the mode selector so it stacks below it (see setupSourcesAndLayers).
 
 const HVV_POLL_INTERVAL_MS = 1_000;
 const REFERENCE_POLL_INTERVAL_MS = 60_000;
@@ -90,9 +83,7 @@ const DISRUPTIONS_POLL_INTERVAL_MS = 60_000;
 
 const EMPTY_FEATURE_COLLECTION = { type: 'FeatureCollection', features: [] };
 
-// Positions, lines and stops are grouped per mode; ModeToggleControl below
-// toggles all three together for a given mode, mirroring the Leaflet page's
-// per-mode layerGroup + L.control.layers checkboxes.
+// ModeToggleControl toggles a mode's lines/stops/positions together.
 const MODES = [
     { key: 'U', name: 'U-Bahn', icon: '/static/hvv/icons/u.svg' },
     { key: 'S', name: 'S-Bahn', icon: '/static/hvv/icons/s.svg' },
@@ -100,8 +91,7 @@ const MODES = [
     { key: 'FERRY', name: 'Fähre', icon: '/static/hvv/icons/ferry.svg' },
 ];
 
-// Only two of three categories shown - SONSTIGE stays too vague for a
-// useful map display (matches the Leaflet page).
+// Only two of three categories - SONSTIGE stays too vague to show usefully.
 const DISRUPTION_CATEGORIES = [
     { key: 'SPERRUNG', name: 'Sperrung', icon: '🚧', visible: true },
     { key: 'BARRIEREFREIHEIT', name: 'Aufzüge', icon: '♿', visible: false },
@@ -119,9 +109,7 @@ function buildIconNode(icon) {
     return span;
 }
 
-// One checkbox per mode plus (if given) one per disruption category, in a
-// single panel - onModeToggle(modeKey, visible) / onCategoryToggle(categoryKey,
-// visible) are wired up by initHvvVehicleLayers() to the actual layers/markers.
+// One checkbox per mode + disruption category; onToggle callbacks wire up the actual layers.
 class ModeToggleControl {
     constructor(onModeToggle, categories, onCategoryToggle) {
         this._onModeToggle = onModeToggle;
@@ -163,14 +151,25 @@ class ModeToggleControl {
     }
 }
 
-// Builds one marker's DOM element from its GeoJSON properties - a close
-// port of leaflet_map_hvv_base.js's hvvPointToLayer(), minus the Leaflet
-// divIcon wrapping. A separate .hvv-marker-hitbox child gives it a real,
-// generously-sized hoverable area (not just whatever the icon/label happen
-// to occupy) - a sibling, not a change to the wrapper itself, since MapLibre
-// applies its own positioning transform ON TOP of the wrapper's box: shifting
-// the wrapper's own left/top would shift the whole marker, not just widen
-// its hit area.
+// Ports leaflet_map_hvv_base.js's hvvPointToLayer(); .hvv-marker-hitbox below
+// widens the hover area beyond the icon/label itself.
+
+// Vehicle model isn't its own property - parsed from properties.text; only
+// the newest model per category (DT5, Batteriegelenkbus) is highlighted.
+const VEHICLE_MODEL_CLASSES = {
+    'Batteriegelenkbus': 'hvv-vehicle-batteriegelenkbus',
+    'DT5': 'hvv-vehicle-dt5',
+};
+
+function vehicleModelFromText(text, delay) {
+    if (!text) {
+        return '';
+    }
+    const parts = text.split('<br>');
+    const modelParts = delay > 0 ? parts.slice(1, -1) : parts.slice(1);
+    return modelParts.join('');
+}
+
 function buildMarkerElement(properties) {
     const wrapper = document.createElement('div');
     wrapper.className = 'hvv-marker-wrapper';
@@ -183,8 +182,10 @@ function buildMarkerElement(properties) {
         const delay = properties.delay || 0;
         const delayText = delay > 0 ? `+${delay}` : '';
         const delayBadge = delayText ? ` <span class="hvv-marker-delay">${delayText}</span>` : '';
+        const modelClass = VEHICLE_MODEL_CLASSES[vehicleModelFromText(properties.text, delay)] || '';
+        const labelClass = modelClass ? `hvv-marker-label ${modelClass}` : 'hvv-marker-label';
         const label = properties.label
-            ? `<span class="hvv-marker-label" style="left:${labelOffset}px;">${properties.label}${delayBadge}</span>`
+            ? `<span class="${labelClass}" style="left:${labelOffset}px;">${properties.label}${delayBadge}</span>`
             : '';
         // Stays visible when labels are hidden overall (see CSS).
         const delayStandalone = delayText
@@ -192,10 +193,7 @@ function buildMarkerElement(properties) {
             : '';
         wrapper.innerHTML = `<img src="${properties.icon}" style="height:${height}px" />${label}${delayStandalone}`;
 
-        // Hit area reaching from the icon's left edge out past the label's
-        // (roughly estimated) right edge - doesn't need to be pixel-exact,
-        // just comfortable to hit. Positioned relative to the same origin
-        // as the icon/label (wrapper's local (0,0) = the map point).
+        // Hit area spans icon + estimated label width - doesn't need to be pixel-exact.
         const halfHeight = height / 2;
         const labelWidthEstimate = properties.label ? properties.label.length * 6.5 + 16 : 0;
         const rightEdge = properties.label ? labelOffset + labelWidthEstimate : halfHeight;
@@ -209,9 +207,7 @@ function buildMarkerElement(properties) {
         return wrapper;
     }
 
-    // Fallback for lines without a known icon key - a plain colored dot,
-    // matching the live API path's L.circleMarker fallback. Self-centers on
-    // the wrapper's origin the same way the icon <img> above does.
+    // Fallback for unmapped lines - a plain colored dot, self-centered like the icon above.
     const dot = document.createElement('div');
     const diameter = (properties.markerRadius || 5) * 2;
     dot.style.position = 'absolute';
@@ -234,14 +230,9 @@ function buildMarkerElement(properties) {
 
 
 // config: { positionsEndpoint, linesEndpoint, stopsEndpoint, disruptionsEndpoint }
-// A full port of the Leaflet page's layer control - U/S/AKN/Fähre modes and,
-// if disruptionsEndpoint is given, the Sperrung/Aufzüge disruption categories.
+// Full port of the Leaflet layer control: U/S/AKN/Fähre modes + Sperrung/Aufzüge categories.
 function initHvvVehicleLayers(config) {
-    // Shared by every hover handler below (vehicles, stops, disruptions) so
-    // there is only ever one popup in existence - two features close
-    // together can never show overlapping popups at the same time.
-    // anchor:'bottom' pins the popup above the point with its tip pointing
-    // straight down at it, instead of MapLibre's automatic corner choice.
+    // Single shared popup (vehicles/stops/disruptions); anchor:'bottom' points its tip straight down.
     const hoverPopup = new maplibregl.Popup({ closeButton: false, closeOnClick: false, anchor: 'bottom' });
     const activeModes = new Set(MODES.map((m) => m.key));
     const positionMarkersByMode = {};
@@ -314,8 +305,7 @@ function initHvvVehicleLayers(config) {
             });
         }
 
-        // Lightweight hover popup - GL circle layers have no Leaflet-style
-        // bindTooltip() equivalent, this is close enough for a test page.
+        // GL layers have no Leaflet-style bindTooltip(); this popup is the equivalent.
         hoverLayers.forEach(function(layerId) {
             map.on('mouseenter', layerId, function(e) {
                 map.getCanvas().style.cursor = 'pointer';
@@ -370,13 +360,8 @@ function initHvvVehicleLayers(config) {
                 return;
             }
             const data = await response.json();
-            // Cleared and recreated every poll rather than diffed/reused -
-            // simple on purpose for this first test; fine at HVV's vehicle
-            // counts, worth revisiting if flicker becomes noticeable. No
-            // explicit hoverPopup.remove() here: removing a hovered marker's
-            // element already fires its mouseleave, closing the popup on its
-            // own - force-closing it unconditionally every second would also
-            // kill an unrelated, still-hovered stop/disruption popup.
+            // Recreated every poll (not diffed) - fine at these vehicle counts;
+            // marker removal already fires mouseleave, closing any open popup.
             MODES.forEach((m) => {
                 positionMarkersByMode[m.key].forEach((marker) => marker.remove());
                 positionMarkersByMode[m.key] = [];
@@ -388,9 +373,8 @@ function initHvvVehicleLayers(config) {
                     return; // unknown mode - shouldn't happen, but don't crash the poll
                 }
                 const element = buildMarkerElement(properties);
-                // anchor:'top-left' - the wrapper's own origin is the point
-                // itself, matching Leaflet's iconAnchor:[0,0]; the icon/dot
-                // then re-centers itself via CSS transform (see buildMarkerElement).
+                // anchor:'top-left' matches Leaflet's iconAnchor:[0,0]; icon/dot
+                // re-center via CSS transform (see buildMarkerElement).
                 const marker = new maplibregl.Marker({ element, anchor: 'top-left' })
                     .setLngLat(feature.geometry.coordinates)
                     .addTo(map);
@@ -398,13 +382,9 @@ function initHvvVehicleLayers(config) {
                     element.style.display = 'none';
                 }
                 if (properties.text) {
-                    // A real DOM element, so hover can be wired up directly -
-                    // no need for the map's layer-based mouseenter/mouseleave
-                    // used for the GL stops/disruptions layers below.
+                    // Real DOM element, so hover wires up directly (no map layer events needed).
                     element.addEventListener('mouseenter', function() {
-                        // Extra gap above the icon (anchor:'bottom' already
-                        // points the tip straight down at it) so the popup
-                        // doesn't sit flush against the icon itself.
+                        // Extra gap above the icon so the popup doesn't sit flush against it.
                         const halfIconHeight = (properties.iconHeight || 20) / 2;
                         hoverPopup
                             .setOffset(halfIconHeight)
@@ -437,9 +417,8 @@ function initHvvVehicleLayers(config) {
             }
             const filtered = {
                 type: 'FeatureCollection',
-                // Data is kept in sync for every category regardless of its
-                // current visibility, so toggling one on shows up immediately
-                // instead of waiting for the next poll.
+                // Kept in sync for every category regardless of visibility, so
+                // toggling one on shows data immediately, not just after the next poll.
                 features: disruptionRawData.features.filter(function(f) {
                     if (f.properties?.category !== c.key) {
                         return false;
