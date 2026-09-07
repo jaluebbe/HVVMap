@@ -15,6 +15,7 @@ dependencies = [
 
 [project.optional-dependencies]
 fetcher = ["requests"]
+gtfs-fetcher = ["redis"]
 api = ["fastapi", "uvicorn"]
 dev = ["pytest", "ruff", "httpx2"]
 
@@ -25,6 +26,7 @@ hvvmap-stations = "hvv_map.stations:main"
 hvvmap-reference = "hvv_map.reference_geojson:main"
 hvvmap-fetch-announcements = "hvv_map.fetcher:fetch_once_announcements"
 hvvmap-fetch-vehiclemap = "hvv_map.fetcher:fetch_once_vehicle_map"
+hvvmap-gtfs-fetcher = "hvv_map.gtfs_fetcher:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/hvv_map"]

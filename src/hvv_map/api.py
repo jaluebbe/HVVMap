@@ -186,28 +186,21 @@ def get_live_lines():
     return _read_geojson("hvv:reference_lines")
 
 
-# --- GTFS layers (not yet implemented) --------------------------------------
-
-
-def _gtfs_not_implemented(layer: str):
-    raise HTTPException(
-        status_code=501, detail=f"GTFS '{layer}' layer is not implemented yet."
-    )
-
+# --- GTFS layers -------------------------------------------------------------
 
 @app.get("/api/hvv/gtfs/positions.geojson", tags=["hvv_gtfs"])
 def get_gtfs_positions():
-    _gtfs_not_implemented("positions")
+    return _read_geojson("hvv:gtfs:positions")
 
 
 @app.get("/api/hvv/gtfs/lines.geojson", tags=["hvv_gtfs"])
 def get_gtfs_lines():
-    _gtfs_not_implemented("lines")
+    return _read_geojson("hvv:gtfs:reference_lines")
 
 
 @app.get("/api/hvv/gtfs/stops.geojson", tags=["hvv_gtfs"])
 def get_gtfs_stops():
-    _gtfs_not_implemented("stops")
+    return _read_geojson("hvv:gtfs:reference_stops")
 
 
 if __name__ == "__main__":
