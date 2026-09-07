@@ -8,7 +8,7 @@ const map = new maplibregl.Map({
     style: '/api/vector/style/positron.json',
     center: HAMBURG_CENTER,
     zoom: HAMBURG_DEFAULT_ZOOM,
-    minZoom: 9,
+    minZoom: 7,
     maxZoom: 18,
     attributionControl: false, // added manually below, with our own extra links
 });

@@ -4,7 +4,7 @@
  * editor and carries features this page doesn't need.
  */
 
-const minZoom = 9;
+const minZoom = 7;
 const maxZoom = 18;
 const map = L.map('map', {
     minZoom: minZoom,
