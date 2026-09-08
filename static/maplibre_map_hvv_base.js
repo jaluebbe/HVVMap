@@ -20,7 +20,7 @@ map.addControl(new maplibregl.ScaleControl({ unit: 'metric' }), 'bottom-left');
 const attributionControl = new maplibregl.AttributionControl({
     compact: true,
     customAttribution: [
-        '<a href="https://github.com/jaluebbe/HVVMap">Source on GitHub</a>',
+        '<a href="https://github.com/jaluebbe/HVVMap" target="_blank">Source on GitHub</a>',
         '<a href="https://www.hvv.de/" target="_blank">Fahrplandaten: Hamburger Verkehrsverbund GmbH</a>',
     ],
 });
@@ -109,7 +109,7 @@ function buildIconNode(icon) {
     return span;
 }
 
-// One checkbox per mode + disruption category; onToggle callbacks wire up the actual layers.
+// One checkbox per mode + disruption category; collapsible on narrow/short screens.
 class ModeToggleControl {
     constructor(onModeToggle, categories, onCategoryToggle) {
         this._onModeToggle = onModeToggle;
@@ -132,30 +132,62 @@ class ModeToggleControl {
         this._map = mapInstance;
         const container = document.createElement('div');
         container.className = 'maplibregl-ctrl maplibregl-ctrl-group hvv-mode-control';
-        MODES.forEach((m) => this._appendItem(container, m.key, m.name, m.icon, true, this._onModeToggle));
+        // Matches on width OR height so landscape phones still count as mobile.
+        const mobileQuery = window.matchMedia('(max-width: 600px), (max-height: 600px)');
+        const syncCollapsedState = () => container.classList.toggle('hvv-mode-control-collapsed', mobileQuery.matches);
+        syncCollapsedState();
+        mobileQuery.addEventListener('change', syncCollapsedState);
+
+        const toggleButton = document.createElement('button');
+        toggleButton.type = 'button';
+        toggleButton.className = 'hvv-mode-control-toggle';
+        toggleButton.title = 'Ebenen ein-/ausklappen';
+        toggleButton.style.fontSize = '16px'; // matches LabelToggleControl's icon size
+        toggleButton.textContent = '☰';
+        toggleButton.addEventListener('click', () => {
+            container.classList.toggle('hvv-mode-control-collapsed');
+        });
+        container.appendChild(toggleButton);
+
+        // Auto-collapse on mobile once the user interacts with the map, mirroring Leaflet's layer control.
+        const collapseOnMapClick = () => {
+            if (mobileQuery.matches) {
+                container.classList.add('hvv-mode-control-collapsed');
+            }
+        };
+        mapInstance.on('click', collapseOnMapClick);
+        this._collapseOnMapClick = collapseOnMapClick;
+        this._mobileQuery = mobileQuery;
+        this._syncCollapsedState = syncCollapsedState;
+
+        const items = document.createElement('div');
+        items.className = 'hvv-mode-control-items';
+        MODES.forEach((m) => this._appendItem(items, m.key, m.name, m.icon, true, this._onModeToggle));
         if (this._categories.length > 0) {
             const divider = document.createElement('div');
             divider.className = 'hvv-mode-control-divider';
-            container.appendChild(divider);
+            items.appendChild(divider);
             this._categories.forEach((c) => {
-                this._appendItem(container, c.key, c.name, c.icon, c.visible, this._onCategoryToggle);
+                this._appendItem(items, c.key, c.name, c.icon, c.visible, this._onCategoryToggle);
             });
         }
+        container.appendChild(items);
+
         this._container = container;
         return container;
     }
 
     onRemove() {
+        this._map.off('click', this._collapseOnMapClick);
+        this._mobileQuery.removeEventListener('change', this._syncCollapsedState);
         this._container.parentNode.removeChild(this._container);
         this._map = undefined;
     }
 }
 
-// Ports leaflet_map_hvv_base.js's hvvPointToLayer(); .hvv-marker-hitbox below
-// widens the hover area beyond the icon/label itself.
+// Ports leaflet_map_hvv_base.js's hvvPointToLayer(); hitbox widens the hover area.
 
-// Vehicle model isn't its own property - parsed from properties.text; only
-// the newest model per category (DT5, Batteriegelenkbus) is highlighted.
+// Vehicle model isn't its own property - parsed from properties.text (DT5/Batteriegelenkbus only).
 const VEHICLE_MODEL_CLASSES = {
     'Batteriegelenkbus': 'hvv-vehicle-batteriegelenkbus',
     'DT5': 'hvv-vehicle-dt5',
@@ -229,8 +261,7 @@ function buildMarkerElement(properties) {
 }
 
 
-// config: { positionsEndpoint, linesEndpoint, stopsEndpoint, disruptionsEndpoint }
-// Full port of the Leaflet layer control: U/S/AKN/Fähre modes + Sperrung/Aufzüge categories.
+// config: {positionsEndpoint, linesEndpoint, stopsEndpoint, disruptionsEndpoint}
 function initHvvVehicleLayers(config) {
     // Single shared popup (vehicles/stops/disruptions); anchor:'bottom' points its tip straight down.
     const hoverPopup = new maplibregl.Popup({ closeButton: false, closeOnClick: false, anchor: 'bottom' });
@@ -360,8 +391,7 @@ function initHvvVehicleLayers(config) {
                 return;
             }
             const data = await response.json();
-            // Recreated every poll (not diffed) - fine at these vehicle counts;
-            // marker removal already fires mouseleave, closing any open popup.
+            // Recreated every poll (not diffed); marker removal fires mouseleave, closing any open popup.
             MODES.forEach((m) => {
                 positionMarkersByMode[m.key].forEach((marker) => marker.remove());
                 positionMarkersByMode[m.key] = [];
@@ -373,8 +403,7 @@ function initHvvVehicleLayers(config) {
                     return; // unknown mode - shouldn't happen, but don't crash the poll
                 }
                 const element = buildMarkerElement(properties);
-                // anchor:'top-left' matches Leaflet's iconAnchor:[0,0]; icon/dot
-                // re-center via CSS transform (see buildMarkerElement).
+                // anchor:'top-left' matches Leaflet's iconAnchor:[0,0]; icon re-centers via CSS transform.
                 const marker = new maplibregl.Marker({ element, anchor: 'top-left' })
                     .setLngLat(feature.geometry.coordinates)
                     .addTo(map);
@@ -417,8 +446,7 @@ function initHvvVehicleLayers(config) {
             }
             const filtered = {
                 type: 'FeatureCollection',
-                // Kept in sync for every category regardless of visibility, so
-                // toggling one on shows data immediately, not just after the next poll.
+                // Kept in sync regardless of visibility, so toggling a category shows data immediately.
                 features: disruptionRawData.features.filter(function(f) {
                     if (f.properties?.category !== c.key) {
                         return false;

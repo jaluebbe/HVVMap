@@ -24,11 +24,40 @@ body {
 
 /* Checkbox layout for ModeToggleControl - maplibregl-ctrl-group only styles buttons. */
 .hvv-mode-control {
-    padding: 4px 8px;
+    font-size: 12px;
+    display: flex;
+    flex-direction: column;
+}
+
+/* !important overrides MapLibre's own .maplibregl-ctrl-group button styling. */
+.hvv-mode-control .hvv-mode-control-toggle {
+    display: block !important;
+    width: 100% !important;
+    height: auto !important;
+    min-height: 0 !important;
+    background: none !important;
+    border: none !important;
+    padding: 4px 8px !important;
+    font-size: 16px !important;
+    line-height: normal !important;
+    text-align: center !important;
+    cursor: pointer !important;
+}
+
+/* Only needed while collapsed - desktop never collapses, mobile re-collapses via map click. */
+.hvv-mode-control:not(.hvv-mode-control-collapsed) .hvv-mode-control-toggle {
+    display: none !important;
+}
+
+.hvv-mode-control-items {
     display: flex;
     flex-direction: column;
     gap: 4px;
-    font-size: 12px;
+    padding: 4px 8px;
+}
+
+.hvv-mode-control-collapsed .hvv-mode-control-items {
+    display: none;
 }
 
 .hvv-mode-control-item {
