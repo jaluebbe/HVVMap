@@ -67,8 +67,11 @@ def main() -> None:
                 current_mtime = _routes_txt_mtime()
                 if current_mtime != last_feed_mtime:
                     schedule = load_schedule(GTFS_DIR)
-                    _rebuild_reference(redis_client, schedule)
                     last_feed_mtime = current_mtime
+                # Re-stored every check regardless of a feed change, so the TTL
+                # keeps being renewed - otherwise it expires after REFERENCE_TTL
+                # even though nothing was ever wrong with the data.
+                _rebuild_reference(redis_client, schedule)
         except Exception as e:  # keep the loop alive on transient errors
             print(f"[hvvmap-gtfs-fetcher] error: {e}", flush=True)
 
