@@ -29,6 +29,12 @@ body {
     flex-direction: column;
 }
 
+.hvv-mode-control-source-select {
+    font-size: 12px;
+    margin: 0 8px;
+    padding: 2px 4px;
+}
+
 /* !important overrides MapLibre's own .maplibregl-ctrl-group button styling. */
 .hvv-mode-control .hvv-mode-control-toggle {
     display: block !important;
@@ -54,6 +60,12 @@ body {
     flex-direction: column;
     gap: 4px;
     padding: 4px 8px;
+}
+
+.hvv-mode-control-categories {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
 }
 
 .hvv-mode-control-collapsed .hvv-mode-control-items {

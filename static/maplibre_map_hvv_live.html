@@ -26,13 +26,9 @@
 <!-- Parallel, independent structure to leaflet_map_hvv_live.html; see maplibre_map_hvv_base.js for scope. -->
 <script src="/static/maplibre_map_hvv_base.js"></script>
 <script>
-    // Reads from Redis, populated by the separate hvvmap-fetcher process.
-    initHvvVehicleLayers({
-        positionsEndpoint: '/api/hvv/live/positions.geojson',
-        linesEndpoint: '/api/hvv/live/lines.geojson',
-        stopsEndpoint: '/api/hvv/live/stops.geojson',
-        disruptionsEndpoint: '/api/hvv/live/disruptions.geojson',
-    });
+    // Reads from Redis, populated by the separate hvvmap-fetcher/gtfs-fetcher processes;
+    // 'live' is the default, switchable at runtime via the source dropdown control.
+    initHvvVehicleLayers('live');
 </script>
 
 </html>

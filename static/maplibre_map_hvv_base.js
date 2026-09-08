@@ -111,10 +111,11 @@ function buildIconNode(icon) {
 
 // One checkbox per mode + disruption category; collapsible on narrow/short screens.
 class ModeToggleControl {
-    constructor(onModeToggle, categories, onCategoryToggle) {
+    constructor(onModeToggle, categories, onCategoryToggle, sourceConfig) {
         this._onModeToggle = onModeToggle;
         this._categories = categories || [];
         this._onCategoryToggle = onCategoryToggle;
+        this._sourceConfig = sourceConfig || null;
     }
 
     _appendItem(container, key, name, icon, checked, onToggle) {
@@ -163,18 +164,48 @@ class ModeToggleControl {
         const items = document.createElement('div');
         items.className = 'hvv-mode-control-items';
         MODES.forEach((m) => this._appendItem(items, m.key, m.name, m.icon, true, this._onModeToggle));
+
+        this._categoriesSection = document.createElement('div');
+        this._categoriesSection.className = 'hvv-mode-control-categories';
         if (this._categories.length > 0) {
             const divider = document.createElement('div');
             divider.className = 'hvv-mode-control-divider';
-            items.appendChild(divider);
+            this._categoriesSection.appendChild(divider);
             this._categories.forEach((c) => {
-                this._appendItem(items, c.key, c.name, c.icon, c.visible, this._onCategoryToggle);
+                this._appendItem(this._categoriesSection, c.key, c.name, c.icon, c.visible, this._onCategoryToggle);
             });
         }
+        items.appendChild(this._categoriesSection);
+
+        if (this._sourceConfig) {
+            const sourceDivider = document.createElement('div');
+            sourceDivider.className = 'hvv-mode-control-divider';
+            items.appendChild(sourceDivider);
+
+            const select = document.createElement('select');
+            select.className = 'hvv-mode-control-source-select';
+            this._sourceConfig.sources.forEach((s) => {
+                const option = document.createElement('option');
+                option.value = s.key;
+                option.textContent = s.name;
+                option.selected = s.key === this._sourceConfig.initialKey;
+                select.appendChild(option);
+            });
+            select.addEventListener('change', () => this._sourceConfig.onSourceChange(select.value));
+            items.appendChild(select);
+        }
+
         container.appendChild(items);
 
         this._container = container;
         return container;
+    }
+
+    // Hides the disruption checkboxes for sources without disruption data (e.g. GTFS).
+    setCategoriesVisible(visible) {
+        if (this._categoriesSection) {
+            this._categoriesSection.style.display = visible ? '' : 'none';
+        }
     }
 
     onRemove() {
@@ -261,13 +292,44 @@ function buildMarkerElement(properties) {
 }
 
 
-// config: {positionsEndpoint, linesEndpoint, stopsEndpoint, disruptionsEndpoint}
-function initHvvVehicleLayers(config) {
+// Built-in data sources - GTFS has no disruptions endpoint (null skips that layer).
+const SOURCES = [
+    {
+        key: 'live',
+        name: 'Live',
+        positionsEndpoint: '/api/hvv/live/positions.geojson',
+        linesEndpoint: '/api/hvv/live/lines.geojson',
+        stopsEndpoint: '/api/hvv/live/stops.geojson',
+        disruptionsEndpoint: '/api/hvv/live/disruptions.geojson',
+    },
+    {
+        key: 'realtime',
+        name: 'Realtime',
+        positionsEndpoint: '/api/hvv/realtime/positions.geojson',
+        linesEndpoint: '/api/hvv/live/lines.geojson',
+        stopsEndpoint: '/api/hvv/live/stops.geojson',
+        disruptionsEndpoint: '/api/hvv/live/disruptions.geojson',
+    },
+    {
+        key: 'gtfs',
+        name: 'GTFS',
+        positionsEndpoint: '/api/hvv/gtfs/positions.geojson',
+        linesEndpoint: '/api/hvv/gtfs/lines.geojson',
+        stopsEndpoint: '/api/hvv/gtfs/stops.geojson',
+        disruptionsEndpoint: null,
+    },
+];
+
+// initialSourceKey defaults to 'live' when omitted or unknown.
+function initHvvVehicleLayers(initialSourceKey) {
     // Single shared popup (vehicles/stops/disruptions); anchor:'bottom' points its tip straight down.
     const hoverPopup = new maplibregl.Popup({ closeButton: false, closeOnClick: false, anchor: 'bottom' });
     const activeModes = new Set(MODES.map((m) => m.key));
     const positionMarkersByMode = {};
     MODES.forEach((m) => { positionMarkersByMode[m.key] = []; });
+    let currentSource = SOURCES.find((s) => s.key === initialSourceKey) || SOURCES[0];
+    let modeToggleControl = null;
+    const pollTimers = [];
 
     function setModeVisibility(modeKey, visible) {
         if (visible) {
@@ -319,22 +381,21 @@ function initHvvVehicleLayers(config) {
             hoverLayers.push(`hvv-stops-layer-${m.key}`);
         });
 
-        if (config.disruptionsEndpoint) {
-            DISRUPTION_CATEGORIES.forEach(function(c) {
-                map.addSource(`hvv-disruptions-${c.key}`, { type: 'geojson', data: EMPTY_FEATURE_COLLECTION });
-                map.addLayer({
-                    id: `hvv-disruptions-layer-${c.key}`,
-                    type: 'circle',
-                    source: `hvv-disruptions-${c.key}`,
-                    layout: { visibility: c.visible ? 'visible' : 'none' },
-                    paint: {
-                        'circle-radius': ['coalesce', ['get', 'markerRadius'], 5],
-                        'circle-color': ['coalesce', ['get', 'color'], '#888888'],
-                    },
-                });
-                hoverLayers.push(`hvv-disruptions-layer-${c.key}`);
+        // Always created regardless of the current source, so switching sources doesn't need new layers.
+        DISRUPTION_CATEGORIES.forEach(function(c) {
+            map.addSource(`hvv-disruptions-${c.key}`, { type: 'geojson', data: EMPTY_FEATURE_COLLECTION });
+            map.addLayer({
+                id: `hvv-disruptions-layer-${c.key}`,
+                type: 'circle',
+                source: `hvv-disruptions-${c.key}`,
+                layout: { visibility: c.visible ? 'visible' : 'none' },
+                paint: {
+                    'circle-radius': ['coalesce', ['get', 'markerRadius'], 5],
+                    'circle-color': ['coalesce', ['get', 'color'], '#888888'],
+                },
             });
-        }
+            hoverLayers.push(`hvv-disruptions-layer-${c.key}`);
+        });
 
         // GL layers have no Leaflet-style bindTooltip(); this popup is the equivalent.
         hoverLayers.forEach(function(layerId) {
@@ -352,14 +413,14 @@ function initHvvVehicleLayers(config) {
             });
         });
 
-        map.addControl(
-            new ModeToggleControl(
-                setModeVisibility,
-                config.disruptionsEndpoint ? DISRUPTION_CATEGORIES : [],
-                setCategoryVisibility,
-            ),
-            'top-right',
+        modeToggleControl = new ModeToggleControl(
+            setModeVisibility,
+            DISRUPTION_CATEGORIES,
+            setCategoryVisibility,
+            { sources: SOURCES, initialKey: currentSource.key, onSourceChange: switchSource },
         );
+        map.addControl(modeToggleControl, 'top-right');
+        modeToggleControl.setCategoriesVisible(!!currentSource.disruptionsEndpoint);
         map.addControl(new LabelToggleControl(), 'top-right');
     }
 
@@ -385,7 +446,7 @@ function initHvvVehicleLayers(config) {
 
     async function refreshHvvPositions() {
         try {
-            const response = await fetch(config.positionsEndpoint, { cache: 'no-store' });
+            const response = await fetch(currentSource.positionsEndpoint, { cache: 'no-store' });
             if (!response.ok) {
                 console.warn('HVV positions: HTTP', response.status);
                 return;
@@ -461,7 +522,7 @@ function initHvvVehicleLayers(config) {
 
     async function refreshDisruptions() {
         try {
-            const response = await fetch(config.disruptionsEndpoint, { cache: 'no-store' });
+            const response = await fetch(currentSource.disruptionsEndpoint, { cache: 'no-store' });
             if (!response.ok) {
                 console.warn('HVV disruptions: HTTP', response.status);
                 return;
@@ -473,23 +534,58 @@ function initHvvVehicleLayers(config) {
         }
     }
 
-    function start() {
-        setupSourcesAndLayers();
+    function stopPolling() {
+        pollTimers.forEach((id) => clearInterval(id));
+        pollTimers.length = 0;
+    }
 
-        const refreshLines = () => refreshReferenceLayer(config.linesEndpoint, 'hvv-lines', 'lines');
-        const refreshStops = () => refreshReferenceLayer(config.stopsEndpoint, 'hvv-stops', 'stops');
+    // Wipes markers/sources so stale data from the previous source doesn't linger.
+    function clearAllData() {
+        MODES.forEach((m) => {
+            map.getSource(`hvv-lines-${m.key}`).setData(EMPTY_FEATURE_COLLECTION);
+            map.getSource(`hvv-stops-${m.key}`).setData(EMPTY_FEATURE_COLLECTION);
+            positionMarkersByMode[m.key].forEach((marker) => marker.remove());
+            positionMarkersByMode[m.key] = [];
+        });
+        disruptionRawData = null;
+        DISRUPTION_CATEGORIES.forEach((c) => {
+            map.getSource(`hvv-disruptions-${c.key}`).setData(EMPTY_FEATURE_COLLECTION);
+        });
+    }
+
+    function startPolling() {
+        const refreshLines = () => refreshReferenceLayer(currentSource.linesEndpoint, 'hvv-lines', 'lines');
+        const refreshStops = () => refreshReferenceLayer(currentSource.stopsEndpoint, 'hvv-stops', 'stops');
         refreshLines();
         refreshStops();
-        setInterval(refreshLines, REFERENCE_POLL_INTERVAL_MS);
-        setInterval(refreshStops, REFERENCE_POLL_INTERVAL_MS);
+        pollTimers.push(setInterval(refreshLines, REFERENCE_POLL_INTERVAL_MS));
+        pollTimers.push(setInterval(refreshStops, REFERENCE_POLL_INTERVAL_MS));
 
         refreshHvvPositions();
-        setInterval(refreshHvvPositions, HVV_POLL_INTERVAL_MS);
+        pollTimers.push(setInterval(refreshHvvPositions, HVV_POLL_INTERVAL_MS));
 
-        if (config.disruptionsEndpoint) {
+        if (currentSource.disruptionsEndpoint) {
             refreshDisruptions();
-            setInterval(refreshDisruptions, DISRUPTIONS_POLL_INTERVAL_MS);
+            pollTimers.push(setInterval(refreshDisruptions, DISRUPTIONS_POLL_INTERVAL_MS));
         }
+    }
+
+    // Swaps endpoints, resets timers/data, and hides disruption checkboxes for sources without them.
+    function switchSource(sourceKey) {
+        const next = SOURCES.find((s) => s.key === sourceKey);
+        if (!next || next === currentSource) {
+            return;
+        }
+        stopPolling();
+        clearAllData();
+        currentSource = next;
+        modeToggleControl.setCategoriesVisible(!!currentSource.disruptionsEndpoint);
+        startPolling();
+    }
+
+    function start() {
+        setupSourcesAndLayers();
+        startPolling();
     }
 
     if (map.isStyleLoaded()) {
