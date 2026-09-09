@@ -30,6 +30,17 @@ ACCESSIBILITY_PATTERNS = [
     re.compile(r"Aufzu(g|üge).*?außer Betrieb", re.IGNORECASE),
 ]
 
+# Real closure announcements don't always say "Sperrung"/"Ersatzverkehr"
+# outright (e.g. a bomb-disposal notice) - checked against summary AND
+# description, since the actual "no trains" wording often only appears there.
+CLOSURE_PATTERNS = [
+    re.compile(r"Sperrung", re.IGNORECASE),
+    re.compile(r"Ersatzverkehr", re.IGNORECASE),
+    re.compile(r"fahren (keine|nicht)", re.IGNORECASE),
+    re.compile(r"kein Zugverkehr", re.IGNORECASE),
+    re.compile(r"gesperrt", re.IGNORECASE),
+]
+
 BASE_LINE_MODE = {
     "U1": "U", "U2": "U", "U3": "U", "U4": "U",
     "S1": "S", "S2": "S", "S3": "S", "S4": "S", "S5": "S", "S6": "S", "S7": "S",
@@ -43,14 +54,13 @@ def is_accessibility_related(announcement: dict) -> bool:
 
 
 def classify_category(announcement: dict) -> str:
-    """SPERRUNG: clear closure/replacement-service (title keyword match -
-    titles are more precise than body text, which often phrases things
-    differently, e.g. 'verkehren keine Züge' instead of 'gesperrt').
-    BARRIEREFREIHEIT: pure accessibility notice. SONSTIGE: everything else."""
+    """SPERRUNG: clear closure/replacement-service, matched against summary
+    AND description. BARRIEREFREIHEIT: pure accessibility notice.
+    SONSTIGE: everything else."""
     if is_accessibility_related(announcement):
         return CATEGORY_BARRIEREFREIHEIT
-    summary = announcement.get("summary") or ""
-    if "Sperrung" in summary or "Ersatzverkehr" in summary:
+    text = " ".join([announcement.get("summary") or "", announcement.get("description") or ""])
+    if any(p.search(text) for p in CLOSURE_PATTERNS):
         return CATEGORY_SPERRUNG
     return CATEGORY_SONSTIGE
 

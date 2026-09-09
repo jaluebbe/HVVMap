@@ -27,8 +27,9 @@
 <script src="/static/maplibre_map_hvv_base.js"></script>
 <script>
     // Reads from Redis, populated by the separate hvvmap-fetcher/gtfs-fetcher processes;
-    // 'live' is the default, switchable at runtime via the source dropdown control.
-    initHvvVehicleLayers('live');
+    // 'realtime' is the default (matches actual disruption situations better than
+    // schedule-based 'live'), switchable at runtime via the source dropdown control.
+    initHvvVehicleLayers('realtime');
 </script>
 
 </html>
