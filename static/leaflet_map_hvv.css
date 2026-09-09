@@ -69,6 +69,16 @@ body {
     font-weight: bold;
 }
 
+/* Highlights only the newest model per category; older ones stay unstyled. */
+.hvv-vehicle-batteriegelenkbus {
+    background: #c8e6c9;
+}
+
+.hvv-vehicle-dt5 {
+    /* Blood-orange ends, stainless-steel grey middle - echoes the real DT5 livery. */
+    background: linear-gradient(90deg, #ffab91, #e0e0e0 20%, #e0e0e0 80%, #ffab91);
+}
+
 .hvv-labels-hidden .hvv-marker-label {
     display: none;
 }

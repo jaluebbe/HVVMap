@@ -110,6 +110,21 @@ const MODES = [
     { key: 'FERRY', name: 'Fähre', icon: '/static/hvv/icons/ferry.svg' },
 ];
 
+// Vehicle model isn't its own property - parsed from properties.text (DT5/Batteriegelenkbus only).
+const VEHICLE_MODEL_CLASSES = {
+    'Batteriegelenkbus': 'hvv-vehicle-batteriegelenkbus',
+    'DT5': 'hvv-vehicle-dt5',
+};
+
+function vehicleModelFromText(text, delay) {
+    if (!text) {
+        return '';
+    }
+    const parts = text.split('<br>');
+    const modelParts = delay > 0 ? parts.slice(1, -1) : parts.slice(1);
+    return modelParts.join('');
+}
+
 function hvvPointToLayer(feature, latlng) {
     const properties = feature.properties || {};
     if (properties.icon) {
@@ -120,8 +135,10 @@ function hvvPointToLayer(feature, latlng) {
         const delay = properties.delay || 0;
         const delayText = delay > 0 ? `+${delay}` : '';
         const delayBadge = delayText ? ` <span class="hvv-marker-delay">${delayText}</span>` : '';
+        const modelClass = VEHICLE_MODEL_CLASSES[vehicleModelFromText(properties.text, delay)] || '';
+        const labelClass = modelClass ? `hvv-marker-label ${modelClass}` : 'hvv-marker-label';
         const label = properties.label
-            ? `<span class="hvv-marker-label" style="left:${labelOffset}px;">${properties.label}${delayBadge}</span>`
+            ? `<span class="${labelClass}" style="left:${labelOffset}px;">${properties.label}${delayBadge}</span>`
             : '';
         // Stays visible when labels are hidden overall (see CSS).
         const delayStandalone = delayText
