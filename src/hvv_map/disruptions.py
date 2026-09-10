@@ -42,9 +42,20 @@ CLOSURE_PATTERNS = [
 ]
 
 BASE_LINE_MODE = {
-    "U1": "U", "U2": "U", "U3": "U", "U4": "U",
-    "S1": "S", "S2": "S", "S3": "S", "S4": "S", "S5": "S", "S6": "S", "S7": "S",
-    "A1": "AKN", "A2": "AKN", "A3": "AKN",
+    "U1": "U",
+    "U2": "U",
+    "U3": "U",
+    "U4": "U",
+    "S1": "S",
+    "S2": "S",
+    "S3": "S",
+    "S4": "S",
+    "S5": "S",
+    "S6": "S",
+    "S7": "S",
+    "A1": "AKN",
+    "A2": "AKN",
+    "A3": "AKN",
 }
 
 
@@ -59,7 +70,9 @@ def classify_category(announcement: dict) -> str:
     SONSTIGE: everything else."""
     if is_accessibility_related(announcement):
         return CATEGORY_BARRIEREFREIHEIT
-    text = " ".join([announcement.get("summary") or "", announcement.get("description") or ""])
+    text = " ".join(
+        [announcement.get("summary") or "", announcement.get("description") or ""]
+    )
     if any(p.search(text) for p in CLOSURE_PATTERNS):
         return CATEGORY_SPERRUNG
     return CATEGORY_SONSTIGE

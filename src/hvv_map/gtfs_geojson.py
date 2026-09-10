@@ -97,7 +97,9 @@ def _stop_coord(stop: dict):
     return (float(stop["stop_lon"]), float(stop["stop_lat"]))
 
 
-def _build_point_feature(journey_id, line_short_name, color, head, text, progress, direction, mode):
+def _build_point_feature(
+    journey_id, line_short_name, color, head, text, progress, direction, mode
+):
     icon_key = LINE_ID_MAP.get(line_short_name)
     label = direction.split("(")[0].strip()
     if icon_key:
@@ -174,8 +176,12 @@ def _merge_colocated_features(features: list) -> list:
 
         merged_properties = dict(base["properties"])
         merged_properties["label"] = " / ".join(labels)
-        merged_properties["text"] = f"{combined_direction}<br>{model}" if model else combined_direction
-        merged_properties["journeyID"] = "+".join(f["properties"]["journeyID"] for f in group)
+        merged_properties["text"] = (
+            f"{combined_direction}<br>{model}" if model else combined_direction
+        )
+        merged_properties["journeyID"] = "+".join(
+            f["properties"]["journeyID"] for f in group
+        )
 
         merged.append(
             {
@@ -255,8 +261,14 @@ def build_positions_geojson(schedule: Schedule, now_ts: int) -> dict:
         journey_id = f"GTFS:{trip['route_id']}.{trip_id}"
         features.append(
             _build_point_feature(
-                journey_id, line_short_name, f"#{color_hex}", head, text, progress,
-                trip["trip_headsign"], mode,
+                journey_id,
+                line_short_name,
+                f"#{color_hex}",
+                head,
+                text,
+                progress,
+                trip["trip_headsign"],
+                mode,
             )
         )
 
@@ -285,14 +297,23 @@ def build_positions_geojson(schedule: Schedule, now_ts: int) -> dict:
                     journey_id = f"GTFS:{trip['route_id']}.{trip_id}"
                     features.append(
                         _build_point_feature(
-                            journey_id, line_short_name, f"#{color_hex}", _stop_coord(stop),
-                            text, 0.0, trip["trip_headsign"], mode_for_trip(schedule, trip),
+                            journey_id,
+                            line_short_name,
+                            f"#{color_hex}",
+                            _stop_coord(stop),
+                            text,
+                            0.0,
+                            trip["trip_headsign"],
+                            mode_for_trip(schedule, trip),
                         )
                     )
                     occupied_stops.add(first_stop_id)
                 break
 
-    return {"type": "FeatureCollection", "features": _merge_colocated_features(features)}
+    return {
+        "type": "FeatureCollection",
+        "features": _merge_colocated_features(features),
+    }
 
 
 def build_stops_geojson(schedule: Schedule, reference_date: date | None = None) -> dict:
@@ -355,7 +376,9 @@ def build_lines_geojson(schedule: Schedule, reference_date: date | None = None) 
         color_hex = LINE_COLORS.get(route["route_short_name"])
         if color_hex is None:
             continue
-        entry = info_by_shape.setdefault(shape_id, {"color": f"#{color_hex}", "modes": set()})
+        entry = info_by_shape.setdefault(
+            shape_id, {"color": f"#{color_hex}", "modes": set()}
+        )
         entry["modes"].add(mode)
 
     features = []

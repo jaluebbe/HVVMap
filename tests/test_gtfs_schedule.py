@@ -34,37 +34,78 @@ def gtfs_dir(tmp_path):
         tmp_path / "stops.txt",
         ["stop_id", "stop_name", "stop_lat", "stop_lon"],
         [
-            {"stop_id": "A", "stop_name": "Alpha", "stop_lat": "53.5", "stop_lon": "10.0"},
-            {"stop_id": "B", "stop_name": "Beta", "stop_lat": "53.6", "stop_lon": "10.1"},
+            {
+                "stop_id": "A",
+                "stop_name": "Alpha",
+                "stop_lat": "53.5",
+                "stop_lon": "10.0",
+            },
+            {
+                "stop_id": "B",
+                "stop_name": "Beta",
+                "stop_lat": "53.6",
+                "stop_lon": "10.1",
+            },
         ],
     )
     _write_csv(
         tmp_path / "trips.txt",
         ["trip_id", "route_id", "service_id", "trip_headsign"],
         [
-            {"trip_id": "T1", "route_id": "R_U1", "service_id": "WEEKDAYS", "trip_headsign": "Beta"},
+            {
+                "trip_id": "T1",
+                "route_id": "R_U1",
+                "service_id": "WEEKDAYS",
+                "trip_headsign": "Beta",
+            },
         ],
     )
     _write_csv(
         tmp_path / "stop_times.txt",
         ["trip_id", "stop_id", "stop_sequence", "arrival_time", "departure_time"],
         [
-            {"trip_id": "T1", "stop_id": "A", "stop_sequence": "1", "arrival_time": "08:00:00", "departure_time": "08:00:00"},
-            {"trip_id": "T1", "stop_id": "B", "stop_sequence": "2", "arrival_time": "08:02:00", "departure_time": "08:02:00"},
+            {
+                "trip_id": "T1",
+                "stop_id": "A",
+                "stop_sequence": "1",
+                "arrival_time": "08:00:00",
+                "departure_time": "08:00:00",
+            },
+            {
+                "trip_id": "T1",
+                "stop_id": "B",
+                "stop_sequence": "2",
+                "arrival_time": "08:02:00",
+                "departure_time": "08:02:00",
+            },
         ],
     )
     _write_csv(
         tmp_path / "calendar.txt",
         [
-            "service_id", "monday", "tuesday", "wednesday", "thursday", "friday",
-            "saturday", "sunday", "start_date", "end_date",
+            "service_id",
+            "monday",
+            "tuesday",
+            "wednesday",
+            "thursday",
+            "friday",
+            "saturday",
+            "sunday",
+            "start_date",
+            "end_date",
         ],
         [
             {
                 "service_id": "WEEKDAYS",
-                "monday": "1", "tuesday": "1", "wednesday": "1", "thursday": "1", "friday": "1",
-                "saturday": "0", "sunday": "0",
-                "start_date": "20200101", "end_date": "20301231",
+                "monday": "1",
+                "tuesday": "1",
+                "wednesday": "1",
+                "thursday": "1",
+                "friday": "1",
+                "saturday": "0",
+                "sunday": "0",
+                "start_date": "20200101",
+                "end_date": "20301231",
             },
         ],
     )
@@ -72,8 +113,16 @@ def gtfs_dir(tmp_path):
         tmp_path / "calendar_dates.txt",
         ["service_id", "date", "exception_type"],
         [
-            {"service_id": "WEEKDAYS", "date": "20250101", "exception_type": "2"},  # removed (holiday)
-            {"service_id": "SPECIAL", "date": "20250706", "exception_type": "1"},  # added, no calendar.txt row
+            {
+                "service_id": "WEEKDAYS",
+                "date": "20250101",
+                "exception_type": "2",
+            },  # removed (holiday)
+            {
+                "service_id": "SPECIAL",
+                "date": "20250706",
+                "exception_type": "1",
+            },  # added, no calendar.txt row
         ],
     )
     return str(tmp_path)
@@ -152,4 +201,6 @@ def test_head_position_clamps_after_end():
 
 
 def test_head_position_none_for_single_point():
-    assert head_position([(0.0, 0.0)], actual_start=0, actual_end=100, now_ts=50) is None
+    assert (
+        head_position([(0.0, 0.0)], actual_start=0, actual_end=100, now_ts=50) is None
+    )

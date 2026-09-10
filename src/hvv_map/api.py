@@ -188,6 +188,7 @@ def get_live_lines():
 
 # --- GTFS layers -------------------------------------------------------------
 
+
 @app.get("/api/hvv/gtfs/positions.geojson", tags=["hvv_gtfs"])
 def get_gtfs_positions():
     return _read_geojson("hvv:gtfs:positions")

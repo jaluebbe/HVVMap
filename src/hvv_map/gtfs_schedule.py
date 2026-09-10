@@ -84,8 +84,12 @@ class Schedule:
     trips: dict  # trip_id -> row
     trip_stop_times: dict  # trip_id -> [(seq, stop_id, arrival_s, departure_s), ...]
     calendar_rows: list
-    calendar_dates: dict  # (service_id, date) -> exception_type ("1" added, "2" removed)
-    shapes: dict = field(default_factory=dict)  # shape_id -> [(lon, lat), ...], only for used trips
+    calendar_dates: (
+        dict  # (service_id, date) -> exception_type ("1" added, "2" removed)
+    )
+    shapes: dict = field(
+        default_factory=dict
+    )  # shape_id -> [(lon, lat), ...], only for used trips
     _active_services_cache: dict = field(default_factory=dict, repr=False)
 
 
@@ -135,13 +139,17 @@ def load_schedule(gtfs_dir: str) -> Schedule:
         with open(calendar_dates_path, encoding="utf-8") as f:
             for row in csv.DictReader(f):
                 exception_date = datetime.strptime(row["date"], "%Y%m%d").date()
-                calendar_dates[(row["service_id"], exception_date)] = row["exception_type"]
+                calendar_dates[(row["service_id"], exception_date)] = row[
+                    "exception_type"
+                ]
 
     # Only the shapes actually used by a trip of interest are kept - the
     # full feed's shapes.txt also covers the regional bus network and can be
     # very large, so unrelated rows are skipped while streaming instead of
     # loaded and discarded afterwards.
-    needed_shape_ids = {trip["shape_id"] for trip in trips.values() if trip.get("shape_id")}
+    needed_shape_ids = {
+        trip["shape_id"] for trip in trips.values() if trip.get("shape_id")
+    }
     shapes: dict = {}
     shapes_path = gtfs_path / "shapes.txt"
     if shapes_path.is_file() and needed_shape_ids:
@@ -234,7 +242,11 @@ def recently_active_shape_ids(
     shape_ids = set()
     for trip in schedule.trips.values():
         shape_id = trip.get("shape_id")
-        if shape_id and trip["service_id"] in service_ids and shape_id in schedule.shapes:
+        if (
+            shape_id
+            and trip["service_id"] in service_ids
+            and shape_id in schedule.shapes
+        ):
             shape_ids.add(shape_id)
     return shape_ids
 
@@ -258,7 +270,10 @@ def _haversine(lon1: float, lat1: float, lon2: float, lat2: float) -> float:
     phi1, phi2 = math.radians(lat1), math.radians(lat2)
     dphi = math.radians(lat2 - lat1)
     dlambda = math.radians(lon2 - lon1)
-    a = math.sin(dphi / 2) ** 2 + math.cos(phi1) * math.cos(phi2) * math.sin(dlambda / 2) ** 2
+    a = (
+        math.sin(dphi / 2) ** 2
+        + math.cos(phi1) * math.cos(phi2) * math.sin(dlambda / 2) ** 2
+    )
     return 2 * earth_radius * math.asin(math.sqrt(a))
 
 

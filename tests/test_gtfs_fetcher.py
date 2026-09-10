@@ -17,14 +17,19 @@ def test_store_writes_envelope_with_fetched_at():
 def test_rebuild_reference_stores_both_layers():
     redis_client = get_redis_client()
     redis_client.delete(gtfs_fetcher.LINES_KEY, gtfs_fetcher.STOPS_KEY)
-    fake_schedule = object()  # opaque - build_* below are mocked, so its shape doesn't matter
+    fake_schedule = (
+        object()
+    )  # opaque - build_* below are mocked, so its shape doesn't matter
 
-    with patch(
-        "hvv_map.gtfs_fetcher.build_lines_geojson",
-        return_value={"type": "FeatureCollection", "features": ["lines"]},
-    ), patch(
-        "hvv_map.gtfs_fetcher.build_stops_geojson",
-        return_value={"type": "FeatureCollection", "features": ["stops"]},
+    with (
+        patch(
+            "hvv_map.gtfs_fetcher.build_lines_geojson",
+            return_value={"type": "FeatureCollection", "features": ["lines"]},
+        ),
+        patch(
+            "hvv_map.gtfs_fetcher.build_stops_geojson",
+            return_value={"type": "FeatureCollection", "features": ["stops"]},
+        ),
     ):
         gtfs_fetcher._rebuild_reference(redis_client, fake_schedule)
 
@@ -37,22 +42,35 @@ def test_rebuild_reference_stores_both_layers():
 def test_fetch_once_stores_all_three_layers(tmp_path, monkeypatch):
     monkeypatch.setattr(gtfs_fetcher, "GTFS_DIR", str(tmp_path))
     redis_client = get_redis_client()
-    for key in (gtfs_fetcher.POSITIONS_KEY, gtfs_fetcher.LINES_KEY, gtfs_fetcher.STOPS_KEY):
+    for key in (
+        gtfs_fetcher.POSITIONS_KEY,
+        gtfs_fetcher.LINES_KEY,
+        gtfs_fetcher.STOPS_KEY,
+    ):
         redis_client.delete(key)
 
-    with patch("hvv_map.gtfs_fetcher.load_schedule", return_value=object()), patch(
-        "hvv_map.gtfs_fetcher.build_positions_geojson",
-        return_value={"type": "FeatureCollection", "features": []},
-    ), patch(
-        "hvv_map.gtfs_fetcher.build_lines_geojson",
-        return_value={"type": "FeatureCollection", "features": []},
-    ), patch(
-        "hvv_map.gtfs_fetcher.build_stops_geojson",
-        return_value={"type": "FeatureCollection", "features": []},
+    with (
+        patch("hvv_map.gtfs_fetcher.load_schedule", return_value=object()),
+        patch(
+            "hvv_map.gtfs_fetcher.build_positions_geojson",
+            return_value={"type": "FeatureCollection", "features": []},
+        ),
+        patch(
+            "hvv_map.gtfs_fetcher.build_lines_geojson",
+            return_value={"type": "FeatureCollection", "features": []},
+        ),
+        patch(
+            "hvv_map.gtfs_fetcher.build_stops_geojson",
+            return_value={"type": "FeatureCollection", "features": []},
+        ),
     ):
         gtfs_fetcher.fetch_once()
 
-    for key in (gtfs_fetcher.POSITIONS_KEY, gtfs_fetcher.LINES_KEY, gtfs_fetcher.STOPS_KEY):
+    for key in (
+        gtfs_fetcher.POSITIONS_KEY,
+        gtfs_fetcher.LINES_KEY,
+        gtfs_fetcher.STOPS_KEY,
+    ):
         assert redis_client.get(key) is not None
 
 

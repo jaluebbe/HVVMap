@@ -14,18 +14,35 @@ def _epoch(y, m, d, hh, mm, ss=0):
 
 
 def _make_schedule(
-    trips=None, trip_stop_times=None, extra_routes=None, shapes=None, calendar_rows=None,
+    trips=None,
+    trip_stop_times=None,
+    extra_routes=None,
+    shapes=None,
+    calendar_rows=None,
 ):
     routes = {"R1": {"route_id": "R1", "route_short_name": "U1", "route_type": "402"}}
     if extra_routes:
         routes.update(extra_routes)
     stops = {
-        "A": {"stop_id": "A", "stop_name": "Alpha", "stop_lat": "53.50", "stop_lon": "10.00"},
-        "B": {"stop_id": "B", "stop_name": "Beta", "stop_lat": "53.52", "stop_lon": "10.00"},
+        "A": {
+            "stop_id": "A",
+            "stop_name": "Alpha",
+            "stop_lat": "53.50",
+            "stop_lon": "10.00",
+        },
+        "B": {
+            "stop_id": "B",
+            "stop_name": "Beta",
+            "stop_lat": "53.52",
+            "stop_lon": "10.00",
+        },
     }
     trips = trips or {
         "T1": {
-            "trip_id": "T1", "route_id": "R1", "service_id": "ALLDAYS", "trip_headsign": "Beta",
+            "trip_id": "T1",
+            "route_id": "R1",
+            "service_id": "ALLDAYS",
+            "trip_headsign": "Beta",
             "shape_id": "SHAPE1",
         },
     }
@@ -35,9 +52,15 @@ def _make_schedule(
     calendar_rows = calendar_rows or [
         {
             "service_id": "ALLDAYS",
-            "monday": "1", "tuesday": "1", "wednesday": "1", "thursday": "1", "friday": "1",
-            "saturday": "1", "sunday": "1",
-            "start_date": "20200101", "end_date": "20301231",
+            "monday": "1",
+            "tuesday": "1",
+            "wednesday": "1",
+            "thursday": "1",
+            "friday": "1",
+            "saturday": "1",
+            "sunday": "1",
+            "start_date": "20200101",
+            "end_date": "20301231",
         },
     ]
     return Schedule(
@@ -47,7 +70,9 @@ def _make_schedule(
         trip_stop_times=trip_stop_times,
         calendar_rows=calendar_rows,
         calendar_dates={},
-        shapes=shapes if shapes is not None else {"SHAPE1": [(10.00, 53.50), (10.00, 53.52)]},
+        shapes=shapes
+        if shapes is not None
+        else {"SHAPE1": [(10.00, 53.50), (10.00, 53.52)]},
     )
 
 
@@ -66,8 +91,17 @@ def test_build_positions_geojson_places_vehicle_between_stops():
 
 def test_build_positions_geojson_skips_route_without_known_color():
     schedule = _make_schedule(
-        trips={"T1": {"trip_id": "T1", "route_id": "R2", "service_id": "ALLDAYS", "trip_headsign": "Beta"}},
-        extra_routes={"R2": {"route_id": "R2", "route_short_name": "U99", "route_type": "402"}},
+        trips={
+            "T1": {
+                "trip_id": "T1",
+                "route_id": "R2",
+                "service_id": "ALLDAYS",
+                "trip_headsign": "Beta",
+            }
+        },
+        extra_routes={
+            "R2": {"route_id": "R2", "route_short_name": "U99", "route_type": "402"}
+        },
     )
     now_ts = _epoch(2025, 6, 2, 8, 1, 0)
 
@@ -109,15 +143,24 @@ def test_build_stops_geojson_excludes_stop_without_recent_trip():
     old_calendar = [
         {
             "service_id": "OLD",
-            "monday": "1", "tuesday": "1", "wednesday": "1", "thursday": "1", "friday": "1",
-            "saturday": "1", "sunday": "1",
-            "start_date": "20200101", "end_date": "20200601",  # long expired
+            "monday": "1",
+            "tuesday": "1",
+            "wednesday": "1",
+            "thursday": "1",
+            "friday": "1",
+            "saturday": "1",
+            "sunday": "1",
+            "start_date": "20200101",
+            "end_date": "20200601",  # long expired
         },
     ]
     schedule = _make_schedule(
         trips={
             "T1": {
-                "trip_id": "T1", "route_id": "R1", "service_id": "OLD", "trip_headsign": "Beta",
+                "trip_id": "T1",
+                "route_id": "R1",
+                "service_id": "OLD",
+                "trip_headsign": "Beta",
                 "shape_id": "SHAPE1",
             },
         },
@@ -138,7 +181,11 @@ def test_build_lines_geojson_draws_full_shape_not_straight_stop_line():
     assert len(result["features"]) == 1
     feature = result["features"][0]
     assert feature["geometry"]["type"] == "LineString"
-    assert feature["geometry"]["coordinates"] == [[10.00, 53.50], [10.01, 53.51], [10.00, 53.52]]
+    assert feature["geometry"]["coordinates"] == [
+        [10.00, 53.50],
+        [10.01, 53.51],
+        [10.00, 53.52],
+    ]
     assert feature["properties"]["modes"] == ["U"]
 
 
@@ -146,15 +193,24 @@ def test_build_lines_geojson_excludes_shape_without_recent_trip():
     old_calendar = [
         {
             "service_id": "OLD",
-            "monday": "1", "tuesday": "1", "wednesday": "1", "thursday": "1", "friday": "1",
-            "saturday": "1", "sunday": "1",
-            "start_date": "20200101", "end_date": "20200601",  # long expired
+            "monday": "1",
+            "tuesday": "1",
+            "wednesday": "1",
+            "thursday": "1",
+            "friday": "1",
+            "saturday": "1",
+            "sunday": "1",
+            "start_date": "20200101",
+            "end_date": "20200601",  # long expired
         },
     ]
     schedule = _make_schedule(
         trips={
             "T1": {
-                "trip_id": "T1", "route_id": "R1", "service_id": "OLD", "trip_headsign": "Beta",
+                "trip_id": "T1",
+                "route_id": "R1",
+                "service_id": "OLD",
+                "trip_headsign": "Beta",
                 "shape_id": "SHAPE1",
             },
         },
