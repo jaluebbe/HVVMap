@@ -104,3 +104,62 @@ body {
 .hvv-labels-hidden .hvv-marker-delay-standalone {
     display: block;
 }
+
+/* Bottom-of-screen panel showing a disruption marker's full description and
+   links - the tooltip's short summary alone isn't enough for e.g. the
+   "Infos" category. Independent lifecycle from the tooltip: stays open
+   across marker switches, closes only on an explicit map click/move. */
+#hvv-info-panel {
+    display: none;
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    max-height: 45vh;
+    overflow-y: auto;
+    background: #fff;
+    box-shadow: 0 -2px 10px rgba(0, 0, 0, 0.25);
+    padding: 12px 16px calc(12px + env(safe-area-inset-bottom, 0px));
+    font-size: 0.85rem;
+    z-index: 1000;
+    box-sizing: border-box;
+}
+
+#hvv-info-panel.hvv-info-panel-open {
+    display: block;
+}
+
+#hvv-info-panel .hvv-info-close {
+    float: right;
+    border: none;
+    background: none;
+    font-size: 1.2rem;
+    line-height: 1;
+    padding: 0 0 0 8px;
+    cursor: pointer;
+    color: #666;
+}
+
+#hvv-info-panel .hvv-info-message {
+    margin-bottom: 12px;
+}
+
+#hvv-info-panel .hvv-info-message:last-child {
+    margin-bottom: 0;
+}
+
+#hvv-info-panel .hvv-info-summary {
+    font-weight: bold;
+    margin-bottom: 4px;
+}
+
+#hvv-info-panel .hvv-info-description {
+    white-space: pre-wrap;
+    line-height: 1.4;
+}
+
+#hvv-info-panel .hvv-info-links a {
+    display: block;
+    margin-top: 6px;
+    color: #1e64a0;
+}

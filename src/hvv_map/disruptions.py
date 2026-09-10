@@ -19,9 +19,20 @@ from hvv_map.stations import StationInfo
 MARKER_RADIUS = 5
 
 BASE_LINE_MODE = {
-    "U1": "U", "U2": "U", "U3": "U", "U4": "U",
-    "S1": "S", "S2": "S", "S3": "S", "S4": "S", "S5": "S", "S6": "S", "S7": "S",
-    "A1": "AKN", "A2": "AKN", "A3": "AKN",
+    "U1": "U",
+    "U2": "U",
+    "U3": "U",
+    "U4": "U",
+    "S1": "S",
+    "S2": "S",
+    "S3": "S",
+    "S4": "S",
+    "S5": "S",
+    "S6": "S",
+    "S7": "S",
+    "A1": "AKN",
+    "A2": "AKN",
+    "A3": "AKN",
 }
 
 
@@ -62,7 +73,7 @@ def build_disruptions_geojson(
     if now is None:
         now = datetime.now(timezone.utc)
 
-    # (station_id, category) -> {"summaries": [...], "modes": set()}
+    # (station_id, category) -> {"messages": [...], "modes": set()}
     grouped: dict[tuple[str, str], dict] = {}
     for announcement in announcements_data.get("announcements", []):
         if not is_currently_valid(announcement, now):
@@ -73,10 +84,18 @@ def build_disruptions_geojson(
             mode = _location_mode(location)
             for station_id in _location_station_ids(location):
                 entry = grouped.setdefault(
-                    (station_id, category), {"summaries": [], "modes": set()}
+                    (station_id, category), {"messages": [], "modes": set()}
                 )
-                if summary and summary not in entry["summaries"]:
-                    entry["summaries"].append(summary)
+                if summary and not any(
+                    m["summary"] == summary for m in entry["messages"]
+                ):
+                    entry["messages"].append(
+                        {
+                            "summary": summary,
+                            "description": announcement.get("description") or "",
+                            "links": announcement.get("links") or [],
+                        }
+                    )
                 if mode:
                     entry["modes"].add(mode)
 
@@ -85,8 +104,11 @@ def build_disruptions_geojson(
         station = stations_by_id.get(station_id)
         if station is None:
             continue
-        cleaned = [_strip_redundant_prefix(s, station.name) for s in entry["summaries"]]
-        text = f"{station.name}:<br>" + "<br><br>".join(cleaned)
+        cleaned = [
+            {**m, "summary": _strip_redundant_prefix(m["summary"], station.name)}
+            for m in entry["messages"]
+        ]
+        text = f"{station.name}:<br>" + "<br><br>".join(m["summary"] for m in cleaned)
         features.append(
             {
                 "type": "Feature",
@@ -103,6 +125,7 @@ def build_disruptions_geojson(
                     "category": category,
                     "modes": sorted(entry["modes"]),
                     "message_count": len(cleaned),
+                    "messages": cleaned,
                 },
             }
         )

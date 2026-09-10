@@ -16,10 +16,11 @@ STATIONS = {
 }
 
 
-def _announcement(summary, description, begin_id, end_id, line_name="U1"):
+def _announcement(summary, description, begin_id, end_id, line_name="U1", links=None):
     return {
         "summary": summary,
         "description": description,
+        "links": links or [],
         "locations": [
             {
                 "line": {"name": line_name},
@@ -96,3 +97,37 @@ def test_build_disruptions_geojson_skips_unknown_station_ids():
     }
     result = build_disruptions_geojson(data, STATIONS, now=NOW)
     assert result["features"] == []
+
+
+def test_build_disruptions_geojson_messages_include_description_and_links():
+    links = [{"label": "Störungskarte", "url": "https://example.com/karte.png"}]
+    data = {
+        "announcements": [
+            _announcement(
+                "U1-Sperrung",
+                "Volltext der Meldung",
+                "Master:1",
+                "Master:1",
+                links=links,
+            )
+        ]
+    }
+    feature = build_disruptions_geojson(data, STATIONS, now=NOW)["features"][0]
+    messages = feature["properties"]["messages"]
+    assert len(messages) == 1
+    assert messages[0]["summary"] == "U1-Sperrung"
+    assert messages[0]["description"] == "Volltext der Meldung"
+    assert messages[0]["links"] == links
+
+
+def test_build_disruptions_geojson_messages_one_entry_per_distinct_announcement():
+    data = {
+        "announcements": [
+            _announcement("Meldung A", "Text A", "Master:1", "Master:1"),
+            _announcement("Meldung B", "Text B", "Master:1", "Master:1"),
+        ]
+    }
+    feature = build_disruptions_geojson(data, STATIONS, now=NOW)["features"][0]
+    messages = feature["properties"]["messages"]
+    assert [m["summary"] for m in messages] == ["Meldung A", "Meldung B"]
+    assert [m["description"] for m in messages] == ["Text A", "Text B"]

@@ -214,7 +214,67 @@ function hvvDisruptionOnEachFeature(feature, layer) {
             offset: [0, -5],
         });
     }
+    if (properties.messages && properties.messages.length > 0) {
+        layer.on('click', function(e) {
+            L.DomEvent.stopPropagation(e);
+            showInfoPanel(properties.messages);
+        });
+    }
 }
+
+// --- Info panel: full description + links for a disruption marker --------
+// Independent from the tooltip above on purpose - the tooltip's short
+// summary alone isn't enough for the "Infos" category, where a title like
+// "Fahrplanänderung" needs the full description to make sense. Stays open
+// across marker switches (content is replaced, not closed/reopened) and
+// only closes on an explicit map click or map movement.
+
+function _escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+}
+
+const infoPanel = document.createElement('div');
+infoPanel.id = 'hvv-info-panel';
+document.body.appendChild(infoPanel);
+
+function hideInfoPanel() {
+    infoPanel.classList.remove('hvv-info-panel-open');
+}
+
+function showInfoPanel(messages) {
+    const linksHtml = (links) =>
+        links && links.length > 0
+            ? '<div class="hvv-info-links">' +
+              links
+                  .map(
+                      (l) =>
+                          `<a href="${_escapeHtml(l.url)}" target="_blank" rel="noopener noreferrer">${_escapeHtml(l.label)}</a>`,
+                  )
+                  .join('') +
+              '</div>'
+            : '';
+    infoPanel.innerHTML =
+        '<button type="button" class="hvv-info-close" aria-label="Schließen">×</button>' +
+        messages
+            .map(
+                (m) => `
+                <div class="hvv-info-message">
+                    <div class="hvv-info-summary">${_escapeHtml(m.summary)}</div>
+                    <div class="hvv-info-description">${_escapeHtml(m.description)}</div>
+                    ${linksHtml(m.links)}
+                </div>
+            `,
+            )
+            .join('');
+    infoPanel.querySelector('.hvv-info-close').addEventListener('click', hideInfoPanel);
+    infoPanel.classList.add('hvv-info-panel-open');
+}
+
+map.on('click', hideInfoPanel);
+map.on('movestart', hideInfoPanel);
+map.on('zoomstart', hideInfoPanel);
 
 // config: { positionsEndpoint, linesEndpoint, stopsEndpoint, disruptionsEndpoint }
 // disruptionsEndpoint is optional - omit it for backends that don't support
@@ -260,7 +320,7 @@ function initHvvVehicleLayers(config) {
             pointToLayer: function(feature, latlng) {
                 return L.circleMarker(latlng, {
                     pane: 'hvvStopsPane',
-                    radius: 4,
+                    radius: 5,
                     fillColor: '#ffffff',
                     fillOpacity: 1,
                     color: '#000000',

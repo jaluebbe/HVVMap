@@ -162,6 +162,65 @@ class WakeLockControl {
 }
 // Added after the mode selector so it stacks below it (see setupSourcesAndLayers).
 
+// --- Info panel: full description + links for a disruption marker --------
+// Independent from the hover popup - the hover text's short summary alone
+// isn't enough for the "Infos" category, where a title like
+// "Fahrplanänderung" needs the full description to make sense. Stays open
+// across marker switches (content is replaced, not closed/reopened) and
+// only closes on an explicit map click or map movement.
+
+function _escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+}
+
+const infoPanel = document.createElement('div');
+infoPanel.id = 'hvv-info-panel';
+document.body.appendChild(infoPanel);
+
+function hideInfoPanel() {
+    infoPanel.classList.remove('hvv-info-panel-open');
+}
+
+function showInfoPanel(messages) {
+    const linksHtml = (links) =>
+        links && links.length > 0
+            ? '<div class="hvv-info-links">' +
+              links
+                  .map(
+                      (l) =>
+                          `<a href="${_escapeHtml(l.url)}" target="_blank" rel="noopener noreferrer">${_escapeHtml(l.label)}</a>`,
+                  )
+                  .join('') +
+              '</div>'
+            : '';
+    infoPanel.innerHTML =
+        '<button type="button" class="hvv-info-close" aria-label="Schließen">×</button>' +
+        messages
+            .map(
+                (m) => `
+                <div class="hvv-info-message">
+                    <div class="hvv-info-summary">${_escapeHtml(m.summary)}</div>
+                    <div class="hvv-info-description">${_escapeHtml(m.description)}</div>
+                    ${linksHtml(m.links)}
+                </div>
+            `,
+            )
+            .join('');
+    infoPanel.querySelector('.hvv-info-close').addEventListener('click', hideInfoPanel);
+    infoPanel.classList.add('hvv-info-panel-open');
+}
+
+map.on('click', function(e) {
+    if (e.originalEvent && e.originalEvent._hvvHandledByMarker) {
+        return;
+    }
+    hideInfoPanel();
+});
+map.on('movestart', hideInfoPanel);
+map.on('zoomstart', hideInfoPanel);
+
 const HVV_POLL_INTERVAL_MS = 1_000;
 const REFERENCE_POLL_INTERVAL_MS = 60_000;
 const DISRUPTIONS_POLL_INTERVAL_MS = 60_000;
@@ -442,6 +501,7 @@ function initHvvVehicleLayers(initialSourceKey) {
 
     function setupSourcesAndLayers() {
         const hoverLayers = [];
+        const disruptionLayerIds = [];
         MODES.forEach(function(m) {
             map.addSource(`hvv-lines-${m.key}`, { type: 'geojson', data: EMPTY_FEATURE_COLLECTION });
             map.addLayer({
@@ -462,7 +522,7 @@ function initHvvVehicleLayers(initialSourceKey) {
                 type: 'circle',
                 source: `hvv-stops-${m.key}`,
                 paint: {
-                    'circle-radius': 4,
+                    'circle-radius': 5,
                     'circle-color': '#ffffff',
                     'circle-stroke-color': '#000000',
                     'circle-stroke-width': 1,
@@ -485,6 +545,7 @@ function initHvvVehicleLayers(initialSourceKey) {
                 },
             });
             hoverLayers.push(`hvv-disruptions-layer-${c.key}`);
+            disruptionLayerIds.push(`hvv-disruptions-layer-${c.key}`);
         });
 
         // GL layers have no Leaflet-style bindTooltip(); this popup is the equivalent.
@@ -500,6 +561,22 @@ function initHvvVehicleLayers(initialSourceKey) {
             map.on('mouseleave', layerId, function() {
                 map.getCanvas().style.cursor = '';
                 hoverPopup.remove();
+            });
+        });
+
+        // Separate from the hover popup above: opens the bottom info panel
+        // with the full description/links, which the short hover text
+        // can't carry. GL serializes nested properties (our "messages"
+        // array) to a JSON string on the feature - parse it back.
+        disruptionLayerIds.forEach(function(layerId) {
+            map.on('click', layerId, function(e) {
+                const feature = e.features[0];
+                const raw = feature.properties && feature.properties.messages;
+                const messages = typeof raw === 'string' ? JSON.parse(raw) : raw;
+                if (messages && messages.length > 0) {
+                    showInfoPanel(messages);
+                    e.originalEvent._hvvHandledByMarker = true;
+                }
             });
         });
 
