@@ -172,13 +172,13 @@ GTI fetcher needs `GTI_USER`/`GTI_HMAC_SECRET`.
 - `hvv:positions` is built from the `realtime=False` API variant,
   `hvv:positions_realtime` from `realtime=True` - both actively served
   (`/api/hvv/live/positions.geojson` and `/api/hvv/realtime/...`), not just
-  kept for comparison. Confirmed against a real closure (Diebsteich, Sept
-  2026): the `realtime=False` variant ignores line detours entirely and
-  keeps showing journeys straight through a closed section; `realtime=True`
-  reflects at least some of the actual detours, though inconsistently
-  across lines (some correctly truncated, others still showing unaffected
-  full-length trips) - neither is fully reliable, but `realtime=True` is
-  the closer approximation, hence the MapLibre page's default.
+  kept for comparison. The `realtime=False` variant does not reflect
+  unplanned service detours (e.g. a closure) and keeps showing journeys
+  along the original route; `realtime=True` reflects at least some such
+  detours, though inconsistently across lines (some correctly truncated,
+  others still showing unaffected full-length trips) - neither is fully
+  reliable, but `realtime=True` is the closer approximation, hence the
+  MapLibre page's default.
 - The fetcher makes an actual `getVehicleMap` call only every
   `VEHICLE_MAP_FETCH_INTERVAL` seconds; both `hvv:positions` and
   `hvv:positions_realtime` are re-interpolated every loop cycle from the
@@ -196,8 +196,6 @@ GTI fetcher needs `GTI_USER`/`GTI_HMAC_SECRET`.
 - GTFS mode assignment (U/S/AKN/ferry) is mostly a direct `route_type`
   lookup, but replacement buses run under `route_type=3` (regular bus) like
   any other bus line - `gtfs_schedule.py`'s `SPECIAL_BUS_ROUTES` maps their
-  route_ids to the mode they replace, confirmed against the live API's
-  `listLines`.
+  route_ids to the mode they replace.
 - `calendar_dates.txt` exceptions (added/removed single-day services) are
-  respected in `gtfs_schedule.py`, unlike an earlier, now-removed
-  experiment (`hvv_gtfs.py`) that ignored them.
+  respected in `gtfs_schedule.py`.
