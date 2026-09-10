@@ -182,11 +182,15 @@ function hvvOnEachFeature(feature, layer) {
     }
 }
 
-// Only two of three categories shown - SONSTIGE stays too vague for a
-// useful map display.
+// SONSTIGE (displayed as "Infos") has no single fitting emoji among the
+// obvious closure/accessibility ones, so it gets the info symbol instead -
+// matches CATEGORY_COLORS in announcement_categories.py for marker color.
+// Default hidden: still too vague a mix to show automatically, but
+// available to toggle on.
 const DISRUPTION_CATEGORIES = [
     { key: 'SPERRUNG', name: 'Sperrung', icon: '🚧', visible: true },
     { key: 'BARRIEREFREIHEIT', name: 'Aufzüge', icon: '♿', visible: false },
+    { key: 'SONSTIGE', name: 'Infos', icon: 'ℹ️', visible: false },
 ];
 
 function hvvDisruptionPointToLayer(feature, latlng) {

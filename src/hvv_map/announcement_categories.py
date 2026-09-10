@@ -25,13 +25,14 @@ ACCESSIBILITY_PATTERNS = [
     re.compile(r"Aufzu(g|üge).*?außer Betrieb", re.IGNORECASE),
 ]
 
-# Real closure announcements don't always say "Sperrung"/"Ersatzverkehr"
+# Real closure announcements don't always say "Sperrung"
 # outright (e.g. a bomb-disposal notice) - checked against summary AND
 # description, since the actual "no trains" wording often only appears there.
 CLOSURE_PATTERNS = [
     re.compile(r"Sperrung", re.IGNORECASE),
-    re.compile(r"Ersatzverkehr", re.IGNORECASE),
     re.compile(r"fahren (keine|nicht)", re.IGNORECASE),
+    re.compile(r"keine Züge", re.IGNORECASE),
+    re.compile(r"unterbrochen", re.IGNORECASE),
     re.compile(r"kein Zugverkehr", re.IGNORECASE),
     re.compile(r"gesperrt", re.IGNORECASE),
 ]
