@@ -20,6 +20,7 @@ from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
+from hvv_map.announcement_categories import classify_category
 from hvv_map.redis_client import get_redis_client
 
 mimetypes.add_type("text/javascript", ".cjs")
@@ -181,6 +182,16 @@ def get_live_announcements():
     """Raw getAnnouncements response, not GeoJSON - see hvv:disruptions for
     the derived, map-ready version."""
     return _read_cached_json("hvv:announcements")
+
+
+@app.get("/api/hvv/live/announcement-categories.json", tags=["hvv_live"])
+def get_announcement_categories():
+    """Our own SPERRUNG/BARRIEREFREIHEIT/SONSTIGE classification per
+    announcement id - not an HVV API field, see announcement_categories.py.
+    Computed on request, not cached: classify_category() is cheap and pure,
+    no need to store a derived value the fetcher didn't write."""
+    announcements = _read_cached_json("hvv:announcements").get("announcements", [])
+    return {a["id"]: classify_category(a) for a in announcements if "id" in a}
 
 
 @app.get("/api/hvv/live/stops.geojson", tags=["hvv_live"])

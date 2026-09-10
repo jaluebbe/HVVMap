@@ -33,7 +33,8 @@ Supporting modules (all under `src/hvv_map/`):
 | `segment_cache.py` | SQLite cache of observed segment geometry, growing organically as the fetcher runs |
 | `positions.py` | interpolation math (position along a segment at a given time) |
 | `geojson.py` | builds `hvv:positions`/`hvv:positions_realtime` from a `getVehicleMap` response |
-| `disruptions.py` | builds `hvv:disruptions` from a `getAnnouncements` response |
+| `announcement_categories.py` | our own SPERRUNG/BARRIEREFREIHEIT/SONSTIGE classification per announcement - dependency-free (stdlib only), importable by both the fetcher and the API server |
+| `disruptions.py` | builds `hvv:disruptions` from a `getAnnouncements` response, using `announcement_categories.py` for classification |
 | `reference_geojson.py` | builds `hvv:reference_lines`/`hvv:reference_stops` from `segment_cache` + station data |
 | `gtfs_schedule.py` | parses a static GTFS feed into an in-memory schedule, locates a trip's position at a given time |
 | `gtfs_geojson.py` | builds the three `hvv:gtfs:*` layers from a loaded `Schedule` |
@@ -118,6 +119,8 @@ they're built directly from the static feed on first run.
   immediately, instead of waiting for the fetcher's own periodic rebuild
 - `hvvmap-fetch-vehiclemap` / `hvvmap-fetch-announcements` - one-shot fetches
   for manual inspection via `redis-cli`
+- `hvvmap-gtfs-fetch-once` - one-shot GTFS layer build, same idea for the
+  `hvv:gtfs:*` keys
 
 `scripts/` holds standalone diagnostics (line stability, gap analysis, bus
 vehicle-type checks) - not part of the installed package.
@@ -137,6 +140,17 @@ vehicle-type checks) - not part of the installed package.
   `realtime` - see "Notable data quirks" below for why.
 
 `index.html` is the landing page linking to all of them.
+
+`dev_announcements.html` is a developer-only page, not linked from
+`index.html`: it fetches `/api/hvv/live/announcements.json` and lists every
+raw announcement with its full fields (locations, validities, links, etc.),
+collapsible per entry (state kept in `localStorage`) with text search and
+filters by `reason`/`planned`/`broadcastRelevant` - for spotting patterns
+while refining `disruptions.py`'s filtering logic. It also fetches
+`/api/hvv/live/announcement-categories.json` and shows our own
+SPERRUNG/BARRIEREFREIHEIT/SONSTIGE classification per announcement,
+filterable the same way - rendered as a visually distinct, filled badge
+labeled "eigene Kategorie" so it's never mistaken for an HVV API field.
 
 ## Docker
 

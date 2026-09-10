@@ -136,6 +136,39 @@ def test_live_endpoint_returns_stored_geojson(client, path, redis_key):
     assert response.json() == geojson
 
 
+def test_announcement_categories_classifies_each_by_id(client):
+    redis_client = get_redis_client()
+    announcements = {
+        "announcements": [
+            {"id": "a1", "summary": "U1-Sperrung", "description": ""},
+            {
+                "id": "a2",
+                "summary": "Aufzug kaputt",
+                "description": "Rollstuhl / Kinderwagen",
+            },
+            {"id": "a3", "summary": "Fahrplanänderung", "description": ""},
+        ]
+    }
+    redis_client.set(
+        "hvv:announcements", json.dumps({"fetched_at": 1, "data": announcements})
+    )
+
+    response = client.get("/api/hvv/live/announcement-categories.json")
+    assert response.status_code == 200
+    assert response.json() == {
+        "a1": "SPERRUNG",
+        "a2": "BARRIEREFREIHEIT",
+        "a3": "SONSTIGE",
+    }
+
+
+def test_announcement_categories_503_when_announcements_missing(client):
+    redis_client = get_redis_client()
+    redis_client.delete("hvv:announcements")
+    response = client.get("/api/hvv/live/announcement-categories.json")
+    assert response.status_code == 503
+
+
 def test_redis_connection_error_does_not_crash_import():
     # get_redis_client() only opens a lazy connection object - importing
     # api.py must not require a live Redis server.

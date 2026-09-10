@@ -1,0 +1,540 @@
+<!DOCTYPE html>
+<html lang="de">
+
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width,initial-scale=1.0">
+    <title>HVV Announcements - Entwickleransicht</title>
+    <style>
+        :root {
+            --ink: #1a2733;
+            --muted: #5b6b78;
+            --line: #d8dee3;
+            --bg: #f4f6f8;
+            --card: #ffffff;
+            --accent: #1e64a0;
+            --warn: #b3541e;
+            --ok: #2b7a4b;
+        }
+
+        * {
+            box-sizing: border-box;
+        }
+
+        body {
+            margin: 0;
+            font-family: -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            background: var(--bg);
+            color: var(--ink);
+        }
+
+        header {
+            position: sticky;
+            top: 0;
+            z-index: 5;
+            background: var(--card);
+            border-bottom: 1px solid var(--line);
+            padding: 12px 16px;
+        }
+
+        header h1 {
+            margin: 0 0 2px;
+            font-size: 1.05rem;
+            font-weight: 600;
+        }
+
+        header .meta {
+            font-size: 0.78rem;
+            color: var(--muted);
+        }
+
+        .toolbar {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px 16px;
+            align-items: center;
+            margin-top: 10px;
+        }
+
+        .toolbar input[type="search"] {
+            flex: 1 1 220px;
+            min-width: 160px;
+            padding: 6px 10px;
+            border: 1px solid var(--line);
+            border-radius: 6px;
+            font-size: 0.85rem;
+        }
+
+        .toolbar label {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            font-size: 0.8rem;
+            color: var(--muted);
+            white-space: nowrap;
+        }
+
+        .toolbar button {
+            border: 1px solid var(--line);
+            background: var(--card);
+            border-radius: 6px;
+            padding: 5px 10px;
+            font-size: 0.8rem;
+            cursor: pointer;
+            color: var(--ink);
+        }
+
+        .toolbar button:hover {
+            background: var(--bg);
+        }
+
+        .reason-filters {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px 12px;
+        }
+
+        main {
+            max-width: 860px;
+            margin: 0 auto;
+            padding: 16px;
+        }
+
+        .count-line {
+            font-size: 0.8rem;
+            color: var(--muted);
+            margin: 4px 0 12px;
+        }
+
+        .card {
+            background: var(--card);
+            border: 1px solid var(--line);
+            border-radius: 8px;
+            margin-bottom: 10px;
+            overflow: hidden;
+        }
+
+        .card-header {
+            display: flex;
+            align-items: flex-start;
+            gap: 10px;
+            padding: 10px 12px;
+            cursor: pointer;
+            user-select: none;
+        }
+
+        .card-header:hover {
+            background: #fafbfc;
+        }
+
+        .disclosure {
+            flex: 0 0 auto;
+            width: 1em;
+            transition: transform 0.15s ease;
+            color: var(--muted);
+            margin-top: 2px;
+        }
+
+        .card.open .disclosure {
+            transform: rotate(90deg);
+        }
+
+        .card-title {
+            flex: 1 1 auto;
+            min-width: 0;
+        }
+
+        .card-summary {
+            font-size: 0.92rem;
+            font-weight: 600;
+            line-height: 1.3;
+        }
+
+        .badges {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 5px;
+            margin-top: 5px;
+        }
+
+        .badge {
+            font-size: 0.7rem;
+            padding: 1px 7px;
+            border-radius: 999px;
+            border: 1px solid var(--line);
+            color: var(--muted);
+            white-space: nowrap;
+        }
+
+        .badge.line {
+            border-color: var(--accent);
+            color: var(--accent);
+            font-weight: 600;
+        }
+
+        .badge.reason {
+            border-color: var(--warn);
+            color: var(--warn);
+        }
+
+        .badge.broadcast {
+            border-color: var(--ok);
+            color: var(--ok);
+        }
+
+        /* Filled background, not just an outline like the API-derived badges
+           above - visually distinct on purpose: this is OUR classification,
+           not a field the HVV API sends. */
+        .badge.our-category {
+            border: none;
+            color: #fff;
+            font-weight: 600;
+        }
+
+        .card-body {
+            display: none;
+            padding: 0 12px 14px;
+            border-top: 1px solid var(--line);
+            font-size: 0.85rem;
+        }
+
+        .card.open .card-body {
+            display: block;
+        }
+
+        .card-body dl {
+            display: grid;
+            grid-template-columns: max-content 1fr;
+            gap: 4px 10px;
+            margin: 10px 0;
+        }
+
+        .card-body dt {
+            color: var(--muted);
+            white-space: nowrap;
+        }
+
+        .card-body dd {
+            margin: 0;
+        }
+
+        .description {
+            white-space: pre-wrap;
+            line-height: 1.5;
+            background: var(--bg);
+            border-radius: 6px;
+            padding: 8px 10px;
+            margin: 8px 0;
+        }
+
+        .locations-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 0.8rem;
+            margin: 8px 0;
+        }
+
+        .locations-table th,
+        .locations-table td {
+            text-align: left;
+            padding: 4px 6px;
+            border-bottom: 1px solid var(--line);
+        }
+
+        .locations-table th {
+            color: var(--muted);
+            font-weight: 500;
+        }
+
+        .links a {
+            display: block;
+            font-size: 0.8rem;
+            color: var(--accent);
+            margin: 3px 0;
+            word-break: break-all;
+        }
+
+        .empty,
+        .error {
+            padding: 24px;
+            text-align: center;
+            color: var(--muted);
+        }
+
+        .error {
+            color: var(--warn);
+        }
+    </style>
+</head>
+
+<body>
+    <header>
+        <h1>HVV Announcements - Entwickleransicht</h1>
+        <div class="meta" id="fetch-meta">lädt …</div>
+        <div class="toolbar">
+            <input type="search" id="search" placeholder="Suche in Summary/Beschreibung/Linie …">
+            <button id="expand-all">Alle ausklappen</button>
+            <button id="collapse-all">Alle einklappen</button>
+            <label><input type="checkbox" id="only-broadcast"> nur broadcastRelevant</label>
+            <label><input type="checkbox" id="only-planned"> nur planned</label>
+        </div>
+        <div class="toolbar reason-filters" id="reason-filters"></div>
+        <div class="toolbar reason-filters" id="our-category-filters">
+            <span style="font-size:0.75rem;color:var(--muted)">unsere Kategorie:</span>
+        </div>
+    </header>
+    <main>
+        <div class="count-line" id="count-line"></div>
+        <div id="list"></div>
+    </main>
+
+    <script>
+        const ENDPOINT = '/api/hvv/live/announcements.json';
+        const CATEGORIES_ENDPOINT = '/api/hvv/live/announcement-categories.json';
+        // color per category - matches CATEGORY_COLORS in
+        // announcement_categories.py, so the badge here matches the map's
+        // own disruption-marker colors.
+        const OUR_CATEGORY_COLORS = {
+            SPERRUNG: '#ff6600',
+            BARRIEREFREIHEIT: '#42A5F5',
+            SONSTIGE: '#888888',
+        };
+
+        let announcements = [];
+        let ourCategories = {}; // announcement id -> our category
+        // In-memory only, not persisted - stays stable across re-renders
+        // (e.g. toggling a filter checkbox) within the same page load, but
+        // resets to all-collapsed on reload.
+        let openIds = {};
+
+        function isOpen(id) {
+            // Default: collapsed, until the developer explicitly opens one.
+            return openIds[id] === true;
+        }
+
+        function formatDate(iso) {
+            if (!iso) return '–';
+            const d = new Date(iso);
+            if (isNaN(d)) return iso;
+            return d.toLocaleString('de-DE', { dateStyle: 'medium', timeStyle: 'short' });
+        }
+
+        function linesOf(announcement) {
+            const names = new Set();
+            (announcement.locations || []).forEach(loc => {
+                if (loc.line && loc.line.name) names.add(loc.line.name);
+            });
+            return Array.from(names).sort();
+        }
+
+        function matchesSearch(announcement, query) {
+            if (!query) return true;
+            const haystack = [
+                announcement.summary,
+                announcement.description,
+                announcement.reason,
+                ...linesOf(announcement),
+            ].join(' ').toLowerCase();
+            return haystack.includes(query);
+        }
+
+        function renderReasonFilters() {
+            const container = document.getElementById('reason-filters');
+            const reasons = Array.from(new Set(announcements.map(a => a.reason || 'UNKNOWN'))).sort();
+            container.innerHTML = reasons.map(r => `
+                <label><input type="checkbox" class="reason-checkbox" value="${r}" checked> ${r}</label>
+            `).join('');
+            container.querySelectorAll('.reason-checkbox').forEach(cb => {
+                cb.addEventListener('change', render);
+            });
+        }
+
+        function renderOurCategoryFilters() {
+            const container = document.getElementById('our-category-filters');
+            const label = container.querySelector('span');
+            const categories = Array.from(new Set(Object.values(ourCategories))).sort();
+            container.innerHTML = '';
+            container.appendChild(label);
+            categories.forEach(c => {
+                const checkbox = document.createElement('label');
+                checkbox.innerHTML = `<input type="checkbox" class="our-category-checkbox" value="${c}" checked> ${c}`;
+                container.appendChild(checkbox);
+            });
+            container.querySelectorAll('.our-category-checkbox').forEach(cb => {
+                cb.addEventListener('change', render);
+            });
+        }
+
+        function activeOurCategories() {
+            return new Set(
+                Array.from(document.querySelectorAll('.our-category-checkbox:checked')).map(cb => cb.value)
+            );
+        }
+
+        function activeReasons() {
+            return new Set(
+                Array.from(document.querySelectorAll('.reason-checkbox:checked')).map(cb => cb.value)
+            );
+        }
+
+        function renderLocationsTable(locations) {
+            if (!locations || locations.length === 0) return '<p><em>keine locations</em></p>';
+            const rows = locations.map(loc => `
+                <tr>
+                    <td>${loc.type || ''}</td>
+                    <td>${loc.line ? loc.line.name : ''}</td>
+                    <td>${loc.line ? (loc.line.direction || '') : ''}</td>
+                    <td>${loc.begin ? loc.begin.combinedName : ''}</td>
+                    <td>${loc.end ? loc.end.combinedName : ''}</td>
+                    <td>${loc.bothDirections ? 'ja' : 'nein'}</td>
+                </tr>
+            `).join('');
+            return `
+                <table class="locations-table">
+                    <thead>
+                        <tr><th>Typ</th><th>Linie</th><th>Richtung</th><th>Von</th><th>Bis</th><th>beide Richtungen</th></tr>
+                    </thead>
+                    <tbody>${rows}</tbody>
+                </table>
+            `;
+        }
+
+        function renderValidities(validities) {
+            if (!validities || validities.length === 0) return '–';
+            return validities.map(v => `${formatDate(v.begin)} – ${formatDate(v.end)}`).join('<br>');
+        }
+
+        function renderLinks(links) {
+            if (!links || links.length === 0) return '';
+            return `
+                <dt>Links</dt>
+                <dd class="links">${links.map(l => `<a href="${l.url}" target="_blank" rel="noopener">${l.label}</a>`).join('')}</dd>
+            `;
+        }
+
+        function renderCard(a) {
+            const open = isOpen(a.id);
+            const lines = linesOf(a);
+            const ourCategory = ourCategories[a.id];
+            const ourCategoryBadge = ourCategory
+                ? `<span class="badge our-category" style="background:${OUR_CATEGORY_COLORS[ourCategory] || '#666'}" title="unsere eigene Einordnung, kein HVV-API-Feld">eigene Kategorie: ${ourCategory}</span>`
+                : '';
+            return `
+                <div class="card ${open ? 'open' : ''}" data-id="${a.id}">
+                    <div class="card-header">
+                        <span class="disclosure">▶</span>
+                        <div class="card-title">
+                            <div class="card-summary">${a.summary || '(ohne Summary)'}</div>
+                            <div class="badges">
+                                ${lines.map(l => `<span class="badge line">${l}</span>`).join('')}
+                                <span class="badge reason">${a.reason || 'UNKNOWN'}</span>
+                                <span class="badge">${a.planned ? 'planned' : 'unplanned'}</span>
+                                ${a.broadcastRelevant ? '<span class="badge broadcast">broadcastRelevant</span>' : ''}
+                                ${ourCategoryBadge}
+                            </div>
+                        </div>
+                    </div>
+                    <div class="card-body">
+                        <div class="description">${a.description || '(keine Beschreibung)'}</div>
+                        <dl>
+                            <dt>id</dt><dd>${a.id}</dd>
+                            <dt>version</dt><dd>${a.version ?? '–'}</dd>
+                            <dt>lastModified</dt><dd>${formatDate(a.lastModified)}</dd>
+                            <dt>publication</dt><dd>${a.publication ? `${formatDate(a.publication.begin)} – ${formatDate(a.publication.end)}` : '–'}</dd>
+                            <dt>validities</dt><dd>${renderValidities(a.validities)}</dd>
+                            ${renderLinks(a.links)}
+                        </dl>
+                        ${renderLocationsTable(a.locations)}
+                    </div>
+                </div>
+            `;
+        }
+
+        function render() {
+            const query = document.getElementById('search').value.trim().toLowerCase();
+            const onlyBroadcast = document.getElementById('only-broadcast').checked;
+            const onlyPlanned = document.getElementById('only-planned').checked;
+            const reasons = activeReasons();
+            const ourCats = activeOurCategories();
+
+            const filtered = announcements.filter(a => {
+                if (!matchesSearch(a, query)) return false;
+                if (onlyBroadcast && !a.broadcastRelevant) return false;
+                if (onlyPlanned && !a.planned) return false;
+                if (!reasons.has(a.reason || 'UNKNOWN')) return false;
+                if (ourCats.size > 0 && !ourCats.has(ourCategories[a.id])) return false;
+                return true;
+            });
+
+            document.getElementById('count-line').textContent =
+                `${filtered.length} von ${announcements.length} Meldungen`;
+            document.getElementById('list').innerHTML =
+                filtered.length > 0
+                    ? filtered.map(renderCard).join('')
+                    : '<div class="empty">Keine Meldungen für diesen Filter.</div>';
+
+            document.querySelectorAll('.card-header').forEach(header => {
+                header.addEventListener('click', () => {
+                    const card = header.closest('.card');
+                    const id = card.dataset.id;
+                    const nowOpen = !card.classList.contains('open');
+                    card.classList.toggle('open', nowOpen);
+                    openIds[id] = nowOpen;
+                });
+            });
+        }
+
+        async function loadOurCategories() {
+            try {
+                const response = await fetch(CATEGORIES_ENDPOINT, { cache: 'no-store' });
+                if (!response.ok) {
+                    ourCategories = {};
+                    return;
+                }
+                ourCategories = await response.json();
+            } catch (error) {
+                ourCategories = {};
+            }
+        }
+
+        async function load() {
+            try {
+                const response = await fetch(ENDPOINT, { cache: 'no-store' });
+                if (!response.ok) {
+                    document.getElementById('fetch-meta').textContent = `Fehler: HTTP ${response.status}`;
+                    document.getElementById('list').innerHTML =
+                        '<div class="error">Keine Daten - läuft hvvmap-fetcher?</div>';
+                    return;
+                }
+                const data = await response.json();
+                announcements = data.announcements || [];
+                await loadOurCategories();
+                document.getElementById('fetch-meta').textContent =
+                    `returnCode: ${data.returnCode || '–'} · lastUpdate: ${formatDate(data.lastUpdate)} · ${announcements.length} Meldungen geladen`;
+                renderReasonFilters();
+                renderOurCategoryFilters();
+                render();
+            } catch (error) {
+                document.getElementById('fetch-meta').textContent = 'Fehler beim Laden';
+                document.getElementById('list').innerHTML =
+                    `<div class="error">${error}</div>`;
+            }
+        }
+
+        document.getElementById('search').addEventListener('input', render);
+        document.getElementById('only-broadcast').addEventListener('change', render);
+        document.getElementById('only-planned').addEventListener('change', render);
+        document.getElementById('expand-all').addEventListener('click', () => {
+            announcements.forEach(a => { openIds[a.id] = true; });
+            render();
+        });
+        document.getElementById('collapse-all').addEventListener('click', () => {
+            announcements.forEach(a => { openIds[a.id] = false; });
+            render();
+        });
+
+        load();
+    </script>
+</body>
+
+</html>
