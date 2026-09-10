@@ -174,3 +174,7 @@ body {
 .hvv-labels-hidden .hvv-marker-delay-standalone {
     display: block;
 }
+
+.hvv-wakelock-active {
+    background-color: #1e64a0 !important;
+}

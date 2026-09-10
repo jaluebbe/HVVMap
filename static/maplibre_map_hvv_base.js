@@ -14,6 +14,14 @@ const map = new maplibregl.Map({
 });
 
 map.addControl(new maplibregl.NavigationControl(), 'top-left');
+map.addControl(
+    new maplibregl.GeolocateControl({
+        positionOptions: { enableHighAccuracy: true },
+        trackUserLocation: true,
+        showUserHeading: true,
+    }),
+    'top-left',
+);
 map.addControl(new maplibregl.ScaleControl({ unit: 'metric' }), 'bottom-left');
 
 // compact:true mirrors the Leaflet page's collapsible "i" toggle, built in here.
@@ -73,6 +81,83 @@ class LabelToggleControl {
     onRemove() {
         this._container.parentNode.removeChild(this._container);
         this._map = undefined;
+    }
+}
+
+// Keeps the screen awake via the Screen Wake Lock API. The browser releases
+// the lock once the tab is backgrounded - re-acquired on return, unless the
+// user had turned it off themselves first.
+class WakeLockControl {
+    onAdd() {
+        this._wakeLock = null;
+        this._wantWakeLock = false;
+        const container = document.createElement('div');
+        container.className = 'maplibregl-ctrl maplibregl-ctrl-group';
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.style.fontSize = '16px';
+        button.textContent = '☀️';
+        this._button = button;
+
+        if (!('wakeLock' in navigator)) {
+            button.disabled = true;
+            button.title = 'Bildschirm wach halten (vom Browser nicht unterstützt)';
+        } else {
+            button.title = 'Bildschirm wach halten';
+            button.addEventListener('click', () => this._toggle());
+            this._visibilityHandler = () => {
+                if (document.visibilityState === 'visible' && this._wantWakeLock && !this._wakeLock) {
+                    this._acquire();
+                }
+            };
+            document.addEventListener('visibilitychange', this._visibilityHandler);
+        }
+
+        container.appendChild(button);
+        this._container = container;
+        return container;
+    }
+
+    async _acquire() {
+        try {
+            this._wakeLock = await navigator.wakeLock.request('screen');
+            this._wakeLock.addEventListener('release', () => {
+                this._wakeLock = null;
+                this._setButtonActive(false);
+            });
+            this._setButtonActive(true);
+        } catch (error) {
+            console.warn('Wake Lock request failed:', error);
+            this._wantWakeLock = false;
+            this._setButtonActive(false);
+        }
+    }
+
+    async _toggle() {
+        if (this._wakeLock) {
+            this._wantWakeLock = false;
+            await this._wakeLock.release();
+        } else {
+            this._wantWakeLock = true;
+            await this._acquire();
+        }
+    }
+
+    _setButtonActive(active) {
+        this._button.classList.toggle('hvv-wakelock-active', active);
+        this._button.title = active
+            ? 'Bildschirm wach halten (aktiv) - klicken zum Beenden'
+            : 'Bildschirm wach halten';
+    }
+
+    onRemove() {
+        if (this._visibilityHandler) {
+            document.removeEventListener('visibilitychange', this._visibilityHandler);
+        }
+        if (this._wakeLock) {
+            this._wakeLock.release();
+        }
+        this._container.parentNode.removeChild(this._container);
     }
 }
 // Added after the mode selector so it stacks below it (see setupSourcesAndLayers).
@@ -422,6 +507,7 @@ function initHvvVehicleLayers(initialSourceKey) {
         map.addControl(modeToggleControl, 'top-right');
         modeToggleControl.setCategoriesVisible(!!currentSource.disruptionsEndpoint);
         map.addControl(new LabelToggleControl(), 'top-right');
+        map.addControl(new WakeLockControl(), 'top-right');
     }
 
     async function refreshReferenceLayer(endpoint, sourcePrefix, layerName) {
