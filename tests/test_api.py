@@ -16,7 +16,7 @@ def client(tmp_path, monkeypatch):
     osm_dir.mkdir()
     monkeypatch.chdir(tmp_path)
     (tmp_path / "static").mkdir()
-    (tmp_path / "static" / "leaflet_map_hvv_live.html").write_text("<html>live</html>")
+    (tmp_path / "static" / "index.html").write_text("<html>index</html>")
     (tmp_path / "fonts").mkdir()
 
     conn = sqlite3.connect(osm_dir / "test.mbtiles")
@@ -51,10 +51,10 @@ def client(tmp_path, monkeypatch):
     return TestClient(api_module.app)
 
 
-def test_root_redirects_to_live_map(client):
+def test_root_redirects_to_index(client):
     response = client.get("/", follow_redirects=False)
     assert response.status_code == 307
-    assert response.headers["location"] == "/static/leaflet_map_hvv_live.html"
+    assert response.headers["location"] == "/static/index.html"
 
 
 def test_vector_metadata_includes_dynamic_tiles_url(client):
@@ -121,6 +121,7 @@ def test_live_endpoint_503_when_redis_key_missing(client):
         ("/api/hvv/live/positions.geojson", "hvv:positions"),
         ("/api/hvv/realtime/positions.geojson", "hvv:positions_realtime"),
         ("/api/hvv/live/disruptions.geojson", "hvv:disruptions"),
+        ("/api/hvv/live/announcements.json", "hvv:announcements"),
         ("/api/hvv/live/stops.geojson", "hvv:reference_stops"),
         ("/api/hvv/live/lines.geojson", "hvv:reference_lines"),
     ],

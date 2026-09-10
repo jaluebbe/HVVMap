@@ -151,7 +151,7 @@ def get_vector_style(style_name: str, request: Request):
 _redis_client = get_redis_client()
 
 
-def _read_geojson(key: str) -> dict:
+def _read_cached_json(key: str) -> dict:
     raw = _redis_client.get(key)
     if raw is None:
         raise HTTPException(
@@ -163,45 +163,50 @@ def _read_geojson(key: str) -> dict:
 
 @app.get("/api/hvv/live/positions.geojson", tags=["hvv_live"])
 def get_live_positions():
-    return _read_geojson("hvv:positions")
+    return _read_cached_json("hvv:positions")
 
 
 @app.get("/api/hvv/realtime/positions.geojson", tags=["hvv_realtime"])
 def get_realtime_positions():
-    return _read_geojson("hvv:positions_realtime")
+    return _read_cached_json("hvv:positions_realtime")
 
 
 @app.get("/api/hvv/live/disruptions.geojson", tags=["hvv_live"])
 def get_live_disruptions():
-    return _read_geojson("hvv:disruptions")
+    return _read_cached_json("hvv:disruptions")
+
+
+@app.get("/api/hvv/live/announcements.json", tags=["hvv_live"])
+def get_live_announcements():
+    """Raw getAnnouncements response, not GeoJSON - see hvv:disruptions for
+    the derived, map-ready version."""
+    return _read_cached_json("hvv:announcements")
 
 
 @app.get("/api/hvv/live/stops.geojson", tags=["hvv_live"])
 def get_live_stops():
-    return _read_geojson("hvv:reference_stops")
+    return _read_cached_json("hvv:reference_stops")
 
 
 @app.get("/api/hvv/live/lines.geojson", tags=["hvv_live"])
 def get_live_lines():
-    return _read_geojson("hvv:reference_lines")
+    return _read_cached_json("hvv:reference_lines")
 
 
 # --- GTFS layers -------------------------------------------------------------
-
-
 @app.get("/api/hvv/gtfs/positions.geojson", tags=["hvv_gtfs"])
 def get_gtfs_positions():
-    return _read_geojson("hvv:gtfs:positions")
+    return _read_cached_json("hvv:gtfs:positions")
 
 
 @app.get("/api/hvv/gtfs/lines.geojson", tags=["hvv_gtfs"])
 def get_gtfs_lines():
-    return _read_geojson("hvv:gtfs:reference_lines")
+    return _read_cached_json("hvv:gtfs:reference_lines")
 
 
 @app.get("/api/hvv/gtfs/stops.geojson", tags=["hvv_gtfs"])
 def get_gtfs_stops():
-    return _read_geojson("hvv:gtfs:reference_stops")
+    return _read_cached_json("hvv:gtfs:reference_stops")
 
 
 if __name__ == "__main__":
