@@ -32,7 +32,7 @@ app.mount("/fonts", StaticFiles(directory="fonts"), name="fonts")
 
 @app.get("/", include_in_schema=False)
 async def root():
-    return RedirectResponse("/static/index.html")
+    return RedirectResponse("/static/maplibre_map_hvv_live.html")
 
 
 # --- Background vector basemap ---------------------------------------------

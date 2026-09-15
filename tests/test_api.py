@@ -54,7 +54,7 @@ def client(tmp_path, monkeypatch):
 def test_root_redirects_to_index(client):
     response = client.get("/", follow_redirects=False)
     assert response.status_code == 307
-    assert response.headers["location"] == "/static/index.html"
+    assert response.headers["location"] == "/static/maplibre_map_hvv_live.html"
 
 
 def test_vector_metadata_includes_dynamic_tiles_url(client):
