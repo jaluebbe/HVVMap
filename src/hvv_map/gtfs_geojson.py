@@ -341,6 +341,7 @@ def build_stops_geojson(schedule: Schedule, reference_date: date | None = None) 
                 "geometry": {"type": "Point", "coordinates": list(_stop_coord(stop))},
                 "properties": {
                     "text": stop.get("stop_name", ""),
+                    "name": stop.get("stop_name", ""),
                     "modes": sorted(modes),
                 },
             }

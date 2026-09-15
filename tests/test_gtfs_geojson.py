@@ -139,6 +139,19 @@ def test_build_stops_geojson_includes_modes_for_used_stops():
         assert feature["properties"]["modes"] == ["U"]
 
 
+def test_build_stops_geojson_name_matches_stop_name():
+    schedule = _make_schedule()
+    result = build_stops_geojson(schedule, reference_date=date(2025, 6, 2))
+
+    names = {feature["properties"]["name"] for feature in result["features"]}
+    assert names == {"Alpha", "Beta"}
+    for feature in result["features"]:
+        # "name" backs the map's persistent station labels (text-field);
+        # "text" backs the hover tooltip - same value here, but kept as two
+        # properties since the two consumers are independent.
+        assert feature["properties"]["name"] == feature["properties"]["text"]
+
+
 def test_build_stops_geojson_excludes_stop_without_recent_trip():
     old_calendar = [
         {
