@@ -24,7 +24,6 @@ map.addControl(
 );
 map.addControl(new maplibregl.ScaleControl({ unit: 'metric' }), 'bottom-left');
 
-// compact:true mirrors the Leaflet page's collapsible "i" toggle, built in here.
 const attributionControl = new maplibregl.AttributionControl({
     compact: true,
     customAttribution: [
@@ -227,6 +226,13 @@ const DISRUPTIONS_POLL_INTERVAL_MS = 60_000;
 
 const EMPTY_FEATURE_COLLECTION = { type: 'FeatureCollection', features: [] };
 
+// Shared by hvv-stops-layer-* and hvv-disruptions-layer-* so both circle kinds match in size.
+const STOP_MARKER_RADIUS = 2;
+
+// Replacement-service lines (e.g. "U1-ERSATZ", "A1-SEV", "A3-BUS") - a 2-char
+// line name followed by a hyphen - render dashed instead of solid (see refreshReferenceLayer).
+const REPLACEMENT_LINE_PATTERN = /^.{2}-/;
+
 // ModeToggleControl toggles a mode's lines/stops/positions together.
 const MODES = [
     { key: 'U', name: 'U-Bahn', icon: '/static/hvv/icons/u.svg' },
@@ -238,12 +244,10 @@ const MODES = [
 // SONSTIGE (displayed as "Infos") has no single fitting emoji among the
 // obvious closure/accessibility ones, so it gets the info symbol instead -
 // matches CATEGORY_COLORS in announcement_categories.py for marker color.
-// Default hidden: still too vague a mix to show automatically, but
-// available to toggle on.
 const DISRUPTION_CATEGORIES = [
     { key: 'SPERRUNG', name: 'Sperrung', icon: '🚧', visible: true },
-    { key: 'BARRIEREFREIHEIT', name: 'Aufzüge', icon: '♿', visible: false },
-    { key: 'SONSTIGE', name: 'Infos', icon: 'ℹ️', visible: false },
+    { key: 'BARRIEREFREIHEIT', name: 'Aufzüge', icon: '♿', visible: true },
+    { key: 'SONSTIGE', name: 'Infos', icon: 'ℹ️', visible: true },
 ];
 
 function buildIconNode(icon) {
@@ -299,7 +303,7 @@ class ModeToggleControl {
         });
         container.appendChild(toggleButton);
 
-        // Auto-collapse on mobile once the user interacts with the map, mirroring Leaflet's layer control.
+        // Auto-collapse on mobile once the user interacts with the map.
         const collapseOnMapClick = () => {
             if (mobileQuery.matches) {
                 container.classList.add('hvv-mode-control-collapsed');
@@ -364,8 +368,6 @@ class ModeToggleControl {
         this._map = undefined;
     }
 }
-
-// Ports leaflet_map_hvv_base.js's hvvPointToLayer(); hitbox widens the hover area.
 
 // Vehicle model isn't its own property - parsed from properties.text (DT5/Batteriegelenkbus only).
 const VEHICLE_MODEL_CLASSES = {
@@ -474,6 +476,7 @@ function initHvvVehicleLayers(initialSourceKey) {
     // Single shared popup (vehicles/stops/disruptions); anchor:'bottom' points its tip straight down.
     const hoverPopup = new maplibregl.Popup({ closeButton: false, closeOnClick: false, anchor: 'bottom' });
     const activeModes = new Set(MODES.map((m) => m.key));
+    const activeCategories = new Set(DISRUPTION_CATEGORIES.filter((c) => c.visible).map((c) => c.key));
     const positionMarkersByMode = {};
     MODES.forEach((m) => { positionMarkersByMode[m.key] = []; });
     let currentSource = SOURCES.find((s) => s.key === initialSourceKey) || SOURCES[0];
@@ -488,7 +491,9 @@ function initHvvVehicleLayers(initialSourceKey) {
         }
         const visibility = visible ? 'visible' : 'none';
         map.setLayoutProperty(`hvv-lines-layer-${modeKey}`, 'visibility', visibility);
+        map.setLayoutProperty(`hvv-lines-layer-${modeKey}-replacement`, 'visibility', visibility);
         map.setLayoutProperty(`hvv-stops-layer-${modeKey}`, 'visibility', visibility);
+        map.setLayoutProperty(`hvv-stops-labels-${modeKey}`, 'visibility', visibility);
         positionMarkersByMode[modeKey].forEach((marker) => {
             marker.getElement().style.display = visible ? '' : 'none';
         });
@@ -496,23 +501,43 @@ function initHvvVehicleLayers(initialSourceKey) {
     }
 
     function setCategoryVisibility(categoryKey, visible) {
+        if (visible) {
+            activeCategories.add(categoryKey);
+        } else {
+            activeCategories.delete(categoryKey);
+        }
         map.setLayoutProperty(`hvv-disruptions-layer-${categoryKey}`, 'visibility', visible ? 'visible' : 'none');
+        updateStationDisruptions();
     }
 
     function setupSourcesAndLayers() {
         const hoverLayers = [];
         const disruptionLayerIds = [];
+        // Split into two passes (lines+dots, then labels) so disruption markers can be
+        // inserted in between - above every mode's stop dots, below every mode's labels.
         MODES.forEach(function(m) {
             map.addSource(`hvv-lines-${m.key}`, { type: 'geojson', data: EMPTY_FEATURE_COLLECTION });
             map.addLayer({
                 id: `hvv-lines-layer-${m.key}`,
                 type: 'line',
                 source: `hvv-lines-${m.key}`,
+                filter: ['!', ['get', 'isReplacementLine']],
                 paint: {
                     'line-color': ['coalesce', ['get', 'color'], '#888888'],
                     'line-width': 1.5,
-                    'line-opacity': 0.85,
-                    'line-dasharray': [1, 2],
+                },
+            });
+            // line-dasharray isn't data-driven in MapLibre, hence a separate layer
+            // (same source, filtered) instead of one expression-based layer.
+            map.addLayer({
+                id: `hvv-lines-layer-${m.key}-replacement`,
+                type: 'line',
+                source: `hvv-lines-${m.key}`,
+                filter: ['==', ['get', 'isReplacementLine'], true],
+                paint: {
+                    'line-color': ['coalesce', ['get', 'color'], '#888888'],
+                    'line-width': 1.5,
+                    'line-dasharray': [1, 3],
                 },
             });
 
@@ -522,16 +547,19 @@ function initHvvVehicleLayers(initialSourceKey) {
                 type: 'circle',
                 source: `hvv-stops-${m.key}`,
                 paint: {
-                    'circle-radius': 5,
+                    'circle-radius': STOP_MARKER_RADIUS,
                     'circle-color': '#ffffff',
                     'circle-stroke-color': '#000000',
                     'circle-stroke-width': 1,
                 },
             });
+            // Backup for stops whose label (below) doesn't fit/render for
+            // some reason - cheap to keep, works regardless.
             hoverLayers.push(`hvv-stops-layer-${m.key}`);
         });
 
         // Always created regardless of the current source, so switching sources doesn't need new layers.
+        // Same radius as the stop dots, but added after them so they render in front.
         DISRUPTION_CATEGORIES.forEach(function(c) {
             map.addSource(`hvv-disruptions-${c.key}`, { type: 'geojson', data: EMPTY_FEATURE_COLLECTION });
             map.addLayer({
@@ -540,12 +568,39 @@ function initHvvVehicleLayers(initialSourceKey) {
                 source: `hvv-disruptions-${c.key}`,
                 layout: { visibility: c.visible ? 'visible' : 'none' },
                 paint: {
-                    'circle-radius': ['coalesce', ['get', 'markerRadius'], 5],
+                    'circle-radius': STOP_MARKER_RADIUS,
                     'circle-color': ['coalesce', ['get', 'color'], '#888888'],
                 },
             });
             hoverLayers.push(`hvv-disruptions-layer-${c.key}`);
             disruptionLayerIds.push(`hvv-disruptions-layer-${c.key}`);
+        });
+
+        MODES.forEach(function(m) {
+            // Our own station/pier name labels, from our own stops data.
+            map.addLayer({
+                id: `hvv-stops-labels-${m.key}`,
+                type: 'symbol',
+                source: `hvv-stops-${m.key}`,
+                minzoom: 8.5,
+                layout: {
+                    'text-field': ['get', 'name'],
+                    'text-font': ['KlokanTech Noto Sans Bold'],
+                    'text-size': 9.5,
+                    'text-anchor': 'center',
+                    'text-max-width': 14,
+                    'text-padding': 2,
+                    'text-letter-spacing': 0.05, // Prevents bold characters from bleeding together
+                    'text-allow-overlap': false, // Hides overlapping labels to keep the map clean
+                },
+                paint: {
+                    'text-color': 'hsl(232, 41%, 48%)',
+                    'text-halo-color': 'hsl(0, 0%, 100%)',
+                    'text-halo-width': 0.8,
+                    'text-translate': [0, 1],
+                    'text-translate-anchor': 'viewport',
+                },
+            });
         });
 
         // GL layers have no Leaflet-style bindTooltip(); this popup is the equivalent.
@@ -561,6 +616,32 @@ function initHvvVehicleLayers(initialSourceKey) {
             map.on('mouseleave', layerId, function() {
                 map.getCanvas().style.cursor = '';
                 hoverPopup.remove();
+            });
+        });
+
+        // Station labels share the same tooltip/click-to-open-info-panel as the
+        // disruption marker itself, looked up by station name (see updateStationDisruptions).
+        MODES.forEach(function(m) {
+            const layerId = `hvv-stops-labels-${m.key}`;
+            map.on('mouseenter', layerId, function(e) {
+                const info = stationDisruptionInfo.get(e.features[0].properties?.name);
+                if (!info) {
+                    return;
+                }
+                map.getCanvas().style.cursor = 'pointer';
+                hoverPopup.setLngLat(e.features[0].geometry.coordinates).setHTML(info.text).addTo(map);
+            });
+            map.on('mouseleave', layerId, function() {
+                map.getCanvas().style.cursor = '';
+                hoverPopup.remove();
+            });
+            map.on('click', layerId, function(e) {
+                const info = stationDisruptionInfo.get(e.features[0].properties?.name);
+                if (!info || info.messages.length === 0) {
+                    return;
+                }
+                showInfoPanel(info.messages);
+                e.originalEvent._hvvHandledByMarker = true;
             });
         });
 
@@ -603,7 +684,15 @@ function initHvvVehicleLayers(initialSourceKey) {
             MODES.forEach(function(m) {
                 const filtered = {
                     type: 'FeatureCollection',
-                    features: data.features.filter((f) => (f.properties?.modes || []).includes(m.key)),
+                    features: data.features
+                        .filter((f) => (f.properties?.modes || []).includes(m.key))
+                        .map((f) => ({
+                            ...f,
+                            properties: {
+                                ...f.properties,
+                                isReplacementLine: (f.properties?.lines || []).some((name) => REPLACEMENT_LINE_PATTERN.test(name)),
+                            },
+                        })),
                 };
                 map.getSource(`${sourcePrefix}-${m.key}`).setData(filtered);
             });
@@ -686,6 +775,65 @@ function initHvvVehicleLayers(initialSourceKey) {
             };
             source.setData(filtered);
         });
+        updateStationDisruptions();
+    }
+
+    // Matches CATEGORY_COLORS in announcement_categories.py; higher priority wins if a
+    // station has several active categories at once.
+    const STATION_LABEL_COLORS = {
+        SPERRUNG: '#e65100',
+        BARRIEREFREIHEIT: '#42A5F5',
+        SONSTIGE: '#616161',
+    };
+    const STATION_LABEL_DEFAULT_COLOR = 'hsl(232, 41%, 48%)';
+    const STATION_LABEL_CATEGORY_PRIORITY = ['SPERRUNG', 'BARRIEREFREIHEIT', 'SONSTIGE'];
+
+    // station name -> {text, messages}, combining every active disruption feature
+    // there - read by the label hover/click handlers registered in setupSourcesAndLayers.
+    let stationDisruptionInfo = new Map();
+
+    // Colors each hvv-stops-labels-* layer's text by the affected station's active
+    // disruption category, and rebuilds stationDisruptionInfo for the label tooltip/click.
+    function updateStationDisruptions() {
+        const colorByStation = {};
+        const infoByStation = new Map();
+        (disruptionRawData?.features || []).forEach(function(f) {
+            const category = f.properties?.category;
+            const stationName = f.properties?.station_name;
+            if (!category || !stationName || !activeCategories.has(category)) {
+                return;
+            }
+            const modes = f.properties?.modes || [];
+            if (modes.length > 0 && !modes.some((mode) => activeModes.has(mode))) {
+                return;
+            }
+            if (STATION_LABEL_COLORS[category]) {
+                const existing = colorByStation[stationName];
+                if (!existing || STATION_LABEL_CATEGORY_PRIORITY.indexOf(category) < STATION_LABEL_CATEGORY_PRIORITY.indexOf(existing)) {
+                    colorByStation[stationName] = category;
+                }
+            }
+            const entry = infoByStation.get(stationName) || { texts: [], messages: [] };
+            if (f.properties.text) {
+                entry.texts.push(f.properties.text);
+            }
+            const rawMessages = f.properties.messages;
+            const messages = typeof rawMessages === 'string' ? JSON.parse(rawMessages) : rawMessages;
+            if (Array.isArray(messages)) {
+                entry.messages.push(...messages);
+            }
+            infoByStation.set(stationName, entry);
+        });
+
+        stationDisruptionInfo = new Map(
+            Array.from(infoByStation, ([name, entry]) => [name, { text: entry.texts.join('<br><br>'), messages: entry.messages }]),
+        );
+
+        const stationNames = Object.keys(colorByStation);
+        const textColor = stationNames.length === 0
+            ? STATION_LABEL_DEFAULT_COLOR
+            : ['match', ['get', 'name'], ...stationNames.flatMap((name) => [name, STATION_LABEL_COLORS[colorByStation[name]]]), STATION_LABEL_DEFAULT_COLOR];
+        MODES.forEach((m) => map.setPaintProperty(`hvv-stops-labels-${m.key}`, 'text-color', textColor));
     }
 
     async function refreshDisruptions() {
@@ -719,6 +867,7 @@ function initHvvVehicleLayers(initialSourceKey) {
         DISRUPTION_CATEGORIES.forEach((c) => {
             map.getSource(`hvv-disruptions-${c.key}`).setData(EMPTY_FEATURE_COLLECTION);
         });
+        updateStationDisruptions();
     }
 
     function startPolling() {
