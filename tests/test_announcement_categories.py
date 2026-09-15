@@ -41,8 +41,24 @@ def test_classify_category_sperrung_from_title():
         == CATEGORY_SPERRUNG
     )
     assert (
-        classify_category({"summary": "Ersatzverkehr mit Bussen", "description": ""})
+        classify_category(
+            {"summary": "", "description": "Zwischen A und B fahren keine Züge"}
+        )
         == CATEGORY_SPERRUNG
+    )
+    assert (
+        classify_category({"summary": "Verkehr unterbrochen", "description": ""})
+        == CATEGORY_SPERRUNG
+    )
+
+
+def test_classify_category_ersatzverkehr_alone_is_not_sperrung():
+    # Ersatzverkehr can also mean a thinned-out schedule, not necessarily a
+    # full closure, so it was dropped from CLOSURE_PATTERNS on its own -
+    # only counts as SPERRUNG if paired with an actual closure phrase.
+    assert (
+        classify_category({"summary": "Ersatzverkehr mit Bussen", "description": ""})
+        == CATEGORY_SONSTIGE
     )
 
 
