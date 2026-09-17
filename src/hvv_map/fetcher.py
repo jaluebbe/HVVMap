@@ -48,7 +48,7 @@ REFERENCE_REBUILD_INTERVAL = 1800.0  # seconds between reference layer rebuilds 
 VEHICLE_MAP_TTL = 10  # seconds - stale data expires fast if fetcher dies
 ANNOUNCEMENTS_TTL = 7200  # seconds - generous headroom above refresh interval
 
-VEHICLE_TYPES = ["U_BAHN", "S_BAHN", "A_BAHN", "SCHIFF", "REGIONALBUS"]
+VEHICLE_TYPES = ["U_BAHN", "S_BAHN", "A_BAHN", "SCHIFF", "REGIONALBUS", "R_BAHN"]
 # Wide window, not just now..now+10: a journey's full segment chain arrives
 # in one response, giving _select_segment() something to pick from even
 # during a station dwell. Narrow windows would only catch a single segment
@@ -57,7 +57,7 @@ PRE_DEPARTURE_SECONDS = 60  # how early before a first departure a vehicle appea
 POST_ARRIVAL_SECONDS = 30  # how long after a last arrival a vehicle stays visible
 BOUNDING_BOX = {
     "lowerLeft": {"x": 9.45, "y": 53.43, "type": "EPSG_4326"},
-    "upperRight": {"x": 10.35, "y": 54.08, "type": "EPSG_4326"},
+    "upperRight": {"x": 10.4, "y": 54.08, "type": "EPSG_4326"},
 }
 
 # getVehicleMap has no line-name filter (unlike getAnnouncements' "names"),
@@ -78,11 +78,18 @@ def _store(key: str, data: dict, ttl: int, publish: bool = False) -> None:
     if publish:
         redis_client.publish(key, payload)
 
+# R_BAHN covers every DB regional train passing through the bounding box,
+# not just ours - RB81 is a deliberate exception (interim solution ahead of
+# the future S4), so it needs the same name-based whitelist REGIONALBUS gets.
+WANTED_R_BAHN_LINES = {"RB81"}
 
 def _is_wanted(journey: dict) -> bool:
-    if journey.get("vehicleType") != "REGIONALBUS":
-        return True  # U_BAHN/S_BAHN/A_BAHN/SCHIFF are already precise
-    return journey.get("line", {}).get("id") in REPLACEMENT_BUS_MODES
+    vehicle_type = journey.get("vehicleType")
+    if vehicle_type == "REGIONALBUS":
+        return journey.get("line", {}).get("id") in REPLACEMENT_BUS_MODES
+    if vehicle_type == "R_BAHN":
+        return journey.get("line", {}).get("name") in WANTED_R_BAHN_LINES
+    return True  # U_BAHN/S_BAHN/A_BAHN/SCHIFF are already precise
 
 
 def _inject_tracks(response: dict) -> None:

@@ -13,7 +13,8 @@ from hvv_map.gti_client import GtiClient
 # U/S/AKN by name prefix (matches replacement buses too, e.g. "U1-ERSATZ",
 # "S3-SEV", via the trailing ".*"). Ferries by carrier instead of name, since
 # ferry line numbers alone aren't distinctive.
-LINE_NAME_PATTERN = re.compile(r"^[USA][0-9]{1,2}.*$")
+#LINE_NAME_PATTERN = re.compile(r"^[USA][0-9]{1,2}.*$")
+LINE_NAME_PATTERN = re.compile(r"^(?:[USA][0-9]{1,2}|RB81).*$")
 FERRY_CARRIER = "HADAG"  # confirmed: the actual Hamburg harbour ferry operator
 
 # For getAnnouncements' "names" filter (accepts line names OR carrier names).
@@ -33,6 +34,7 @@ BASE_LINE_NAMES = [
     "A1",
     "A2",
     "A3",
+    "RB81",
 ]
 ANNOUNCEMENT_FILTER_NAMES = BASE_LINE_NAMES + [FERRY_CARRIER]
 
@@ -64,6 +66,7 @@ LINE_COLORS = {
     "U1-DIREKT": "E2001A", "U1-ERSATZ": "E2001A",
     "A1-SEV": "E2001A", "A2-SEV": "E2001A", "A3-Bus": "E2001A",
     "S3-SEV": "E2001A", "S5-SEV": "E2001A", "S7-SEV": "E2001A",
+    "RB81": "000000",
 }  # fmt: skip
 
 

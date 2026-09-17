@@ -13,6 +13,7 @@ MODE_BY_VEHICLE_TYPE = {
     "S_BAHN": "S",
     "A_BAHN": "AKN",
     "SCHIFF": "FERRY",
+    "R_BAHN": "R",
 }
 
 # S1-only data quirk: some journey representations carry a stale/misleading
@@ -35,6 +36,15 @@ def _s1_starts_or_ends_at_airport(journey: dict) -> bool:
     return first_start == S1_AIRPORT_STATION or last_end == S1_AIRPORT_STATION
 
 
+def _s1_departed_from_wedel(journey: dict) -> bool:
+    origin = journey.get("line", {}).get("origin", "")
+    segments = journey.get("segments", [])
+    if not segments:
+        return False
+    first_start = segments[0].get("startStationName", "")
+    return origin == "Wedel" and first_start in ["Wedel", "Rissen",]
+
+
 def _s1_should_keep(journey: dict, destination: str) -> bool:
     direction = journey.get("line", {}).get("direction", "")
     if _s1_starts_or_ends_at_airport(journey):
@@ -43,6 +53,8 @@ def _s1_should_keep(journey: dict, destination: str) -> bool:
         if destination == direction:
             return True
         return direction in destination
+    if _s1_departed_from_wedel(journey):
+        return True
     return direction != S1_AIRPORT_STATION
 
 
@@ -68,26 +80,31 @@ def _build_feature(
     line = journey.get("line", {})
     line_id = line.get("id", "")
     model = (line.get("type") or {}).get("model", "")
+    mode = mode_for_journey(journey)
     lon, lat = position
     text = f"{destination}<br>{model}" if model else destination
     if delay_minutes > 0:
         text = f"{text}<br>+{delay_minutes} Minuten"
+    icon_url = f"https://cloud.geofox.de/icon/line?height={ICON_HEIGHT}&lineKey={line_id}&fileFormat=SVG"
+    if mode == "R":
+        # R_BAHN's default icon renders plain black - poor contrast against
+        # the basemap. outlined=true adds a light border around it.
+        icon_url += "&outlined=true"
     return {
         "type": "Feature",
         "geometry": {"type": "Point", "coordinates": [lon, lat]},
         "properties": {
             "journeyID": journey.get("journeyID", ""),
-            "icon": f"https://cloud.geofox.de/icon/line?height={ICON_HEIGHT}&lineKey={line_id}&fileFormat=SVG",
+            "icon": icon_url,
             "iconHeight": ICON_HEIGHT,
             "line": line.get("name", ""),
             "label": _short_label(destination),
             "text": text,
             "progress": round(progress, 3),
-            "mode": mode_for_journey(journey),
+            "mode": mode,
             "delay": delay_minutes,
         },
     }
-
 
 def build_positions_geojson(vehiclemap_data: dict, now_ts: int | None = None) -> dict:
     """vehiclemap_data: the 'data' payload of the hvv:vehiclemap Redis entry

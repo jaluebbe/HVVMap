@@ -239,6 +239,7 @@ const MODES = [
     { key: 'S', name: 'S-Bahn', icon: '/static/hvv/icons/s.svg' },
     { key: 'AKN', name: 'AKN', icon: '/static/hvv/icons/akn.svg' },
     { key: 'FERRY', name: 'Fähre', icon: '/static/hvv/icons/ferry.svg' },
+    { key: 'R', name: 'Regio', icon: '/static/hvv/icons/r.svg' },
 ];
 
 // SONSTIGE (displayed as "Infos") has no single fitting emoji among the
