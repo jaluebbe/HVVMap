@@ -89,6 +89,39 @@ def test_build_positions_geojson_places_vehicle_between_stops():
     assert 0.4 < feature["properties"]["progress"] < 0.6
 
 
+def test_build_positions_geojson_follows_curved_shape_not_straight_line():
+    # A detour via (10.02, 53.51) that a straight line between Alpha
+    # (10.00, 53.50) and Beta (10.00, 53.52) would never pass through.
+    curved_shape = {"SHAPE1": [(10.00, 53.50), (10.02, 53.51), (10.00, 53.52)]}
+    schedule = _make_schedule(shapes=curved_shape)
+    now_ts = _epoch(2025, 6, 2, 8, 1, 0)  # midpoint of the 08:00-08:02 segment
+
+    result = build_positions_geojson(schedule, now_ts)
+
+    lon, _lat = result["features"][0]["geometry"]["coordinates"]
+    assert lon > 10.005  # only possible if the detour point was used
+
+
+def test_build_positions_geojson_falls_back_to_straight_line_without_shape():
+    schedule = _make_schedule(
+        trips={
+            "T1": {
+                "trip_id": "T1",
+                "route_id": "R1",
+                "service_id": "ALLDAYS",
+                "trip_headsign": "Beta",
+                "shape_id": "MISSING_SHAPE",
+            },
+        }
+    )
+    now_ts = _epoch(2025, 6, 2, 8, 1, 0)
+
+    result = build_positions_geojson(schedule, now_ts)
+
+    lon, _lat = result["features"][0]["geometry"]["coordinates"]
+    assert lon == 10.00  # straight line between two same-longitude stops
+
+
 def test_build_positions_geojson_skips_route_without_known_color():
     schedule = _make_schedule(
         trips={

@@ -60,6 +60,9 @@ LINE_COLORS = {
     "A2-SEV": "E2001A",
     "A3-Bus": "E2001A",
     "S5-SEV": "E2001A",
+    # route_color is blank for RB81 too - black by request, interim
+    # solution ahead of the future S4.
+    "RB81": "000000",
 }
 # geofox icon service lineKey format. GTFS route_short_name has no
 # equivalent field, so this mapping has to be maintained by hand - ported
@@ -90,11 +93,43 @@ LINE_ID_MAP = {
     "A2-SEV": "DB-EFZ:A2-SEV_DB-EFZ_Z",
     "A3-Bus": "VHH:A3-Bus_VHH",
     "S5-SEV": "SBH:S5-SEV_SBH_SBAHNS",
+    "RB81": "DB-EFZ:RB81_DB-EFZ_Z",
 }
 
 
 def _stop_coord(stop: dict):
     return (float(stop["stop_lon"]), float(stop["stop_lat"]))
+
+
+def _nearest_shape_index(shape_coords: list, point: tuple) -> int:
+    lon, lat = point
+    best_index = 0
+    best_dist = None
+    for i, (shape_lon, shape_lat) in enumerate(shape_coords):
+        # Planar squared distance - good enough for nearest-point ranking
+        # over the short span of one stop-to-stop segment.
+        dist = (shape_lon - lon) ** 2 + (shape_lat - lat) ** 2
+        if best_dist is None or dist < best_dist:
+            best_dist = dist
+            best_index = i
+    return best_index
+
+
+def _shape_segment_coords(
+    shape_coords: list, start_coord: tuple, end_coord: tuple
+) -> list:
+    """Sub-polyline of shape_coords between the points nearest to
+    start_coord/end_coord, so a vehicle follows the actual curve instead of
+    a straight line between its two stops. Falls back to the straight line
+    if there's no shape, or the nearest points don't yield a sane forward
+    slice (e.g. the shape passes close to a stop more than once)."""
+    if not shape_coords:
+        return [start_coord, end_coord]
+    start_index = _nearest_shape_index(shape_coords, start_coord)
+    end_index = _nearest_shape_index(shape_coords, end_coord)
+    if end_index - start_index < 1:
+        return [start_coord, end_coord]
+    return shape_coords[start_index : end_index + 1]
 
 
 def _build_point_feature(
@@ -248,7 +283,10 @@ def build_positions_geojson(schedule: Schedule, now_ts: int) -> dict:
         occupied_stops.add(prev[1])
         occupied_stops.add(nxt[1])
 
-        coords = [_stop_coord(start_stop), _stop_coord(end_stop)]
+        start_coord = _stop_coord(start_stop)
+        end_coord = _stop_coord(end_stop)
+        shape_coords = schedule.shapes.get(trip.get("shape_id"), [])
+        coords = _shape_segment_coords(shape_coords, start_coord, end_coord)
         actual_start = chosen_base_epoch + prev[3]
         actual_end = chosen_base_epoch + nxt[2]
         result = head_position(coords, actual_start, actual_end, now_ts)
