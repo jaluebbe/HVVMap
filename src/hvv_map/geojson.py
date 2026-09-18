@@ -36,15 +36,6 @@ def _s1_starts_or_ends_at_airport(journey: dict) -> bool:
     return first_start == S1_AIRPORT_STATION or last_end == S1_AIRPORT_STATION
 
 
-def _s1_departed_from_wedel(journey: dict) -> bool:
-    origin = journey.get("line", {}).get("origin", "")
-    segments = journey.get("segments", [])
-    if not segments:
-        return False
-    first_start = segments[0].get("startStationName", "")
-    return origin == "Wedel" and first_start in ["Wedel", "Rissen",]
-
-
 def _s1_should_keep(journey: dict, destination: str) -> bool:
     direction = journey.get("line", {}).get("direction", "")
     if _s1_starts_or_ends_at_airport(journey):
@@ -53,8 +44,6 @@ def _s1_should_keep(journey: dict, destination: str) -> bool:
         if destination == direction:
             return True
         return direction in destination
-    if _s1_departed_from_wedel(journey):
-        return True
     return direction != S1_AIRPORT_STATION
 
 
