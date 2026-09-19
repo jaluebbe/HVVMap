@@ -23,7 +23,10 @@ calls (listLines, listStations), split across two consecutive cycles.
 import json
 import time
 
-from hvv_map.disruptions import build_disruptions_geojson
+from hvv_map.disruptions import (
+    build_disruptions_geojson,
+    extract_announcement_station_names,
+)
 from hvv_map.geojson import build_positions_geojson, mode_for_journey
 from hvv_map.gti_client import GtiClient
 from hvv_map.lines import (
@@ -78,10 +81,12 @@ def _store(key: str, data: dict, ttl: int, publish: bool = False) -> None:
     if publish:
         redis_client.publish(key, payload)
 
+
 # R_BAHN covers every DB regional train passing through the bounding box,
 # not just ours - RB81 is a deliberate exception (interim solution ahead of
 # the future S4), so it needs the same name-based whitelist REGIONALBUS gets.
 WANTED_R_BAHN_LINES = {"RB81"}
+
 
 def _is_wanted(journey: dict) -> bool:
     vehicle_type = journey.get("vehicleType")
@@ -126,7 +131,6 @@ def fetch_vehicle_map(ttl: int = VEHICLE_MAP_TTL, realtime: bool = True) -> None
     global _last_no_realtime_response, _last_realtime_response
     now = int(time.time())
     request = {
-        "version": 63,
         "boundingBox": BOUNDING_BOX,
         "periodBegin": now - POST_ARRIVAL_SECONDS,
         "periodEnd": now + PRE_DEPARTURE_SECONDS,
@@ -185,8 +189,6 @@ def _rebuild_positions_realtime(ttl: int = VEHICLE_MAP_TTL) -> None:
 
 def fetch_announcements() -> None:
     request = {
-        "language": "de",
-        "version": 63,
         "full": True,
         "names": ANNOUNCEMENT_FILTER_NAMES,
     }
@@ -199,11 +201,19 @@ def fetch_announcements() -> None:
     disruptions = build_disruptions_geojson(response, stations)
     _store("hvv:disruptions", disruptions, ANNOUNCEMENTS_TTL)
 
+    # Extra departureList lookup targets, beyond the fixed anchor stations -
+    # raw station names only, no id resolution, no reason stored.
+    station_names = extract_announcement_station_names(response)
+    _store("hvv:announcement_stations", station_names, ANNOUNCEMENTS_TTL)
+
 
 def fetch_once_announcements() -> None:
     """CLI: fetch announcements once, store in Redis, then exit."""
     fetch_announcements()
-    print("Stored in Redis (keys: hvv:announcements, hvv:disruptions)")
+    print(
+        "Stored in Redis (keys: hvv:announcements, hvv:disruptions, "
+        "hvv:announcement_stations)"
+    )
 
 
 def fetch_once_vehicle_map() -> None:

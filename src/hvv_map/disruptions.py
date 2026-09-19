@@ -131,3 +131,24 @@ def build_disruptions_geojson(
         )
 
     return {"type": "FeatureCollection", "features": features}
+
+
+def extract_announcement_station_names(
+    announcements_data: dict, now: datetime | None = None
+) -> list[str]:
+    """Distinct station names mentioned in currently-valid announcements'
+    locations, taken as-is from the API (location.begin/end.name) - no id
+    resolution against stations_by_id. Used to widen ad-hoc departureList
+    lookups (including buses) beyond the fixed anchor stations."""
+    if now is None:
+        now = datetime.now(timezone.utc)
+    names = set()
+    for announcement in announcements_data.get("announcements", []):
+        if not is_currently_valid(announcement, now):
+            continue
+        for location in announcement.get("locations", []):
+            for key in ("begin", "end"):
+                name = (location.get(key) or {}).get("name")
+                if name:
+                    names.add(name)
+    return sorted(names)

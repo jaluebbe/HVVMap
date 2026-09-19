@@ -11,6 +11,7 @@ import hmac
 import json
 import os
 from pathlib import Path
+from types import MappingProxyType
 
 import requests
 
@@ -39,13 +40,19 @@ def _load_credentials():
 
 
 class GtiClient:
-    def __init__(self, _user: str = None, _secret: str = None):
+    BASE_URL = "https://gti.geofox.de/gti/public/"
+    DEFAULT_PARAMS = MappingProxyType({"language": "de", "version": 63})
+
+    def __init__(
+        self, _user: str = None, _secret: str = None, default_params: dict = None
+    ):
         if _user is None or _secret is None:
             auto_user, auto_secret = _load_credentials()
             _user = _user or auto_user
             _secret = _secret or auto_secret
         self.gti_user = _user
         self.gti_hmac_secret = _secret
+        self.default_params = {**self.DEFAULT_PARAMS, **(default_params or {})}
         self.client = requests.Session()
 
     def _get_signature(self, request_body: str) -> str:
@@ -55,8 +62,9 @@ class GtiClient:
         return base64.b64encode(digest).decode("utf-8")
 
     def send(self, endpoint: str, request: dict) -> dict:
-        url = "https://gti.geofox.de/gti/public/" + endpoint
-        request_body = json.dumps(request)
+        url = self.BASE_URL + endpoint
+        payload = {**self.default_params, **(request or {})}
+        request_body = json.dumps(payload)
         headers = {
             "Accept": "application/json",
             "geofox-auth-signature": self._get_signature(request_body),
@@ -66,4 +74,5 @@ class GtiClient:
             "Accept-Encoding": "gzip, deflate",
         }
         response = self.client.request("POST", url, headers=headers, data=request_body)
+        response.raise_for_status()
         return response.json()

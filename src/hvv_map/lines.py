@@ -13,7 +13,6 @@ from hvv_map.gti_client import GtiClient
 # U/S/AKN by name prefix (matches replacement buses too, e.g. "U1-ERSATZ",
 # "S3-SEV", via the trailing ".*"). Ferries by carrier instead of name, since
 # ferry line numbers alone aren't distinctive.
-#LINE_NAME_PATTERN = re.compile(r"^[USA][0-9]{1,2}.*$")
 LINE_NAME_PATTERN = re.compile(r"^(?:[USA][0-9]{1,2}|RB81).*$")
 FERRY_CARRIER = "HADAG"  # confirmed: the actual Hamburg harbour ferry operator
 
@@ -81,8 +80,6 @@ class LineInfo:
 def fetch_lines(client: GtiClient) -> list[LineInfo]:
     """Fetch the full current line catalog (all modes, all carriers)."""
     request = {
-        "language": "de",
-        "version": 63,
         "dataReleaseID": "",  # empty = fetch everything, not just changes
         "modificationTypes": ["MAIN"],
     }
@@ -137,8 +134,6 @@ def fetch_sublines(client: GtiClient) -> list[SublineInfo]:
     GTFS. StationLight only has id+name, no coordinates - resolve via
     stations.py separately."""
     request = {
-        "language": "de",
-        "version": 63,
         "dataReleaseID": "",
         "modificationTypes": ["MAIN"],
         "withSublines": True,

@@ -182,7 +182,6 @@ def _fetch_from_api(
         k for pair in keys for k in pair
     ]  # interleave start,end,start,end,...
     request = {
-        "version": 63,
         "coordinateType": "EPSG_4326",
         "stopPointKeys": stop_point_keys,
     }

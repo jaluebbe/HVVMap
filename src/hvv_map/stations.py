@@ -27,8 +27,6 @@ class StationInfo:
 def fetch_stations(client: GtiClient) -> list[StationInfo]:
     """Fetch the full current station catalog (all stations, all modes)."""
     request = {
-        "language": "de",
-        "version": 63,
         "dataReleaseID": "",  # empty = fetch everything, not just changes
         "modificationTypes": ["MAIN", "POSITION"],
         "coordinateType": "EPSG_4326",
