@@ -95,6 +95,7 @@ def _build_feature(
         },
     }
 
+
 def build_positions_geojson(vehiclemap_data: dict, now_ts: int | None = None) -> dict:
     """vehiclemap_data: the 'data' payload of the hvv:vehiclemap Redis entry
     (journeys already filtered and track-enriched by fetcher.py).
