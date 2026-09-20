@@ -22,6 +22,7 @@ from fastapi.staticfiles import StaticFiles
 
 from hvv_map.announcement_categories import classify_category
 from hvv_map.redis_client import get_redis_client
+from hvv_map.stations import by_id, load_stations
 
 mimetypes.add_type("text/javascript", ".cjs")
 
@@ -151,6 +152,8 @@ def get_vector_style(style_name: str, request: Request):
 
 _redis_client = get_redis_client()
 
+SUBLINES_REDIS_KEY = "hvv:sublines"
+
 
 def _read_cached_json(key: str) -> dict:
     raw = _redis_client.get(key)
@@ -160,6 +163,20 @@ def _read_cached_json(key: str) -> dict:
             detail=f"No data under Redis key '{key}' - is hvvmap-fetcher running?",
         )
     return json.loads(raw)["data"]
+
+
+def _read_sublines_cache() -> dict:
+    """hvv:sublines has its own payload shape (data_release_id alongside the
+    lines dict, no "data" wrapper) - kept separate from _read_cached_json
+    rather than forcing a shared shape on an unrelated cache."""
+    raw = _redis_client.get(SUBLINES_REDIS_KEY)
+    if raw is None:
+        raise HTTPException(
+            status_code=503,
+            detail=f"No data under Redis key '{SUBLINES_REDIS_KEY}' - "
+            "is hvvmap-fetcher running?",
+        )
+    return json.loads(raw)["lines"]
 
 
 @app.get("/api/hvv/live/positions.geojson", tags=["hvv_live"])
@@ -179,17 +196,14 @@ def get_live_disruptions():
 
 @app.get("/api/hvv/live/announcements.json", tags=["hvv_live"])
 def get_live_announcements():
-    """Raw getAnnouncements response, not GeoJSON - see hvv:disruptions for
-    the derived, map-ready version."""
+    """Raw HVV announcements, not GeoJSON."""
     return _read_cached_json("hvv:announcements")
 
 
 @app.get("/api/hvv/live/announcement-categories.json", tags=["hvv_live"])
 def get_announcement_categories():
     """Our own SPERRUNG/BARRIEREFREIHEIT/SONSTIGE classification per
-    announcement id - not an HVV API field, see announcement_categories.py.
-    Computed on request, not cached: classify_category() is cheap and pure,
-    no need to store a derived value the fetcher didn't write."""
+    announcement id - not an HVV API field."""
     announcements = _read_cached_json("hvv:announcements").get("announcements", [])
     return {a["id"]: classify_category(a) for a in announcements if "id" in a}
 
@@ -202,6 +216,41 @@ def get_live_stops():
 @app.get("/api/hvv/live/lines.geojson", tags=["hvv_live"])
 def get_live_lines():
     return _read_cached_json("hvv:reference_lines")
+
+
+@app.get("/api/hvv/live/lines.json", tags=["hvv_live"])
+def get_live_lines_catalog():
+    """Lines currently known, sorted by name."""
+    lines = _read_sublines_cache()
+    catalog = [
+        {"id": line_id, "name": entry["line_name"]} for line_id, entry in lines.items()
+    ]
+    catalog.sort(key=lambda line: line["name"])
+    return catalog
+
+
+@app.get("/api/hvv/live/sublines.json", tags=["hvv_live"])
+def get_live_sublines():
+    """All known sublines per line, with each stop's id and name."""
+    lines = _read_sublines_cache()
+    stations = by_id(load_stations(_redis_client))
+
+    result = {}
+    for line_id, entry in lines.items():
+        sublines = []
+        for sub in entry["sublines"]:
+            stops = [
+                {
+                    "id": stop["id"],
+                    "name": stations[stop["id"]].name
+                    if stop["id"] in stations
+                    else stop["name"],
+                }
+                for stop in sub["stations"]
+            ]
+            sublines.append({"vehicle_type": sub["vehicle_type"], "stations": stops})
+        result[line_id] = {"line_name": entry["line_name"], "sublines": sublines}
+    return result
 
 
 # --- GTFS layers -------------------------------------------------------------
