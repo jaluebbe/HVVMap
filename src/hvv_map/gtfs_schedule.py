@@ -51,6 +51,9 @@ ROUTE_TYPE_2_MODE_BY_SHORT_NAME = {
     "A2": "AKN",
     "A3": "AKN",
     "RB81": "R",
+    "RB71": "R",
+    "RB61": "R",
+    "RB60": "R",
 }
 
 # Replacement buses (route_type=3, normally excluded) shown grouped with the
@@ -63,6 +66,8 @@ SPECIAL_BUS_ROUTES = {
     "13071_3": "AKN",
     "11796_3": "AKN",  # A1-SEV, A2-SEV, A3-Bus
     "14476_3": "S",  # S5-SEV
+    "11710_3": "R",  # RB61-SEV
+    "14841_3": "R",  # RB71-SEV
 }
 
 

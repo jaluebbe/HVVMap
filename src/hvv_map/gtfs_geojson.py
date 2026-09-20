@@ -63,6 +63,9 @@ LINE_COLORS = {
     # route_color is blank for RB81 too - black by request, interim
     # solution ahead of the future S4.
     "RB81": "000000",
+    "RB61": "000000",
+    "RB60": "000000",
+    "RB71": "000000",
 }
 # geofox icon service lineKey format. GTFS route_short_name has no
 # equivalent field, so this mapping has to be maintained by hand - ported
@@ -94,6 +97,9 @@ LINE_ID_MAP = {
     "A3-Bus": "VHH:A3-Bus_VHH",
     "S5-SEV": "SBH:S5-SEV_SBH_SBAHNS",
     "RB81": "DB-EFZ:RB81_DB-EFZ_Z",
+    "RB71": "DB-EFZ:RB71_DB-EFZ_Z",
+    "RB61": "DB-EFZ:RB61_DB-EFZ_Z",
+    "RB60": "DB-EFZ:RB60_DB-EFZ_Z",
 }
 
 
@@ -138,9 +144,15 @@ def _build_point_feature(
     icon_key = LINE_ID_MAP.get(line_short_name)
     label = direction.split("(")[0].strip()
     if icon_key:
+        icon_url = f"https://cloud.geofox.de/icon/line?height={ICON_HEIGHT}&lineKey={icon_key}&fileFormat=SVG"
+        if mode == "R":
+            # R_BAHN's default icon renders plain black - poor contrast
+            # against a same-colored line. outlined=true adds a light
+            # border around it (matches geojson.py's live-source icons).
+            icon_url += "&outlined=true"
         properties = {
             "journeyID": journey_id,
-            "icon": f"https://cloud.geofox.de/icon/line?height={ICON_HEIGHT}&lineKey={icon_key}&fileFormat=SVG",
+            "icon": icon_url,
             "iconHeight": ICON_HEIGHT,
             "line": line_short_name,
             "label": label,
@@ -416,9 +428,10 @@ def build_lines_geojson(schedule: Schedule, reference_date: date | None = None) 
         if color_hex is None:
             continue
         entry = info_by_shape.setdefault(
-            shape_id, {"color": f"#{color_hex}", "modes": set()}
+            shape_id, {"color": f"#{color_hex}", "modes": set(), "lines": set()}
         )
         entry["modes"].add(mode)
+        entry["lines"].add(route["route_short_name"])
 
     features = []
     for shape_id, info in info_by_shape.items():
@@ -432,7 +445,11 @@ def build_lines_geojson(schedule: Schedule, reference_date: date | None = None) 
                     "type": "LineString",
                     "coordinates": [list(c) for c in coords],
                 },
-                "properties": {"color": info["color"], "modes": sorted(info["modes"])},
+                "properties": {
+                    "color": info["color"],
+                    "modes": sorted(info["modes"]),
+                    "lines": sorted(info["lines"]),
+                },
             }
         )
     return {"type": "FeatureCollection", "features": features}
