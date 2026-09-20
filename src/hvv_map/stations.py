@@ -3,13 +3,18 @@
 Used to resolve station IDs (from announcement locations) to coordinates.
 """
 
+from __future__ import annotations
+
 import json
 import time
 from dataclasses import asdict, dataclass
+from typing import TYPE_CHECKING
 
 import redis
 
-from hvv_map.gti_client import GtiClient
+if TYPE_CHECKING:
+    # Type-only: avoids pulling gti_client's requests dependency into api.py.
+    from hvv_map.gti_client import GtiClient
 
 REDIS_KEY = "hvv:stations"
 REDIS_TTL = 7 * 24 * 60 * 60  # 7 days - station catalog changes rarely
@@ -75,6 +80,7 @@ def load_stations(redis_client: redis.Redis) -> list[StationInfo]:
 
 def main() -> None:
     """CLI: fetch all stations and store them in Redis."""
+    from hvv_map.gti_client import GtiClient
     from hvv_map.redis_client import get_redis_client
 
     client = GtiClient()
