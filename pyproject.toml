@@ -22,6 +22,7 @@ dev = ["pytest", "ruff", "httpx2"]
 [project.scripts]
 hvvmap-fetcher = "hvv_map.fetcher:main"
 hvvmap-lines = "hvv_map.lines:main"
+hvvmap-sublines-cache-update = "hvv_map.lines:update_sublines_cache_main"
 hvvmap-stations = "hvv_map.stations:main"
 hvvmap-reference = "hvv_map.reference_geojson:main"
 hvvmap-fetch-announcements = "hvv_map.fetcher:fetch_once_announcements"
