@@ -58,10 +58,12 @@ function fixIOSResize() {
 window.addEventListener('orientationchange', fixIOSResize);
 window.addEventListener('resize', fixIOSResize);
 
-// Toggle visibility of vehicle destination labels.
+// Toggle visibility of vehicle destination labels. Shown by default, so the
+// button starts in its active state (same convention as WakeLockControl).
 class LabelToggleControl {
     onAdd(mapInstance) {
         this._map = mapInstance;
+        this._labelsVisible = true;
         const container = document.createElement('div');
         container.className = 'maplibregl-ctrl maplibregl-ctrl-group';
         const button = document.createElement('button');
@@ -69,8 +71,11 @@ class LabelToggleControl {
         button.title = 'Ziel-Labels ein-/ausblenden';
         button.style.fontSize = '16px';
         button.textContent = '🏷️';
-        button.addEventListener('click', function() {
+        button.classList.add('hvv-toggle-active');
+        button.addEventListener('click', () => {
+            this._labelsVisible = !this._labelsVisible;
             mapInstance.getContainer().classList.toggle('hvv-labels-hidden');
+            button.classList.toggle('hvv-toggle-active', this._labelsVisible);
         });
         container.appendChild(button);
         this._container = container;
@@ -143,7 +148,7 @@ class WakeLockControl {
     }
 
     _setButtonActive(active) {
-        this._button.classList.toggle('hvv-wakelock-active', active);
+        this._button.classList.toggle('hvv-toggle-active', active);
         this._button.title = active
             ? 'Bildschirm wach halten (aktiv) - klicken zum Beenden'
             : 'Bildschirm wach halten';
