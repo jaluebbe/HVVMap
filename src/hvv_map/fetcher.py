@@ -16,8 +16,12 @@ endpoint pair (see api.py).
 
 hvv:reference_stops/hvv:reference_lines are rebuilt periodically here
 (every REFERENCE_REBUILD_INTERVAL), replacing a vehicle-map cycle, since
-segment_cache keeps growing between rebuilds. The rebuild needs two API
-calls (listLines, listStations), split across two consecutive cycles.
+segment_cache keeps growing between rebuilds. Sublines come from the
+hvv:sublines cache (not read by the running map itself, see hvv_map.lines)
+rather than a fresh listLines call, so the rebuild needs only one API call
+(listStations). hvv:sublines is kept fresh separately on its own
+SUBLINES_CACHE_INTERVAL - a single incremental listLines call once a
+previous dataReleaseID is cached.
 """
 
 import json
@@ -32,7 +36,8 @@ from hvv_map.gti_client import GtiClient
 from hvv_map.lines import (
     ANNOUNCEMENT_FILTER_NAMES,
     REPLACEMENT_BUS_MODES,
-    fetch_sublines,
+    sublines_from_cache,
+    update_sublines_cache,
 )
 from hvv_map.redis_client import get_redis_client
 from hvv_map.reference_geojson import finish_reference_rebuild
@@ -48,6 +53,8 @@ VEHICLE_MAP_INTERVAL = 1.0  # seconds between loop cycles (positions rebuild rat
 VEHICLE_MAP_FETCH_INTERVAL = 5.0  # seconds between actual getVehicleMap API calls
 ANNOUNCEMENTS_INTERVAL = 600.0  # seconds between getAnnouncements calls (10 min)
 REFERENCE_REBUILD_INTERVAL = 1800.0  # seconds between reference layer rebuilds (30 min)
+SUBLINES_CACHE_INTERVAL = 600.0  # seconds between hvv:sublines updates (10 min) -
+# cheap once incremental, so it can run more often than the full reference rebuild
 VEHICLE_MAP_TTL = 10  # seconds - stale data expires fast if fetcher dies
 ANNOUNCEMENTS_TTL = 7200  # seconds - generous headroom above refresh interval
 
@@ -59,7 +66,7 @@ VEHICLE_TYPES = ["U_BAHN", "S_BAHN", "A_BAHN", "SCHIFF", "REGIONALBUS", "R_BAHN"
 PRE_DEPARTURE_SECONDS = 60  # how early before a first departure a vehicle appears
 POST_ARRIVAL_SECONDS = 30  # how long after a last arrival a vehicle stays visible
 BOUNDING_BOX = {
-    "lowerLeft": {"x": 9.45, "y": 53.43, "type": "EPSG_4326"},
+    "lowerLeft": {"x": 9.40, "y": 53.43, "type": "EPSG_4326"},
     "upperRight": {"x": 10.4, "y": 54.08, "type": "EPSG_4326"},
 }
 
@@ -83,9 +90,8 @@ def _store(key: str, data: dict, ttl: int, publish: bool = False) -> None:
 
 
 # R_BAHN covers every DB regional train passing through the bounding box,
-# not just ours - RB81 is a deliberate exception (interim solution ahead of
-# the future S4), so it needs the same name-based whitelist REGIONALBUS gets.
-WANTED_R_BAHN_LINES = {"RB81"}
+# not just ours, so it needs the same name-based whitelist REGIONALBUS gets.
+WANTED_R_BAHN_LINES = {"RB81", "RB71", "RB61", "RB60"}
 
 
 def _is_wanted(journey: dict) -> bool:
@@ -155,11 +161,7 @@ def fetch_vehicle_map(ttl: int = VEHICLE_MAP_TTL, realtime: bool = True) -> None
 
 def _rebuild_positions(ttl: int = VEHICLE_MAP_TTL) -> None:
     """Re-interpolate hvv:positions from the last fetched no_realtime
-    response with a fresh timestamp - no API call, just math. A segment's
-    start/endDateTime don't change between fetches, so re-running the same
-    interpolation against an up-to-date timestamp advances each marker
-    smoothly even while the underlying data itself refreshes less often.
-    """
+    response with a fresh timestamp - no API call, just math."""
     if _last_no_realtime_response is None:
         return
     now = int(time.time())
@@ -172,8 +174,8 @@ def _rebuild_positions(ttl: int = VEHICLE_MAP_TTL) -> None:
 
 
 def _rebuild_positions_realtime(ttl: int = VEHICLE_MAP_TTL) -> None:
-    """Same idea as _rebuild_positions(), but from the realtime variant -
-    powers the separate /api/hvv/realtime/positions.geojson endpoint, whose
+    """Same as _rebuild_positions(), but from the realtime variant - powers
+    the separate /api/hvv/realtime/positions.geojson endpoint, whose
     positions move as delay estimates change rather than along the fixed
     schedule."""
     if _last_realtime_response is None:
@@ -236,7 +238,7 @@ def main() -> None:
     last_announcements_fetch = 0.0
     last_reference_rebuild = 0.0
     last_vehicle_map_fetch = 0.0
-    pending_reference_sublines = None  # holds fetch_sublines() result across one cycle
+    last_sublines_cache_update = 0.0
     realtime_toggle = True
     while True:
         cycle_start = time.time()
@@ -244,17 +246,17 @@ def main() -> None:
             if cycle_start - last_announcements_fetch >= ANNOUNCEMENTS_INTERVAL:
                 fetch_announcements()
                 last_announcements_fetch = cycle_start
-            elif pending_reference_sublines is not None:
-                # Second half, one cycle after fetch_sublines() below - its
-                # own API call (listStations), kept out of the same second.
-                finish_reference_rebuild(
-                    gti, redis_client, segment_cache_conn, pending_reference_sublines
-                )
-                pending_reference_sublines = None
-                last_reference_rebuild = cycle_start
             elif cycle_start - last_reference_rebuild >= REFERENCE_REBUILD_INTERVAL:
-                # First half: just listLines, finished next cycle above.
-                pending_reference_sublines = fetch_sublines(gti)
+                # Sublines from the hvv:sublines cache, not a fresh listLines
+                # call - one API call (listStations) this cycle.
+                sublines = sublines_from_cache(gti, redis_client)
+                finish_reference_rebuild(
+                    gti, redis_client, segment_cache_conn, sublines
+                )
+                last_reference_rebuild = cycle_start
+            elif cycle_start - last_sublines_cache_update >= SUBLINES_CACHE_INTERVAL:
+                update_sublines_cache(gti, redis_client)
+                last_sublines_cache_update = cycle_start
             elif cycle_start - last_vehicle_map_fetch >= VEHICLE_MAP_FETCH_INTERVAL:
                 fetch_vehicle_map(realtime=realtime_toggle)
                 realtime_toggle = not realtime_toggle
