@@ -7,8 +7,13 @@ from hvv_map.lines import (
     fetch_sublines,
     is_line_of_interest,
     lines_of_interest,
+    load_sublines_cache,
+    replacement_bus_mode,
     simple_types_used,
+    store_sublines_cache,
+    update_sublines_cache,
 )
+from hvv_map.redis_client import get_redis_client
 
 FAKE_RESPONSE = {
     "lines": [
@@ -85,6 +90,22 @@ def test_is_line_of_interest_excludes_unrelated_lines():
     for name in ["1", "20", "RE7", "Metrobus 5", ""]:
         line = LineInfo(id="x", name=name, carrier_short="VHH", simple_type="BUS")
         assert not is_line_of_interest(line)
+
+
+def test_replacement_bus_mode_by_prefix():
+    cases = {
+        "U1-ERSATZ": "U", "U1-DIREKT": "U",
+        "S1-SEV": "S", "S2-SEV": "S", "S3-SEV": "S", "S5-SEV": "S", "S7-SEV": "S",
+        "A1-SEV": "AKN", "A2-SEV": "AKN", "A3-Bus": "AKN",
+        "RB60-SEV": "R", "RB61-SEV": "R", "RB71-SEV": "R", "RB81-SEV": "R",
+    }  # fmt: skip
+    for name, expected_mode in cases.items():
+        assert replacement_bus_mode(name) == expected_mode
+
+
+def test_replacement_bus_mode_unrelated_name_returns_empty():
+    for name in ["175", "Metrobus 5", ""]:
+        assert replacement_bus_mode(name) == ""
 
 
 def test_lines_of_interest_filters_the_full_list():
@@ -172,3 +193,48 @@ def test_fetch_sublines_sends_with_sublines_flag():
     fetch_sublines(client)
     request = client.send.call_args[0][1]
     assert request["withSublines"] is True
+
+
+S1_ENTRY = {
+    "id": "SBH:S1_SBH_SBAHNS",
+    "name": "S1",
+    "carrierNameShort": "S-Bahn Hamburg",
+    "type": {"simpleType": "S_BAHN"},
+    "sublines": [
+        {
+            "sublineNumber": "1",
+            "vehicleType": "S_BAHN",
+            "stationSequence": [
+                {"id": "Master:1", "name": "Wedel"},
+                {"id": "Master:2", "name": "Poppenbüttel"},
+            ],
+        }
+    ],
+}
+
+
+def _client_returning(*responses):
+    client = MagicMock()
+    client.send.side_effect = responses
+    return client
+
+
+def test_update_sublines_cache_ignores_stale_stored_state():
+    """Must not build on top of stale/corrupt stored state - always starts
+    from nothing and sends an empty dataReleaseID, same as a first-ever
+    fetch."""
+    redis_client = get_redis_client()
+    redis_client.delete("hvv:sublines")
+    # Simulate the corrupted state: S1 already missing, stale release id.
+    store_sublines_cache(redis_client, "stale-release-id", {})
+
+    client = _client_returning({"dataReleaseID": "new-id", "lines": [S1_ENTRY]})
+    merged = update_sublines_cache(client, redis_client)
+
+    assert "SBH:S1_SBH_SBAHNS" in merged
+    request = client.send.call_args[0][1]
+    assert request["dataReleaseID"] == ""  # not "stale-release-id"
+
+    release_id, stored = load_sublines_cache(redis_client)
+    assert release_id == "new-id"
+    assert "SBH:S1_SBH_SBAHNS" in stored

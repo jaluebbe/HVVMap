@@ -43,17 +43,25 @@ BASE_LINE_NAMES = [
 ]
 ANNOUNCEMENT_FILTER_NAMES = BASE_LINE_NAMES + [FERRY_CARRIER]
 
-# Replacement-bus lineKeys and which mode they stand in for.
-REPLACEMENT_BUS_MODES = {
-    "HHA-B:U1-ERSATZ_HHA-B": "U",
-    "HHA-B:U1-DIREKT_HHA-B": "U",
-    "DB-EFZ:A1-SEV_DB-EFZ_Z": "AKN",
-    "DB-EFZ:A2-SEV_DB-EFZ_Z": "AKN",
-    "VHH:A3-Bus_VHH": "AKN",
-    "SBH:S3-SEV_SBH_SBAHNS": "S",
-    "SBH:S5-SEV_SBH_SBAHNS": "S",
-    "SBH:S7-SEV_SBH_SBAHNS": "S",
-}
+# R_BAHN covers every DB regional train passing through the bounding box, not
+# just ours - filtered client-side by name wherever R_BAHN is requested.
+WANTED_R_BAHN_LINES = {"RB81", "RB71", "RB61", "RB60"}
+
+# Which original mode a REGIONALBUS-type line stands in for, derived from
+# its name's U/S/A prefix - same convention as LINE_NAME_PATTERN.
+_REPLACEMENT_BUS_MODE_BY_PREFIX = {"U": "U", "S": "S", "A": "AKN"}
+_REPLACEMENT_BUS_NAME_PREFIX = re.compile(r"^([USA])[0-9]{1,2}")
+
+
+def replacement_bus_mode(name: str) -> str:
+    """Mode for a U/S/A- or RB-prefixed replacement-bus name, e.g.
+    "S1-SEV" -> "S", "RB61-SEV" -> "R". "" if name matches neither."""
+    match = _REPLACEMENT_BUS_NAME_PREFIX.match(name)
+    if match:
+        return _REPLACEMENT_BUS_MODE_BY_PREFIX[match.group(1)]
+    if any(name.startswith(rb) for rb in WANTED_R_BAHN_LINES):
+        return "R"
+    return ""
 
 # Official HVV line colors, by name - used for the reference lines layer.
 # Replacement buses share one red across the board.
@@ -65,7 +73,8 @@ LINE_COLORS = {
     "68": "009DD1", "72": "009DD1", "73": "009DD1", "75": "009DD1",
     "U1-DIREKT": "E2001A", "U1-ERSATZ": "E2001A",
     "A1-SEV": "E2001A", "A2-SEV": "E2001A", "A3-Bus": "E2001A",
-    "S3-SEV": "E2001A", "S5-SEV": "E2001A", "S7-SEV": "E2001A",
+    "S1-SEV": "E2001A", "S2-SEV": "E2001A", "S3-SEV": "E2001A", "S5-SEV": "E2001A", "S7-SEV": "E2001A",
+    "RB60-SEV": "E2001A", "RB61-SEV": "E2001A", "RB71-SEV": "E2001A", "RB81-SEV": "E2001A",
     "RB81": "000000",
     "RB71": "000000",
     "RB61": "000000",
@@ -168,47 +177,26 @@ def fetch_sublines(client: GtiClient) -> list[SublineInfo]:
     return sublines
 
 
-# Persistent, incrementally-updated sublines cache, one Redis key. Uses
-# listLines' dataReleaseID + modificationTypes ["MAIN", "SEQUENCE"] to fetch
-# only changed lines after the first full fetch; deleted lines arrive as
-# {id, exists: false}. Merging happens at line-id granularity. The
-# (line_name, start, end) -> variants index is derived from this on read,
-# not stored separately.
+# Persisted sublines cache, one Redis key, rebuilt from scratch on every
+# update (see update_sublines_cache). The (line_name, start, end) -> variants
+# index is derived from this on read, not stored separately.
 
 REDIS_SUBLINES_KEY = "hvv:sublines"
 REDIS_SUBLINES_TTL = 7 * 24 * 60 * 60  # line topology changes rarely
 
 
-def fetch_sublines_incremental(
-    client: GtiClient, previous_release_id: str | None
-) -> tuple[str, list[dict]]:
-    """Raw listLines(withSublines=True) call, incremental if
-    previous_release_id is given. Returns (new_data_release_id,
-    changed_line_entries) - entries are the raw API dicts (id, name, exists,
-    type, sublines), unfiltered by is_line_of_interest."""
-    request = {
-        "dataReleaseID": previous_release_id or "",
-        "modificationTypes": ["MAIN", "SEQUENCE"],
-        "withSublines": True,
-    }
-    response = client.send("listLines", request)
-    return response.get("dataReleaseID", ""), response.get("lines", [])
-
-
-def merge_sublines(stored: dict, changed_lines: list[dict]) -> dict:
-    """Apply changed/deleted line entries onto the stored {line_id: {...}}
-    dict in place, dropping lines no longer of interest. Returns stored.
+def _sublines_by_line_id(line_entries: list[dict]) -> dict:
+    """Build the persisted {line_id: {...}} dict from raw listLines entries,
+    keeping only lines of interest.
 
     Each station carries both id and name, straight from listLines' own
     StationLight - hvv:stations is the primary name source elsewhere, but
     some stations (e.g. synthetic/combined destinations) never appear
     there."""
-    for entry in changed_lines:
+    result = {}
+    for entry in line_entries:
         line_id = entry.get("id", "")
         if not line_id:
-            continue
-        if not entry.get("exists", True):
-            stored.pop(line_id, None)
             continue
         service_type = entry.get("type") or {}
         line = LineInfo(
@@ -218,7 +206,6 @@ def merge_sublines(stored: dict, changed_lines: list[dict]) -> dict:
             simple_type=service_type.get("simpleType", ""),
         )
         if not is_line_of_interest(line):
-            stored.pop(line_id, None)
             continue
         sublines = [
             {
@@ -230,8 +217,8 @@ def merge_sublines(stored: dict, changed_lines: list[dict]) -> dict:
             }
             for sub in entry.get("sublines", [])
         ]
-        stored[line_id] = {"line_name": line.name, "sublines": sublines}
-    return stored
+        result[line_id] = {"line_name": line.name, "sublines": sublines}
+    return result
 
 
 def load_sublines_cache(redis_client: redis.Redis) -> tuple[str | None, dict]:
@@ -256,13 +243,12 @@ def store_sublines_cache(
 
 
 def update_sublines_cache(client: GtiClient, redis_client: redis.Redis) -> dict:
-    """Fetch (incrementally if a previous dataReleaseID is cached) and merge
-    into the persisted sublines cache in Redis. Returns the merged
-    {line_id: {...}} dict."""
-    previous_release_id, stored = load_sublines_cache(redis_client)
-    new_release_id, changed = fetch_sublines_incremental(client, previous_release_id)
-    merged = merge_sublines(stored, changed)
-    store_sublines_cache(redis_client, new_release_id, merged)
+    """Full listLines fetch, replacing the persisted sublines cache in
+    Redis. Returns the {line_id: {...}} dict."""
+    request = {"dataReleaseID": "", "modificationTypes": ["MAIN"], "withSublines": True}
+    response = client.send("listLines", request)
+    merged = _sublines_by_line_id(response.get("lines", []))
+    store_sublines_cache(redis_client, response.get("dataReleaseID", ""), merged)
     return merged
 
 
@@ -328,19 +314,14 @@ def main() -> None:
 
 
 def update_sublines_cache_main() -> None:
-    """CLI: update the persisted hvv:sublines cache in Redis, incrementally
-    when possible. Same as the fetcher's own periodic update - see
-    fetcher.py."""
+    """CLI: update the persisted hvv:sublines cache in Redis. Same as the
+    fetcher's own periodic update - see fetcher.py."""
     from hvv_map.redis_client import get_redis_client
 
     client = GtiClient()
     redis_client = get_redis_client()
-    previous_release_id, _ = load_sublines_cache(redis_client)
     merged = update_sublines_cache(client, redis_client)
-    mode = "incremental" if previous_release_id else "full"
-    print(
-        f"{mode} update: {len(merged)} lines of interest cached ({REDIS_SUBLINES_KEY})"
-    )
+    print(f"{len(merged)} lines of interest cached ({REDIS_SUBLINES_KEY})")
 
 
 if __name__ == "__main__":
