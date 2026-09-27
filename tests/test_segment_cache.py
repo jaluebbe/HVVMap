@@ -28,6 +28,29 @@ def test_get_cached_returns_none_when_missing(conn):
     assert sc.get_cached(conn, ("X", "Y")) is None
 
 
+def test_open_cache_warns_when_creating_new_relative_db(tmp_path, monkeypatch, capsys):
+    """Reproduces the observed footgun: running a CLI from the wrong
+    directory silently creates a fresh, empty cache instead of opening the
+    real one. A relative path that doesn't exist yet must warn."""
+    monkeypatch.chdir(tmp_path)
+    conn = sc.open_cache("segment_cache.db")
+    conn.close()
+    assert "creating a NEW, EMPTY cache" in capsys.readouterr().err
+
+
+def test_open_cache_no_warning_for_existing_relative_db(tmp_path, monkeypatch, capsys):
+    monkeypatch.chdir(tmp_path)
+    sc.open_cache("segment_cache.db").close()
+    capsys.readouterr()  # discard the first-creation warning
+    sc.open_cache("segment_cache.db").close()
+    assert capsys.readouterr().err == ""
+
+
+def test_open_cache_no_warning_for_absolute_path(tmp_path, capsys):
+    sc.open_cache(str(tmp_path / "new_cache.db")).close()
+    assert capsys.readouterr().err == ""
+
+
 def test_all_cache_misses_batched_into_one_call(conn):
     client = _client_with(
         {

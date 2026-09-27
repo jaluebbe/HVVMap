@@ -9,6 +9,7 @@ written back, so repeat lookups are free.
 import json
 import os
 import sqlite3
+import sys
 import time
 
 from hvv_map.gti_client import GtiClient
@@ -25,6 +26,18 @@ SegmentKey = tuple[str, str]  # (start_stop_point_key, end_stop_point_key)
 
 
 def open_cache(db_path: str = DEFAULT_DB_PATH) -> sqlite3.Connection:
+    # DEFAULT_DB_PATH is relative unless SEGMENT_CACHE_PATH is set, so a run
+    # from the wrong working directory silently gets a brand-new, empty
+    # cache instead of the real one - sqlite3.connect() just creates it,
+    # no error. Warn loudly whenever that's about to happen.
+    if not os.path.isabs(db_path) and not os.path.exists(db_path):
+        print(
+            f"[hvv_map.segment_cache] warning: {db_path!r} does not exist yet "
+            f"in {os.getcwd()!r} - creating a NEW, EMPTY cache there. If you "
+            "expected the existing one, run this from the right directory "
+            "or set SEGMENT_CACHE_PATH to its absolute path.",
+            file=sys.stderr,
+        )
     conn = sqlite3.connect(db_path)
     conn.execute(
         "CREATE TABLE IF NOT EXISTS segment_cache ("
