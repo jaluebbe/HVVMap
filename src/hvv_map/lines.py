@@ -77,6 +77,7 @@ def replacement_bus_mode(name: str) -> str:
         return "R"
     return ""
 
+
 # Official HVV line colors, by name - used for the reference lines layer.
 # Replacement buses share one red across the board.
 LINE_COLORS = {

@@ -109,9 +109,7 @@ def build_disruptions_geojson(
         cleaned = [
             {
                 **m,
-                "summary": _strip_redundant_prefix(
-                    m["summary"], station.combined_name
-                ),
+                "summary": _strip_redundant_prefix(m["summary"], station.combined_name),
             }
             for m in entry["messages"]
         ]

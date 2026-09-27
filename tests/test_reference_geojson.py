@@ -11,15 +11,27 @@ from hvv_map.stations import StationInfo
 
 STATIONS = {
     "Master:1": StationInfo(
-        id="Master:1", name="Ohlstedt", city="Hamburg", lon=10.1, lat=53.7,
+        id="Master:1",
+        name="Ohlstedt",
+        city="Hamburg",
+        lon=10.1,
+        lat=53.7,
         combined_name="Ohlstedt",
     ),  # fmt: skip
     "Master:2": StationInfo(
-        id="Master:2", name="Volksdorf", city="Hamburg", lon=10.15, lat=53.68,
+        id="Master:2",
+        name="Volksdorf",
+        city="Hamburg",
+        lon=10.15,
+        lat=53.68,
         combined_name="Volksdorf",
     ),  # fmt: skip
     "SCM:9058093": StationInfo(
-        id="SCM:9058093", name="IKEA", city="Lübeck", lon=10.7, lat=53.9,
+        id="SCM:9058093",
+        name="IKEA",
+        city="Lübeck",
+        lon=10.7,
+        lat=53.9,
         combined_name="Lübeck-Dänischburg IKEA",
     ),  # fmt: skip
 }

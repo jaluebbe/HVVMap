@@ -8,15 +8,27 @@ NOW = datetime(2026, 9, 2, 12, 0, tzinfo=timezone.utc)
 
 STATIONS = {
     "Master:1": StationInfo(
-        id="Master:1", name="Lattenkamp", city="Hamburg", lon=10.0, lat=53.6,
+        id="Master:1",
+        name="Lattenkamp",
+        city="Hamburg",
+        lon=10.0,
+        lat=53.6,
         combined_name="Lattenkamp",
     ),  # fmt: skip
     "Master:2": StationInfo(
-        id="Master:2", name="Fuhlsbüttel Nord", city="Hamburg", lon=10.01, lat=53.65,
+        id="Master:2",
+        name="Fuhlsbüttel Nord",
+        city="Hamburg",
+        lon=10.01,
+        lat=53.65,
         combined_name="Fuhlsbüttel Nord",
     ),  # fmt: skip
     "SCM:9057819": StationInfo(
-        id="SCM:9057819", name="Hbf", city="Lübeck", lon=10.67, lat=53.87,
+        id="SCM:9057819",
+        name="Hbf",
+        city="Lübeck",
+        lon=10.67,
+        lat=53.87,
         combined_name="Lübeck Hbf",
     ),  # fmt: skip
 }
