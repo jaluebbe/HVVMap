@@ -27,6 +27,11 @@ class StationInfo:
     city: str
     lon: float
     lat: float
+    # listStations' own combined display name (e.g. "Lübeck-Dänischburg IKEA"
+    # for name="IKEA", city="Lübeck") - matches the naming getVehicleMap uses
+    # in startStationName/endStationName, unlike name/city split above.
+    # Falls back to name if listStations doesn't provide one.
+    combined_name: str = ""
 
 
 def fetch_stations(client: GtiClient) -> list[StationInfo]:
@@ -48,13 +53,15 @@ def fetch_stations(client: GtiClient) -> list[StationInfo]:
         coordinate = entry.get("coordinate") or {}
         if "x" not in coordinate or "y" not in coordinate:
             continue  # deleted/incomplete entries have no coordinate
+        name = entry.get("name", "")
         stations.append(
             StationInfo(
                 id=entry.get("id", ""),
-                name=entry.get("name", ""),
+                name=name,
                 city=entry.get("city", ""),
                 lon=coordinate["x"],
                 lat=coordinate["y"],
+                combined_name=entry.get("combinedName") or name,
             )
         )
     return stations

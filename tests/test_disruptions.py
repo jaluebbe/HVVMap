@@ -8,11 +8,17 @@ NOW = datetime(2026, 9, 2, 12, 0, tzinfo=timezone.utc)
 
 STATIONS = {
     "Master:1": StationInfo(
-        id="Master:1", name="Lattenkamp", city="Hamburg", lon=10.0, lat=53.6
-    ),
+        id="Master:1", name="Lattenkamp", city="Hamburg", lon=10.0, lat=53.6,
+        combined_name="Lattenkamp",
+    ),  # fmt: skip
     "Master:2": StationInfo(
-        id="Master:2", name="Fuhlsbüttel Nord", city="Hamburg", lon=10.01, lat=53.65
-    ),
+        id="Master:2", name="Fuhlsbüttel Nord", city="Hamburg", lon=10.01, lat=53.65,
+        combined_name="Fuhlsbüttel Nord",
+    ),  # fmt: skip
+    "SCM:9057819": StationInfo(
+        id="SCM:9057819", name="Hbf", city="Lübeck", lon=10.67, lat=53.87,
+        combined_name="Lübeck Hbf",
+    ),  # fmt: skip
 }
 
 
@@ -61,6 +67,38 @@ def test_build_disruptions_geojson_sets_mode_from_line():
     }
     feature = build_disruptions_geojson(data, STATIONS, now=NOW)["features"][0]
     assert feature["properties"]["modes"] == ["U"]
+
+
+def test_build_disruptions_geojson_labels_with_combined_name():
+    # Regression: listStations splits some stations into name="Hbf",
+    # city="Lübeck" - the popup heading and station_name property must use
+    # the recombined combined_name ("Lübeck Hbf"), not the bare name.
+    data = {
+        "announcements": [
+            _announcement("Verspätungen", "", "SCM:9057819", "SCM:9057819"),
+        ]
+    }
+    feature = build_disruptions_geojson(data, STATIONS, now=NOW)["features"][0]
+    assert feature["properties"]["station_name"] == "Lübeck Hbf"
+    assert feature["properties"]["text"].startswith("Lübeck Hbf:")
+
+
+def test_build_disruptions_geojson_strips_redundant_prefix_using_combined_name():
+    # A summary already prefixed with the FULL combined name (as real
+    # announcement text does) must not be duplicated - stripping against
+    # the bare "Hbf" alone wouldn't match this prefix at all.
+    data = {
+        "announcements": [
+            _announcement(
+                "Lübeck Hbf: Verspätungen im Zugverkehr",
+                "",
+                "SCM:9057819",
+                "SCM:9057819",
+            )
+        ]
+    }
+    feature = build_disruptions_geojson(data, STATIONS, now=NOW)["features"][0]
+    assert feature["properties"]["text"] == "Lübeck Hbf:<br>Verspätungen im Zugverkehr"
 
 
 def test_build_disruptions_geojson_strips_redundant_station_prefix():

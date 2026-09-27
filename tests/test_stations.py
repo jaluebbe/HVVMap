@@ -18,6 +18,13 @@ FAKE_RESPONSE = {
             "coordinate": {"x": 9.9, "y": 53.5},
         },
         {"id": "Master:19072", "exists": False},  # deleted entry, no coordinate
+        {
+            "id": "SCM:9058093",
+            "name": "IKEA",
+            "city": "Lübeck",
+            "combinedName": "Lübeck-Dänischburg IKEA",
+            "coordinate": {"x": 10.7, "y": 53.9},
+        },
     ]
 }
 
@@ -30,20 +37,26 @@ def _client_with(response):
 
 def test_fetch_stations_parses_fields():
     stations = fetch_stations(_client_with(FAKE_RESPONSE))
-    assert stations == [
-        StationInfo(
-            id="Master:52982",
-            name="Neumühlen/Övelgönne",
-            city="Hamburg",
-            lon=9.9,
-            lat=53.5,
-        )
-    ]
+    assert stations[0] == StationInfo(
+        id="Master:52982",
+        name="Neumühlen/Övelgönne",
+        city="Hamburg",
+        lon=9.9,
+        lat=53.5,
+        combined_name="Neumühlen/Övelgönne",  # falls back to name, no combinedName given
+    )
+
+
+def test_fetch_stations_uses_combined_name_when_present():
+    stations = fetch_stations(_client_with(FAKE_RESPONSE))
+    ikea = next(s for s in stations if s.id == "SCM:9058093")
+    assert ikea.name == "IKEA"
+    assert ikea.combined_name == "Lübeck-Dänischburg IKEA"
 
 
 def test_fetch_stations_skips_entries_without_coordinate():
     stations = fetch_stations(_client_with(FAKE_RESPONSE))
-    assert len(stations) == 1  # the deleted entry is dropped
+    assert len(stations) == 2  # the deleted entry is dropped
 
 
 def test_fetch_stations_sends_empty_data_release_id():

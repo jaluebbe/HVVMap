@@ -58,7 +58,9 @@ def _location_mode(location: dict) -> str:
 
 def _strip_redundant_prefix(summary: str, station_name: str) -> str:
     """Some summaries already start with 'StationName: ...' - avoid it
-    appearing twice once we prepend our own station-name heading."""
+    appearing twice once we prepend our own station-name heading. Pass
+    combined_name, not name: announcement text uses the full human-readable
+    station name (e.g. "Lübeck Hbf"), not listStations' name/city split."""
     prefix = f"{station_name}:"
     if summary.lower().startswith(prefix.lower()):
         return summary[len(prefix) :].strip()
@@ -105,10 +107,17 @@ def build_disruptions_geojson(
         if station is None:
             continue
         cleaned = [
-            {**m, "summary": _strip_redundant_prefix(m["summary"], station.name)}
+            {
+                **m,
+                "summary": _strip_redundant_prefix(
+                    m["summary"], station.combined_name
+                ),
+            }
             for m in entry["messages"]
         ]
-        text = f"{station.name}:<br>" + "<br><br>".join(m["summary"] for m in cleaned)
+        text = f"{station.combined_name}:<br>" + "<br><br>".join(
+            m["summary"] for m in cleaned
+        )
         features.append(
             {
                 "type": "Feature",
@@ -121,7 +130,7 @@ def build_disruptions_geojson(
                     "fill": True,
                     "markerRadius": MARKER_RADIUS,
                     "text": text,
-                    "station_name": station.name,
+                    "station_name": station.combined_name,
                     "category": category,
                     "modes": sorted(entry["modes"]),
                     "message_count": len(cleaned),
