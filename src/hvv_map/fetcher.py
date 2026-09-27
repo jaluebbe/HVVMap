@@ -58,7 +58,14 @@ SUBLINES_CACHE_INTERVAL = 3600.0  # seconds between hvv:sublines updates (1h) -
 VEHICLE_MAP_TTL = 10  # seconds - stale data expires fast if fetcher dies
 ANNOUNCEMENTS_TTL = 7200  # seconds - generous headroom above refresh interval
 
-VEHICLE_TYPES = ["U_BAHN", "S_BAHN", "A_BAHN", "SCHIFF", "REGIONALBUS", "R_BAHN"]
+VEHICLE_TYPES = [
+    "U_BAHN",
+    "S_BAHN",
+    "A_BAHN",
+    "SCHIFF",
+    "REGIONALBUS",
+    "R_BAHN",
+]
 # Wide window, not just now..now+10: a journey's full segment chain arrives
 # in one response, giving _select_segment() something to pick from even
 # during a station dwell. Narrow windows would only catch a single segment
@@ -67,7 +74,7 @@ PRE_DEPARTURE_SECONDS = 60  # how early before a first departure a vehicle appea
 POST_ARRIVAL_SECONDS = 30  # how long after a last arrival a vehicle stays visible
 BOUNDING_BOX = {
     "lowerLeft": {"x": 9.40, "y": 53.43, "type": "EPSG_4326"},
-    "upperRight": {"x": 10.4, "y": 54.08, "type": "EPSG_4326"},
+    "upperRight": {"x": 10.88, "y": 54.08, "type": "EPSG_4326"},
 }
 
 # getVehicleMap has no line-name filter (unlike getAnnouncements' "names"),
