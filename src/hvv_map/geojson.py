@@ -4,7 +4,7 @@ getVehicleMap response (already filtered and track-enriched, see fetcher.py).
 
 import time
 
-from hvv_map.lines import REPLACEMENT_BUS_MODES
+from hvv_map.lines import replacement_bus_mode
 from hvv_map.positions import interpolate_journey_position_detailed
 
 ICON_HEIGHT = 10
@@ -50,7 +50,7 @@ def _s1_should_keep(journey: dict, destination: str) -> bool:
 def mode_for_journey(journey: dict) -> str:
     vehicle_type = journey.get("vehicleType", "")
     if vehicle_type == "REGIONALBUS":
-        return REPLACEMENT_BUS_MODES.get(journey.get("line", {}).get("id", ""), "")
+        return replacement_bus_mode(journey.get("line", {}).get("name", ""))
     return MODE_BY_VEHICLE_TYPE.get(vehicle_type, "")
 
 

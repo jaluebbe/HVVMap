@@ -18,9 +18,9 @@ from hvv_map.geojson import MODE_BY_VEHICLE_TYPE
 from hvv_map.gti_client import GtiClient
 from hvv_map.lines import (
     LINE_COLORS,
-    REPLACEMENT_BUS_MODES,
     SublineInfo,
     fetch_sublines,
+    replacement_bus_mode,
 )
 from hvv_map.redis_client import get_redis_client
 from hvv_map.segment_cache import (
@@ -37,7 +37,7 @@ REDIS_TTL = 24 * 60 * 60  # seconds; rebuilt periodically anyway, generous headr
 
 def mode_for_subline(subline: SublineInfo) -> str:
     if subline.vehicle_type == "REGIONALBUS":
-        return REPLACEMENT_BUS_MODES.get(subline.line_id, "")
+        return replacement_bus_mode(subline.line_name)
     return MODE_BY_VEHICLE_TYPE.get(subline.vehicle_type, "")
 
 
