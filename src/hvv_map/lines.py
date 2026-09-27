@@ -1,22 +1,33 @@
 """Fetch and structure the HVV line catalog via listLines.
 
-Basis for deciding: icon lineKeys, which vehicleTypes to request from
-getAnnouncements/getVehicleMap, and (later) per-line validity windows.
+Basis for deciding icon lineKeys and which vehicleTypes to request from
+getAnnouncements/getVehicleMap.
 """
+
+from __future__ import annotations
 
 import json
 import re
 import time
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 import redis
 
-from hvv_map.gti_client import GtiClient
+if TYPE_CHECKING:
+    # Type-only: avoids pulling gti_client's requests dependency into
+    # api.py, which imports LINE_COLORS/replacement_bus_mode from here.
+    from hvv_map.gti_client import GtiClient
 
 # U/S/AKN by name prefix (matches replacement buses too, e.g. "U1-ERSATZ",
-# "S3-SEV", via the trailing ".*"). Ferries by carrier instead of name, since
-# ferry line numbers alone aren't distinctive.
-LINE_NAME_PATTERN = re.compile(r"^(?:[USA][0-9]{1,2}|RB(?:60|61|71|81)).*$")
+# "S3-SEV", via the trailing "(?:-.*)?"). Ferries are identified by carrier
+# instead (see FERRY_CARRIER), since ferry line numbers aren't distinctive.
+# The name must end right after the fixed number, or continue with "-" (a
+# replacement-bus/SEV suffix) - otherwise "RE8" would also match "RE83", an
+# unrelated line one digit longer.
+LINE_NAME_PATTERN = re.compile(
+    r"^(?:[USA][0-9]{1,2}|RB(?:60|61|71|81)|RE(?:8|80))(?:-.*)?$"
+)
 FERRY_CARRIER = "HADAG"  # the actual Hamburg harbour ferry operator
 
 # For getAnnouncements' "names" filter (accepts line names OR carrier names).
@@ -40,12 +51,14 @@ BASE_LINE_NAMES = [
     "RB71",
     "RB61",
     "RB60",
+    "RE8",
+    "RE80",
 ]
 ANNOUNCEMENT_FILTER_NAMES = BASE_LINE_NAMES + [FERRY_CARRIER]
 
-# R_BAHN covers every DB regional train passing through the bounding box, not
-# just ours - filtered client-side by name wherever R_BAHN is requested.
-WANTED_R_BAHN_LINES = {"RB81", "RB71", "RB61", "RB60"}
+# RBAHN covers every regional train through the bounding box, not just
+# ours - filtered client-side by name wherever it's requested.
+WANTED_R_BAHN_LINES = {"RB81", "RB71", "RB61", "RB60", "RE8", "RE80"}
 
 # Which original mode a REGIONALBUS-type line stands in for, derived from
 # its name's U/S/A prefix - same convention as LINE_NAME_PATTERN.
@@ -54,8 +67,9 @@ _REPLACEMENT_BUS_NAME_PREFIX = re.compile(r"^([USA])[0-9]{1,2}")
 
 
 def replacement_bus_mode(name: str) -> str:
-    """Mode for a U/S/A- or RB-prefixed replacement-bus name, e.g.
-    "S1-SEV" -> "S", "RB61-SEV" -> "R". "" if name matches neither."""
+    """Mode for a U/S/A-, RB-, or RE-prefixed replacement-bus name, e.g.
+    "S1-SEV" -> "S", "RB61-SEV" -> "R", "RE80-SEV" -> "R". "" if name
+    matches none of those."""
     match = _REPLACEMENT_BUS_NAME_PREFIX.match(name)
     if match:
         return _REPLACEMENT_BUS_MODE_BY_PREFIX[match.group(1)]
@@ -75,10 +89,13 @@ LINE_COLORS = {
     "A1-SEV": "E2001A", "A2-SEV": "E2001A", "A3-Bus": "E2001A",
     "S1-SEV": "E2001A", "S2-SEV": "E2001A", "S3-SEV": "E2001A", "S5-SEV": "E2001A", "S7-SEV": "E2001A",
     "RB60-SEV": "E2001A", "RB61-SEV": "E2001A", "RB71-SEV": "E2001A", "RB81-SEV": "E2001A",
+    "RE8-SEV": "E2001A", "RE80-SEV": "E2001A",
     "RB81": "000000",
     "RB71": "000000",
     "RB61": "000000",
     "RB60": "000000",
+    "RE8": "000000",
+    "RE80": "000000",
 }  # fmt: skip
 
 
@@ -300,6 +317,8 @@ def main() -> None:
     output with a name substring, e.g. `hvvmap-lines A1`."""
     import sys
 
+    from hvv_map.gti_client import GtiClient
+
     client = GtiClient()
     lines = fetch_lines(client)
     selected = lines_of_interest(lines)
@@ -316,6 +335,7 @@ def main() -> None:
 def update_sublines_cache_main() -> None:
     """CLI: update the persisted hvv:sublines cache in Redis. Same as the
     fetcher's own periodic update - see fetcher.py."""
+    from hvv_map.gti_client import GtiClient
     from hvv_map.redis_client import get_redis_client
 
     client = GtiClient()

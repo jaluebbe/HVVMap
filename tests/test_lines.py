@@ -81,6 +81,13 @@ def test_is_line_of_interest_matches_u_s_akn_and_their_replacement_buses():
         )
 
 
+def test_is_line_of_interest_matches_re8_re80_and_their_sev():
+    for name in ["RE8", "RE80", "RE8-SEV", "RE80-SEV"]:
+        assert is_line_of_interest(
+            LineInfo(id="x", name=name, carrier_short="", simple_type="")
+        )
+
+
 def test_is_line_of_interest_matches_ferries_by_carrier_not_name():
     line = LineInfo(id="x", name="62", carrier_short="HADAG", simple_type="SCHIFF")
     assert is_line_of_interest(line)
@@ -92,12 +99,21 @@ def test_is_line_of_interest_excludes_unrelated_lines():
         assert not is_line_of_interest(line)
 
 
+def test_is_line_of_interest_excludes_re83_despite_re8_prefix():
+    # RE83 is a real, unrelated erixx line - must not match as an "RE8"
+    # prefix (regression: LINE_NAME_PATTERN used to end in a bare ".*").
+    for name in ["RE83", "RE83-SEV"]:
+        line = LineInfo(id="x", name=name, carrier_short="erixx", simple_type="TRAIN")
+        assert not is_line_of_interest(line)
+
+
 def test_replacement_bus_mode_by_prefix():
     cases = {
         "U1-ERSATZ": "U", "U1-DIREKT": "U",
         "S1-SEV": "S", "S2-SEV": "S", "S3-SEV": "S", "S5-SEV": "S", "S7-SEV": "S",
         "A1-SEV": "AKN", "A2-SEV": "AKN", "A3-Bus": "AKN",
         "RB60-SEV": "R", "RB61-SEV": "R", "RB71-SEV": "R", "RB81-SEV": "R",
+        "RE8-SEV": "R", "RE80-SEV": "R",
     }  # fmt: skip
     for name, expected_mode in cases.items():
         assert replacement_bus_mode(name) == expected_mode

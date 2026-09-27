@@ -47,17 +47,22 @@ def build_stops_geojson(
     active_names: set[str] | None = None,
 ) -> dict:
     """One Point feature per station actually served by a line of interest,
-    with the set of modes observed there (e.g. a U/S interchange).
+    with the set of modes observed there (e.g. a U/S interchange). Labeled
+    with combined_name, not name: listStations sometimes splits a station's
+    full name into name/city (e.g. name="Hbf", city="Lübeck"), and
+    combined_name is the recombined, human-readable form ("Lübeck Hbf") -
+    falls back to name itself where listStations doesn't split it.
 
-    active_names, if given, additionally requires the station's own name to
-    have been recently observed on a real segment (see
+    active_names, if given, additionally requires the station to have been
+    recently observed on a real segment (see
     segment_cache.active_station_names) - without this, a station whose
     line has gone stale (SEV that has ended, etc.) would keep showing on
     its own, disconnected from any line geometry ("stops lying around" -
     see chat). Name-matched, not ID-matched: stationSequence's station IDs
     and segment_cache's stopPointKeys are different ID namespaces with no
     shared key, so the name is the only thing to cross-reference on -
-    approximate, since naming can differ slightly between endpoints.
+    matched against combined_name, since that's the form getVehicleMap's own
+    startStationName/endStationName (active_names' source) uses.
     """
     modes_by_station: dict[str, set[str]] = {}
     for subline in sublines:
@@ -72,7 +77,7 @@ def build_stops_geojson(
         station = stations.get(station_id)
         if station is None:
             continue
-        if active_names is not None and station.name not in active_names:
+        if active_names is not None and station.combined_name not in active_names:
             continue
         features.append(
             {
@@ -83,9 +88,9 @@ def build_stops_geojson(
                 },
                 "properties": {
                     "id": station.id,
-                    "name": station.name,
+                    "name": station.combined_name,
                     "modes": sorted(modes),
-                    "text": station.name,
+                    "text": station.combined_name,
                 },
             }
         )

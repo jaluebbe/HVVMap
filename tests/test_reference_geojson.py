@@ -11,11 +11,17 @@ from hvv_map.stations import StationInfo
 
 STATIONS = {
     "Master:1": StationInfo(
-        id="Master:1", name="Ohlstedt", city="Hamburg", lon=10.1, lat=53.7
-    ),
+        id="Master:1", name="Ohlstedt", city="Hamburg", lon=10.1, lat=53.7,
+        combined_name="Ohlstedt",
+    ),  # fmt: skip
     "Master:2": StationInfo(
-        id="Master:2", name="Volksdorf", city="Hamburg", lon=10.15, lat=53.68
-    ),
+        id="Master:2", name="Volksdorf", city="Hamburg", lon=10.15, lat=53.68,
+        combined_name="Volksdorf",
+    ),  # fmt: skip
+    "SCM:9058093": StationInfo(
+        id="SCM:9058093", name="IKEA", city="Lübeck", lon=10.7, lat=53.9,
+        combined_name="Lübeck-Dänischburg IKEA",
+    ),  # fmt: skip
 }
 
 
@@ -65,6 +71,20 @@ def test_build_stops_geojson_geometry_and_properties():
         "modes": ["U"],
         "text": "Ohlstedt",
     }
+
+
+def test_build_stops_geojson_labels_with_combined_name_not_name():
+    # Regression: listStations splits some stations into a short name (e.g.
+    # "Hbf", "IKEA") plus a separate city - the label must use the
+    # recombined, human-readable combined_name ("Lübeck Hbf"), not the bare
+    # name, which alone would be confusing/wrong on the map.
+    subline = SublineInfo(
+        line_name="RE8", line_id="DB-EFZ:RE8_DB-EFZ_Z", subline_number="1",
+        vehicle_type="R_BAHN", station_ids=("SCM:9058093",),
+    )  # fmt: skip
+    feature = build_stops_geojson([subline], STATIONS)["features"][0]
+    assert feature["properties"]["name"] == "Lübeck-Dänischburg IKEA"
+    assert feature["properties"]["text"] == "Lübeck-Dänischburg IKEA"
 
 
 def test_build_stops_geojson_combines_modes_at_interchange():
@@ -125,6 +145,21 @@ def test_build_stops_geojson_empty_active_names_drops_all():
     )  # fmt: skip
     result = build_stops_geojson([subline], STATIONS, active_names=set())
     assert result["features"] == []
+
+
+def test_build_stops_geojson_matches_active_names_against_combined_name():
+    # Regression: listStations splits some stations into name="IKEA",
+    # city="Lübeck" while getVehicleMap (the source of active_names) uses
+    # the combined "Lübeck-Dänischburg IKEA" - matching against .name alone
+    # would wrongly drop this station even though it's actively observed.
+    subline = SublineInfo(
+        line_name="RE8", line_id="DB-EFZ:RE8_DB-EFZ_Z", subline_number="1",
+        vehicle_type="R_BAHN", station_ids=("SCM:9058093",),
+    )  # fmt: skip
+    result = build_stops_geojson(
+        [subline], STATIONS, active_names={"Lübeck-Dänischburg IKEA"}
+    )
+    assert len(result["features"]) == 1
 
 
 def test_build_lines_geojson_converts_flat_track_to_coordinates():
