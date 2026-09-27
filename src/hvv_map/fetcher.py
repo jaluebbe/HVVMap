@@ -19,9 +19,8 @@ hvv:reference_stops/hvv:reference_lines are rebuilt periodically here
 segment_cache keeps growing between rebuilds. Sublines come from the
 hvv:sublines cache (not read by the running map itself, see hvv_map.lines)
 rather than a fresh listLines call, so the rebuild needs only one API call
-(listStations). hvv:sublines is kept fresh separately on its own
-SUBLINES_CACHE_INTERVAL - a single incremental listLines call once a
-previous dataReleaseID is cached.
+(listStations). hvv:sublines is kept fresh separately on its own SUBLINES_CACHE_INTERVAL,
+always via a full (non-incremental) listLines call, at an hourly cadence.
 """
 
 import json
@@ -35,7 +34,8 @@ from hvv_map.geojson import build_positions_geojson, mode_for_journey
 from hvv_map.gti_client import GtiClient
 from hvv_map.lines import (
     ANNOUNCEMENT_FILTER_NAMES,
-    REPLACEMENT_BUS_MODES,
+    WANTED_R_BAHN_LINES,
+    replacement_bus_mode,
     sublines_from_cache,
     update_sublines_cache,
 )
@@ -53,8 +53,8 @@ VEHICLE_MAP_INTERVAL = 1.0  # seconds between loop cycles (positions rebuild rat
 VEHICLE_MAP_FETCH_INTERVAL = 5.0  # seconds between actual getVehicleMap API calls
 ANNOUNCEMENTS_INTERVAL = 600.0  # seconds between getAnnouncements calls (10 min)
 REFERENCE_REBUILD_INTERVAL = 1800.0  # seconds between reference layer rebuilds (30 min)
-SUBLINES_CACHE_INTERVAL = 600.0  # seconds between hvv:sublines updates (10 min) -
-# cheap once incremental, so it can run more often than the full reference rebuild
+SUBLINES_CACHE_INTERVAL = 3600.0  # seconds between hvv:sublines updates (1h) -
+# always a full (non-incremental) listLines call, see module docstring
 VEHICLE_MAP_TTL = 10  # seconds - stale data expires fast if fetcher dies
 ANNOUNCEMENTS_TTL = 7200  # seconds - generous headroom above refresh interval
 
@@ -72,7 +72,7 @@ BOUNDING_BOX = {
 
 # getVehicleMap has no line-name filter (unlike getAnnouncements' "names"),
 # so REGIONALBUS pulls in all regional buses, not just our replacement
-# services. Filtered client-side against REPLACEMENT_BUS_MODES (lines.py).
+# services. Filtered client-side against replacement_bus_mode() (lines.py).
 
 redis_client = get_redis_client()
 gti = GtiClient()
@@ -89,15 +89,10 @@ def _store(key: str, data: dict, ttl: int, publish: bool = False) -> None:
         redis_client.publish(key, payload)
 
 
-# R_BAHN covers every DB regional train passing through the bounding box,
-# not just ours, so it needs the same name-based whitelist REGIONALBUS gets.
-WANTED_R_BAHN_LINES = {"RB81", "RB71", "RB61", "RB60"}
-
-
 def _is_wanted(journey: dict) -> bool:
     vehicle_type = journey.get("vehicleType")
     if vehicle_type == "REGIONALBUS":
-        return journey.get("line", {}).get("id") in REPLACEMENT_BUS_MODES
+        return bool(replacement_bus_mode(journey.get("line", {}).get("name", "")))
     if vehicle_type == "R_BAHN":
         return journey.get("line", {}).get("name") in WANTED_R_BAHN_LINES
     return True  # U_BAHN/S_BAHN/A_BAHN/SCHIFF are already precise

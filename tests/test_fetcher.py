@@ -4,7 +4,6 @@ from unittest.mock import patch
 
 import hvv_map.fetcher as fetcher
 from hvv_map.fetcher import _is_wanted, _store
-from hvv_map.lines import REPLACEMENT_BUS_MODES
 from hvv_map.redis_client import get_redis_client
 
 
@@ -17,19 +16,25 @@ def test_non_regionalbus_always_wanted():
 def test_known_replacement_bus_wanted():
     journey = {
         "vehicleType": "REGIONALBUS",
-        "line": {"id": "HHA-B:U1-ERSATZ_HHA-B"},
+        "line": {"id": "HHA-B:U1-ERSATZ_HHA-B", "name": "U1-ERSATZ"},
     }
     assert _is_wanted(journey)
 
 
 def test_unrelated_regionalbus_rejected():
-    journey = {"vehicleType": "REGIONALBUS", "line": {"id": "HHA-B:175_HHA-B"}}
+    journey = {
+        "vehicleType": "REGIONALBUS",
+        "line": {"id": "HHA-B:175_HHA-B", "name": "175"},
+    }
     assert not _is_wanted(journey)
 
 
-def test_all_known_replacement_bus_ids_are_wanted():
-    for line_id in REPLACEMENT_BUS_MODES:
-        journey = {"vehicleType": "REGIONALBUS", "line": {"id": line_id}}
+def test_all_usa_prefixed_replacement_bus_names_are_wanted():
+    # Any REGIONALBUS journey named like a U/S/A replacement service is
+    # wanted, whatever its line id.
+    for name in ["U1-ERSATZ", "U1-DIREKT", "A1-SEV", "A2-SEV", "A3-Bus",
+                 "S1-SEV", "S2-SEV", "S3-SEV", "S5-SEV", "S7-SEV"]:  # fmt: skip
+        journey = {"vehicleType": "REGIONALBUS", "line": {"id": "x", "name": name}}
         assert _is_wanted(journey)
 
 
