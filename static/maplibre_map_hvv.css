@@ -175,7 +175,8 @@ body {
     display: block;
 }
 
-.hvv-toggle-active {
+.hvv-wakelock-active,
+.hvv-labels-toggle-active {
     background-color: #1e64a0 !important;
 }
 

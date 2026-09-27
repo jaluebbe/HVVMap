@@ -13,7 +13,11 @@ const map = new maplibregl.Map({
     attributionControl: false, // added manually below, with our own extra links
 });
 
-map.addControl(new maplibregl.NavigationControl(), 'top-left');
+// visualizePitch: shows a tilt indicator and resets pitch on click
+map.addControl(
+    new maplibregl.NavigationControl({ visualizePitch: true }),
+    'top-left',
+);
 map.addControl(
     new maplibregl.GeolocateControl({
         positionOptions: { enableHighAccuracy: true },
@@ -58,8 +62,7 @@ function fixIOSResize() {
 window.addEventListener('orientationchange', fixIOSResize);
 window.addEventListener('resize', fixIOSResize);
 
-// Toggle visibility of vehicle destination labels. Shown by default, so the
-// button starts in its active state (same convention as WakeLockControl).
+// Toggle visibility of vehicle destination labels.
 class LabelToggleControl {
     onAdd(mapInstance) {
         this._map = mapInstance;
@@ -71,11 +74,11 @@ class LabelToggleControl {
         button.title = 'Ziel-Labels ein-/ausblenden';
         button.style.fontSize = '16px';
         button.textContent = '🏷️';
-        button.classList.add('hvv-toggle-active');
+        button.classList.add('hvv-labels-toggle-active');
         button.addEventListener('click', () => {
             this._labelsVisible = !this._labelsVisible;
             mapInstance.getContainer().classList.toggle('hvv-labels-hidden');
-            button.classList.toggle('hvv-toggle-active', this._labelsVisible);
+            button.classList.toggle('hvv-labels-toggle-active', this._labelsVisible);
         });
         container.appendChild(button);
         this._container = container;
@@ -148,7 +151,7 @@ class WakeLockControl {
     }
 
     _setButtonActive(active) {
-        this._button.classList.toggle('hvv-toggle-active', active);
+        this._button.classList.toggle('hvv-wakelock-active', active);
         this._button.title = active
             ? 'Bildschirm wach halten (aktiv) - klicken zum Beenden'
             : 'Bildschirm wach halten';

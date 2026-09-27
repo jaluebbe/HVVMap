@@ -1,6 +1,6 @@
 {
-  "name": "HVV Map MapLibre",
-  "short_name": "HVV MapLibre",
+  "name": "HVV Map Live",
+  "short_name": "HVVMap",
   "start_url": "/static/maplibre_map_hvv_live.html",
   "scope": "/static/maplibre_map_hvv_live.html",
   "display": "standalone",
