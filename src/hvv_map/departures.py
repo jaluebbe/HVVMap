@@ -50,22 +50,28 @@ ANCHOR_STATIONS_MAIN = {
 } - PSEUDO_STATIONS  # fmt: skip
 MAIN_SERVICE_TYPES = ["SBAHN", "UBAHN", "AKN", "FAEHRE"]
 
-# Terminal/hub and subline-disambiguating stations covering RB60/61/71/81.
-ANCHOR_STATIONS_RB = {
+# Terminal/hub and subline-disambiguating stations covering the regional
+# trains in R_BAHN_LINES (Lübeck-Kücknitz tells the RE8 shuttle variants apart).
+ANCHOR_STATIONS_R = {
     "Elmshorn", "Ahrensburg", "Wrist", "Itzehoe", "Bad Oldesloe",
     "Hamburg-Altona", "Hamburg Hbf", "Lübeck Hbf", "Bargteheide",
     "Hamburg Dammtor", "Hasselbrook", "Tonndorf", "Glückstadt",
+    "Lübeck-Kücknitz",
 }  # fmt: skip
-RB_SERVICE_TYPES = ["RBAHN"]
+R_SERVICE_TYPES = ["RBAHN"]  # GTI service type, covers RB and RE
 
 SEV_SERVICE_TYPES = ["SBAHN", "UBAHN", "AKN", "FAEHRE", "BUS"]
 REDIS_ANNOUNCEMENT_STATIONS_KEY = "hvv:announcement_stations"
 
 REDIS_MAIN_KEY = "hvv:departures:main"
-REDIS_RB_KEY = "hvv:departures:rb"
+REDIS_R_KEY = "hvv:departures:r"
 REDIS_SEV_KEY = "hvv:departures:sev"
 REDIS_MERGED_KEY = "hvv:departures:merged"
 REDIS_BY_SERVICE_KEY = "hvv:departures:by_service"
+# The anchor time all three snapshots were queried from - needed to turn a
+# by_service stop's timeOffset (minutes from it) back into an absolute time,
+# e.g. for a departureCourse query (see gti_shapes.py).
+REDIS_ANCHOR_KEY = "hvv:departures:anchor_start"
 
 
 QUERY_ANCHOR_HOUR = 4  # most services first run around here
@@ -119,11 +125,11 @@ def fetch_main_departures(client: GtiClient, start: datetime) -> dict:
     return client.send("departureList", request)
 
 
-def fetch_rb_departures(client: GtiClient, start: datetime) -> dict:
-    """24h departureList across the RB anchor stations, filtered down to
-    WANTED_R_BAHN_LINES - RBAHN alone also returns other DB regional trains
+def fetch_r_departures(client: GtiClient, start: datetime) -> dict:
+    """24h departureList across the regional-train anchor stations, filtered
+    down to WANTED_R_BAHN_LINES - RBAHN alone also returns other DB regional trains
     passing through, same as getVehicleMap."""
-    request = _build_request(ANCHOR_STATIONS_RB, RB_SERVICE_TYPES, start)
+    request = _build_request(ANCHOR_STATIONS_R, R_SERVICE_TYPES, start)
     response = client.send("departureList", request)
     response["departures"] = [
         d
@@ -267,14 +273,36 @@ def _is_subsequence(observed_ids: list[str], candidate_ids: list[str]) -> bool:
     return idx == len(observed_ids)
 
 
+# Lines whose stations form one continuous physical loop (Hamburg's
+# "Ringlinie") rather than two distinct termini - a subline's declared
+# station list is only one arbitrary cut through the loop, so a real trip
+# can be observed starting anywhere else on it and run past the declared
+# list's last station right back around to its own first one. Doubling the
+# candidate's ids lets that wrap-around still match in order - see
+# _candidate_match_ids. Every other line has two real, distinct termini, so
+# a trip can never wrap from its route's end back to its own start; doubling
+# those unconditionally would risk matching a reversed trip on a short
+# route (e.g. a 2-stop shuttle) to the forward candidate.
+RING_LINE_NAMES = {"U3"}
+
+
+def _candidate_match_ids(candidate: list[dict], line_name: str) -> list[str]:
+    """Station ids to subsequence-match observed stops against - doubled for
+    a ring line (see RING_LINE_NAMES), unchanged for every other line."""
+    ids = [s["id"] for s in candidate]
+    if line_name in RING_LINE_NAMES:
+        return ids + ids
+    return ids
+
+
 def _anchor_set(line: dict) -> set[str]:
     """Anchor stations queried for this service's own vehicle type - other
     anchors don't apply, since they were never queried for it. SEV/bus uses
     the dynamic announcement-station set, not tracked here, so no anchor
     check applies to it."""
     short_info = (line.get("type") or {}).get("shortInfo")
-    if short_info == "RB":
-        return ANCHOR_STATIONS_RB
+    if short_info in ("RB", "RE"):
+        return ANCHOR_STATIONS_R
     if short_info == "Bus":
         return set()
     return ANCHOR_STATIONS_MAIN
@@ -299,8 +327,11 @@ def match_subline(entry: dict, sublines_cache: dict) -> list[list[dict]]:
             seen.add(station_id)
             observed_ids.append(station_id)
 
+    line_name = line.get("name", "")
     subseq = [
-        c for c in candidates if _is_subsequence(observed_ids, [s["id"] for s in c])
+        c
+        for c in candidates
+        if _is_subsequence(observed_ids, _candidate_match_ids(c, line_name))
     ]
     anchors = _anchor_set(line)
     narrowed = [
@@ -343,6 +374,11 @@ def main() -> None:
     client = GtiClient()
     redis_client = get_redis_client()
     start = _query_start_time(datetime.now())
+    _store(
+        redis_client,
+        REDIS_ANCHOR_KEY,
+        {"date": start.strftime("%Y-%m-%d"), "time": start.strftime("%H:%M:%S")},
+    )
 
     if _run_snapshot(
         redis_client,
@@ -352,7 +388,7 @@ def main() -> None:
     ):
         time.sleep(1)  # 1 req/s rate limit across all GTI endpoints
     if _run_snapshot(
-        redis_client, REDIS_RB_KEY, start, lambda: fetch_rb_departures(client, start)
+        redis_client, REDIS_R_KEY, start, lambda: fetch_r_departures(client, start)
     ):
         time.sleep(1)
     _run_snapshot(
@@ -364,7 +400,7 @@ def main() -> None:
 
     merged = merge_departures(
         _load_data(redis_client, REDIS_MAIN_KEY),
-        _load_data(redis_client, REDIS_RB_KEY),
+        _load_data(redis_client, REDIS_R_KEY),
         _load_data(redis_client, REDIS_SEV_KEY),
     )
     _store(redis_client, REDIS_MERGED_KEY, {"departures": merged})
