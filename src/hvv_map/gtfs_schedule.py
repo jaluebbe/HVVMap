@@ -19,6 +19,7 @@ import math
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
 from pathlib import Path
+from hvv_map.lines import R_BAHN_LINES
 
 csv.field_size_limit(10_000_000)
 
@@ -50,10 +51,7 @@ ROUTE_TYPE_2_MODE_BY_SHORT_NAME = {
     "A1": "AKN",
     "A2": "AKN",
     "A3": "AKN",
-    "RB81": "R",
-    "RB71": "R",
-    "RB61": "R",
-    "RB60": "R",
+    **dict.fromkeys(R_BAHN_LINES, "R"),
 }
 
 # Replacement buses (route_type=3, normally excluded) shown grouped with the
@@ -68,6 +66,7 @@ SPECIAL_BUS_ROUTES = {
     "14476_3": "S",  # S5-SEV
     "11710_3": "R",  # RB61-SEV
     "14841_3": "R",  # RB71-SEV
+    "11711_3": "R",  # RE80-SEV
 }
 
 

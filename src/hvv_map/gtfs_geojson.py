@@ -15,6 +15,7 @@ from hvv_map.gtfs_schedule import (
     recently_active_service_ids,
     recently_active_shape_ids,
 )
+from hvv_map.lines import R_BAHN_LINES
 
 BERLIN_TZ = ZoneInfo("Europe/Berlin")
 
@@ -42,9 +43,9 @@ LINE_COLORS = {
     "S3": "622181",
     "S5": "0089bb",
     "S7": "cc7720",
-    "A1": "F29400",
-    "A2": "F29400",
-    "A3": "F29400",
+    "A1": "FF8000",
+    "A2": "FF8000",
+    "A3": "FF8000",
     # Ferry: route_color is blank/white in GTFS, using route_text_color
     # (matches the official ferry icon's fill #009ED4).
     "61": "009DD1",
@@ -60,12 +61,8 @@ LINE_COLORS = {
     "A2-SEV": "E2001A",
     "A3-Bus": "E2001A",
     "S5-SEV": "E2001A",
-    # route_color is blank for RB81 too - black by request, interim
-    # solution ahead of the future S4.
-    "RB81": "000000",
-    "RB61": "000000",
-    "RB60": "000000",
-    "RB71": "000000",
+    # route_color is blank for regional trains - black, as on the HVV maps.
+    **dict.fromkeys(R_BAHN_LINES, "000000"),
 }
 # geofox icon service lineKey format. GTFS route_short_name has no
 # equivalent field, so this mapping has to be maintained by hand - ported
@@ -100,6 +97,8 @@ LINE_ID_MAP = {
     "RB71": "DB-EFZ:RB71_DB-EFZ_Z",
     "RB61": "DB-EFZ:RB61_DB-EFZ_Z",
     "RB60": "DB-EFZ:RB60_DB-EFZ_Z",
+    "RE8": "DB-EFZ:RE8_DB-EFZ_Z",
+    "RE80": "DB-EFZ:RE80_DB-EFZ_Z",
 }
 
 

@@ -14,10 +14,21 @@ from typing import TYPE_CHECKING
 
 import redis
 
+from hvv_map.gtfs_colors import GTFS_LINES
+
 if TYPE_CHECKING:
     # Type-only: avoids pulling gti_client's requests dependency into
     # api.py, which imports LINE_COLORS/replacement_bus_mode from here.
     from hvv_map.gti_client import GtiClient
+
+# Wanted lines, the single place to edit. U/S/A lines are matched by
+# LINE_NAME_PATTERN, regional trains only if listed in R_BAHN_LINES.
+URBAN_LINE_NAMES = (
+    "U1", "U2", "U3", "U4",
+    "S1", "S2", "S3", "S5", "S7",
+    "A1", "A2", "A3",
+)  # fmt: skip
+R_BAHN_LINES = ("RB60", "RB61", "RB71", "RB81", "RE8", "RE80")
 
 # U/S/AKN by name prefix (matches replacement buses too, e.g. "U1-ERSATZ",
 # "S3-SEV", via the trailing "(?:-.*)?"). Ferries are identified by carrier
@@ -26,7 +37,8 @@ if TYPE_CHECKING:
 # replacement-bus/SEV suffix) - otherwise "RE8" would also match "RE83", an
 # unrelated line one digit longer.
 LINE_NAME_PATTERN = re.compile(
-    r"^(?:[USA][0-9]{1,2}|RB(?:60|61|71|81)|RE(?:8|80))(?:-.*)?$"
+    r"^(?:[USA][0-9]{1,2}|" + "|".join(map(re.escape, R_BAHN_LINES)) + r")"
+    r"(?:-.*)?$"
 )
 FERRY_CARRIER = "HADAG"  # the actual Hamburg harbour ferry operator
 
@@ -34,31 +46,12 @@ FERRY_CARRIER = "HADAG"  # the actual Hamburg harbour ferry operator
 # Base line names only, no SEV/replacement-bus variants: announcements
 # reference the affected original line (e.g. "A2"), not the replacement
 # service's own name (e.g. "A2-SEV").
-BASE_LINE_NAMES = [
-    "U1",
-    "U2",
-    "U3",
-    "U4",
-    "S1",
-    "S2",
-    "S3",
-    "S5",
-    "S7",
-    "A1",
-    "A2",
-    "A3",
-    "RB81",
-    "RB71",
-    "RB61",
-    "RB60",
-    "RE8",
-    "RE80",
-]
+BASE_LINE_NAMES = [*URBAN_LINE_NAMES, *R_BAHN_LINES]
 ANNOUNCEMENT_FILTER_NAMES = BASE_LINE_NAMES + [FERRY_CARRIER]
 
 # RBAHN covers every regional train through the bounding box, not just
 # ours - filtered client-side by name wherever it's requested.
-WANTED_R_BAHN_LINES = {"RB81", "RB71", "RB61", "RB60", "RE8", "RE80"}
+WANTED_R_BAHN_LINES = set(R_BAHN_LINES)
 
 # Which original mode a REGIONALBUS-type line stands in for, derived from
 # its name's U/S/A prefix - same convention as LINE_NAME_PATTERN.
@@ -79,25 +72,30 @@ def replacement_bus_mode(name: str) -> str:
 
 
 # Official HVV line colors, by name - used for the reference lines layer.
+# U/S/AKN/ferry colors come from the GTFS feed (gtfs_colors.py, regenerate
+# with `python -m hvv_map.gtfs_lines routes.txt --write-colors <path>`).
+# Regional trains are black on the HVV maps and absent from the feed's colors.
 # Replacement buses share one red across the board.
+SEV_COLOR = "E2001A"
+REGIONAL_COLOR = "000000"
+# Irregular replacement-bus names that the "<line>-SEV" rule doesn't cover.
+_URBAN_SEV_NAMES = (
+    "U1-DIREKT", "U1-ERSATZ", "A1-SEV", "A2-SEV", "A3-Bus",
+    "S1-SEV", "S2-SEV", "S3-SEV", "S5-SEV", "S7-SEV",
+)  # fmt: skip
+_EXTRA_COLORS = {"68": "009DD1"}  # ferry missing from the current feed
+
 LINE_COLORS = {
-    "U1": "006ab3", "U2": "e2001a", "U3": "ffdd00", "U4": "0098a1",
-    "S1": "1a962b", "S2": "b51143", "S3": "622181", "S5": "0089bb", "S7": "cc7720",
-    "A1": "F29400", "A2": "F29400", "A3": "F29400",
-    "61": "009DD1", "62": "009DD1", "64": "009DD1", "65": "009DD1",
-    "68": "009DD1", "72": "009DD1", "73": "009DD1", "75": "009DD1",
-    "U1-DIREKT": "E2001A", "U1-ERSATZ": "E2001A",
-    "A1-SEV": "E2001A", "A2-SEV": "E2001A", "A3-Bus": "E2001A",
-    "S1-SEV": "E2001A", "S2-SEV": "E2001A", "S3-SEV": "E2001A", "S5-SEV": "E2001A", "S7-SEV": "E2001A",
-    "RB60-SEV": "E2001A", "RB61-SEV": "E2001A", "RB71-SEV": "E2001A", "RB81-SEV": "E2001A",
-    "RE8-SEV": "E2001A", "RE80-SEV": "E2001A",
-    "RB81": "000000",
-    "RB71": "000000",
-    "RB61": "000000",
-    "RB60": "000000",
-    "RE8": "000000",
-    "RE80": "000000",
-}  # fmt: skip
+    **{name: REGIONAL_COLOR for name in R_BAHN_LINES},
+    **{
+        name: color
+        for name, (mode, color) in GTFS_LINES.items()
+        if mode in ("U", "S", "AKN", "FERRY")
+    },
+    **_EXTRA_COLORS,
+    **{name: SEV_COLOR for name in _URBAN_SEV_NAMES},
+    **{f"{name}-SEV": SEV_COLOR for name in R_BAHN_LINES},
+}
 
 
 @dataclass(frozen=True)
