@@ -63,6 +63,7 @@ LINE_COLORS = {
     "S5-SEV": "E2001A",
     # route_color is blank for regional trains - black, as on the HVV maps.
     **dict.fromkeys(R_BAHN_LINES, "000000"),
+    "RE80-SEV": "E2001A",
 }
 # geofox icon service lineKey format. GTFS route_short_name has no
 # equivalent field, so this mapping has to be maintained by hand - ported
@@ -99,6 +100,7 @@ LINE_ID_MAP = {
     "RB60": "DB-EFZ:RB60_DB-EFZ_Z",
     "RE8": "DB-EFZ:RE8_DB-EFZ_Z",
     "RE80": "DB-EFZ:RE80_DB-EFZ_Z",
+    "RE80-SEV": "DB-EFZ:RE80-SEV_DB-EFZ_Z",
 }
 
 
