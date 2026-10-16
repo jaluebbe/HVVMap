@@ -361,7 +361,6 @@ def test_update_gti_shapes_logs_each_call_with_delays(tmp_path):
     assert first_leg["dep_time"] and first_leg["arr_time"]
     assert log["calls"][0]["segments"] == 2
     assert log["runs"][0]["calls"] == 1 and log["runs"][0]["ok"] == 1
-    assert log["sublines"][0]["calls"] == 1
 
 
 def test_read_course_log_empty_without_table_or_connection(tmp_path):
@@ -369,4 +368,4 @@ def test_read_course_log_empty_without_table_or_connection(tmp_path):
 
     assert read_course_log(None)["calls"] == []
     bare = sqlite3.connect(str(tmp_path / "bare.db"))
-    assert read_course_log(bare) == {"calls": [], "runs": [], "sublines": []}
+    assert read_course_log(bare) == {"calls": [], "runs": []}

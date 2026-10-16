@@ -300,4 +300,4 @@ def test_gtilive_debug_503_when_by_service_missing(client, monkeypatch):
 def test_gtilive_courses_empty_without_database(client, monkeypatch):
     monkeypatch.setattr(api_module, "_get_gti_shapes_connection", lambda: None)
     data = client.get("/api/hvv/gtilive/courses.json").json()
-    assert data == {"calls": [], "runs": [], "sublines": []}
+    assert data == {"calls": [], "runs": []}

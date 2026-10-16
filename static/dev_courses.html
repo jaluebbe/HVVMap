@@ -164,9 +164,8 @@
             <span class="tabs">
                 <button data-view="calls" class="active">Abrufe</button>
                 <button data-view="runs">Läufe</button>
-                <button data-view="sublines">Sublines</button>
             </span>
-            <input type="search" id="search" placeholder="Linie, Station, Subline …">
+            <input type="search" id="search" placeholder="Linie, Station …">
             <select id="result">
                 <option value="">alle Ergebnisse</option>
                 <option value="ok">nur ok</option>
@@ -178,7 +177,7 @@
 
     <script>
         const ENDPOINT = "/api/hvv/gtilive/courses.json?limit=2000";
-        let data = { calls: [], runs: [], sublines: [] };
+        let data = { calls: [], runs: [] };
         let view = "calls";
 
         const content = document.getElementById("content");
@@ -274,7 +273,7 @@
                     "Segmente", "max. Verspätung"], [7]);
             let shown = 0;
             for (const c of data.calls) {
-                const text = [c.line, c.station, c.subline_key, c.service_id].join(" ");
+                const text = [c.line, c.station, c.service_id].join(" ");
                 if (!matches(text) || !resultMatches(c.result)) continue;
                 shown++;
                 const row = document.createElement("tr");
@@ -318,26 +317,8 @@
             return [t, data.runs.length];
         }
 
-        function renderSublines() {
-            const t = table(["Linie", "aufgelöst", "Beispielfahrt", "Abrufe", "ok", "letzter Abruf"], [3, 4]);
-            let shown = 0;
-            for (const s of data.sublines) {
-                if (!matches([s.line, s.line_id, s.subline_key].join(" "))) continue;
-                shown++;
-                const row = document.createElement("tr");
-                cell(row, s.line || s.line_id).title = s.subline_key;
-                cell(row, stamp(s.resolved_at));
-                cell(row, s.service_id);
-                cell(row, String(s.calls), "num");
-                cell(row, String(s.ok), "num");
-                cell(row, stamp(s.last_call));
-                t.appendChild(row);
-            }
-            return [t, shown];
-        }
-
         function render() {
-            const [node, shown] = { calls: renderCalls, runs: renderRuns, sublines: renderSublines }[view]();
+            const [node, shown] = { calls: renderCalls, runs: renderRuns }[view]();
             content.replaceChildren(shown ? node : Object.assign(
                 document.createElement("div"), { className: "empty", textContent: "Keine Einträge." }));
         }
@@ -357,7 +338,7 @@
                 data = await response.json();
                 const ok = data.calls.filter(c => c.result === "ok").length;
                 document.getElementById("meta").textContent =
-                    `${data.calls.length} Abrufe geladen (${ok} ok), ${data.runs.length} Läufe, ${data.sublines.length} Sublines`;
+                    `${data.calls.length} Abrufe geladen (${ok} ok), ${data.runs.length} Läufe`;
             } catch (error) {
                 document.getElementById("meta").textContent = `Fehler beim Laden: ${error.message}`;
             }

@@ -203,9 +203,9 @@ def _max_delay(legs: list[dict]) -> int | None:
 
 
 def read_course_log(conn: sqlite3.Connection | None, limit: int = 500) -> dict:
-    """Overview for the courses debug page: the latest attempts, per-run
-    totals and per-subline totals. Empty if the log table doesn't exist yet."""
-    empty = {"calls": [], "runs": [], "sublines": []}
+    """Overview for the courses debug page: the latest attempts and per-run
+    totals. Empty if the log table doesn't exist yet."""
+    empty = {"calls": [], "runs": []}
     if conn is None:
         return empty
     try:
@@ -218,13 +218,6 @@ def read_course_log(conn: sqlite3.Connection | None, limit: int = 500) -> dict:
         runs = conn.execute(
             "SELECT run_id, COUNT(*), SUM(result = 'ok'), MIN(called_at), "
             "MAX(called_at) FROM course_log GROUP BY run_id ORDER BY run_id DESC"
-        ).fetchall()
-        sublines = conn.execute(
-            "SELECT s.subline_key, s.service_id, s.resolved_at, "
-            "COUNT(c.id), SUM(c.result = 'ok'), MAX(c.called_at), MAX(c.line_name) "
-            "FROM subline_schedule s LEFT JOIN course_log c "
-            "ON c.subline_key = s.subline_key GROUP BY s.subline_key "
-            "ORDER BY s.resolved_at DESC"
         ).fetchall()
     except sqlite3.OperationalError:
         return empty
@@ -259,19 +252,6 @@ def read_course_log(conn: sqlite3.Connection | None, limit: int = 500) -> dict:
                 "last": r[4],
             }
             for r in runs
-        ],
-        "sublines": [
-            {
-                "subline_key": r[0],
-                "service_id": r[1],
-                "resolved_at": r[2],
-                "calls": r[3],
-                "ok": r[4] or 0,
-                "last_call": r[5],
-                "line": r[6],
-                "line_id": r[0].split("|", 1)[0],
-            }
-            for r in sublines
         ],
     }
 
