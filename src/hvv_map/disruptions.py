@@ -56,6 +56,10 @@ def _location_mode(location: dict) -> str:
     return ""
 
 
+def _location_line_name(location: dict) -> str:
+    return (location.get("line") or {}).get("name", "")
+
+
 def _strip_redundant_prefix(summary: str, station_name: str) -> str:
     """Some summaries already start with 'StationName: ...' - avoid it
     appearing twice once we prepend our own station-name heading. Pass
@@ -75,7 +79,7 @@ def build_disruptions_geojson(
     if now is None:
         now = datetime.now(timezone.utc)
 
-    # (station_id, category) -> {"messages": [...], "modes": set()}
+    # (station_id, category) -> {"messages": [...], "modes": set(), "lines": set()}
     grouped: dict[tuple[str, str], dict] = {}
     for announcement in announcements_data.get("announcements", []):
         if not is_currently_valid(announcement, now):
@@ -84,9 +88,11 @@ def build_disruptions_geojson(
         summary = announcement.get("summary") or ""
         for location in announcement.get("locations", []):
             mode = _location_mode(location)
+            line_name = _location_line_name(location)
             for station_id in _location_station_ids(location):
                 entry = grouped.setdefault(
-                    (station_id, category), {"messages": [], "modes": set()}
+                    (station_id, category),
+                    {"messages": [], "modes": set(), "lines": set()},
                 )
                 if summary and not any(
                     m["summary"] == summary for m in entry["messages"]
@@ -100,6 +106,8 @@ def build_disruptions_geojson(
                     )
                 if mode:
                     entry["modes"].add(mode)
+                if line_name:
+                    entry["lines"].add(line_name)
 
     features = []
     for (station_id, category), entry in grouped.items():
@@ -131,6 +139,7 @@ def build_disruptions_geojson(
                     "station_name": station.combined_name,
                     "category": category,
                     "modes": sorted(entry["modes"]),
+                    "lines": sorted(entry["lines"]),
                     "message_count": len(cleaned),
                     "messages": cleaned,
                 },

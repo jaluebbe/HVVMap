@@ -47,7 +47,8 @@ def build_stops_geojson(
     active_names: set[str] | None = None,
 ) -> dict:
     """One Point feature per station actually served by a line of interest,
-    with the set of modes observed there (e.g. a U/S interchange). Labeled
+    with the sets of modes and line names observed there (e.g. a U/S
+    interchange; "lines" lets clients filter per line). Labeled
     with combined_name, not name: listStations sometimes splits a station's
     full name into name/city (e.g. name="Hbf", city="Lübeck"), and
     combined_name is the recombined, human-readable form ("Lübeck Hbf") -
@@ -65,12 +66,14 @@ def build_stops_geojson(
     startStationName/endStationName (active_names' source) uses.
     """
     modes_by_station: dict[str, set[str]] = {}
+    lines_by_station: dict[str, set[str]] = {}
     for subline in sublines:
         mode = mode_for_subline(subline)
         if not mode:
             continue
         for station_id in subline.station_ids:
             modes_by_station.setdefault(station_id, set()).add(mode)
+            lines_by_station.setdefault(station_id, set()).add(subline.line_name)
 
     features = []
     for station_id, modes in modes_by_station.items():
@@ -90,6 +93,7 @@ def build_stops_geojson(
                     "id": station.id,
                     "name": station.combined_name,
                     "modes": sorted(modes),
+                    "lines": sorted(lines_by_station[station_id]),
                     "text": station.combined_name,
                 },
             }

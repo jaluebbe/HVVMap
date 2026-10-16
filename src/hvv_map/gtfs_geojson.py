@@ -371,14 +371,19 @@ def build_stops_geojson(schedule: Schedule, reference_date: date | None = None) 
     service_ids = recently_active_service_ids(schedule, reference_date)
 
     modes_by_stop: dict = {}
+    lines_by_stop: dict = {}
     for trip in schedule.trips.values():
         if trip["service_id"] not in service_ids:
             continue
         mode = mode_for_trip(schedule, trip)
         if not mode:
             continue
+        route = schedule.routes.get(trip["route_id"], {})
+        line_name = route.get("route_short_name", "")
         for _, stop_id, _, _ in schedule.trip_stop_times.get(trip["trip_id"], []):
             modes_by_stop.setdefault(stop_id, set()).add(mode)
+            if line_name:
+                lines_by_stop.setdefault(stop_id, set()).add(line_name)
 
     features = []
     for stop_id, modes in modes_by_stop.items():
@@ -393,6 +398,7 @@ def build_stops_geojson(schedule: Schedule, reference_date: date | None = None) 
                     "text": stop.get("stop_name", ""),
                     "name": stop.get("stop_name", ""),
                     "modes": sorted(modes),
+                    "lines": sorted(lines_by_stop.get(stop_id, ())),
                 },
             }
         )

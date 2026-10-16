@@ -3,11 +3,16 @@
 const HAMBURG_CENTER = [9.9937, 53.5511]; // MapLibre wants [lon, lat]
 const HAMBURG_DEFAULT_ZOOM = 12;
 
+// Optional page overrides (window.HVV_PAGE_CONFIG): center [lon, lat], zoom, modes,
+// lineToggles {mode: [{key, color, icon}]} - per-line checkboxes replacing that mode's.
+const PAGE_CONFIG = window.HVV_PAGE_CONFIG || {};
+const LINE_TOGGLES = PAGE_CONFIG.lineToggles || {};
+
 const map = new maplibregl.Map({
     container: 'map',
     style: '/api/vector/style/positron.json',
-    center: HAMBURG_CENTER,
-    zoom: HAMBURG_DEFAULT_ZOOM,
+    center: PAGE_CONFIG.center || HAMBURG_CENTER,
+    zoom: PAGE_CONFIG.zoom ?? HAMBURG_DEFAULT_ZOOM,
     minZoom: 7,
     maxZoom: 18,
     attributionControl: false, // added manually below, with our own extra links
@@ -242,13 +247,19 @@ const STOP_MARKER_RADIUS = 2;
 const REPLACEMENT_LINE_PATTERN = /^.{2}-/;
 
 // ModeToggleControl toggles a mode's lines/stops/positions together.
-const MODES = [
+const ALL_MODES = [
     { key: 'U', name: 'U-Bahn', icon: '/static/hvv/icons/u.svg' },
     { key: 'S', name: 'S-Bahn', icon: '/static/hvv/icons/s.svg' },
     { key: 'AKN', name: 'AKN', icon: '/static/hvv/icons/akn.svg' },
     { key: 'FERRY', name: 'Fähre', icon: '/static/hvv/icons/ferry.svg' },
     { key: 'R', name: 'Regio', icon: '/static/hvv/icons/r.svg' },
 ];
+const MODES = PAGE_CONFIG.modes ? ALL_MODES.filter((m) => PAGE_CONFIG.modes.includes(m.key)) : ALL_MODES;
+
+// "U1-ERSATZ" -> "U1"
+function baseLineName(name) {
+    return (name || '').split('-')[0];
+}
 
 // SONSTIGE (displayed as "Infos") has no single fitting emoji among the
 // obvious closure/accessibility ones, so it gets the info symbol instead -
@@ -260,7 +271,7 @@ const DISRUPTION_CATEGORIES = [
 ];
 
 function buildIconNode(icon) {
-    if (icon.startsWith('/')) {
+    if (/^(\/|https?:)/.test(icon)) {
         const img = document.createElement('img');
         img.src = icon;
         img.height = 16;
@@ -273,8 +284,9 @@ function buildIconNode(icon) {
 
 // One checkbox per mode + disruption category; collapsible on narrow/short screens.
 class ModeToggleControl {
-    constructor(onModeToggle, categories, onCategoryToggle, sourceConfig) {
+    constructor(onModeToggle, categories, onCategoryToggle, sourceConfig, onLineToggle) {
         this._onModeToggle = onModeToggle;
+        this._onLineToggle = onLineToggle;
         this._categories = categories || [];
         this._onCategoryToggle = onCategoryToggle;
         this._sourceConfig = sourceConfig || null;
@@ -286,6 +298,7 @@ class ModeToggleControl {
         const checkbox = document.createElement('input');
         checkbox.type = 'checkbox';
         checkbox.checked = checked;
+        checkbox.setAttribute('aria-label', name || key);
         checkbox.addEventListener('change', () => onToggle(key, checkbox.checked));
         label.append(checkbox, buildIconNode(icon), document.createTextNode(name));
         container.appendChild(label);
@@ -325,7 +338,15 @@ class ModeToggleControl {
 
         const items = document.createElement('div');
         items.className = 'hvv-mode-control-items';
-        MODES.forEach((m) => this._appendItem(items, m.key, m.name, m.icon, true, this._onModeToggle));
+        MODES.forEach((m) => {
+            const lineToggles = LINE_TOGGLES[m.key];
+            if (lineToggles) {
+                // Icon already names the line.
+                lineToggles.forEach((l) => this._appendItem(items, l.key, '', l.icon, true, this._onLineToggle));
+            } else {
+                this._appendItem(items, m.key, m.name, m.icon, true, this._onModeToggle);
+            }
+        });
 
         this._categoriesSection = document.createElement('div');
         this._categoriesSection.className = 'hvv-mode-control-categories';
@@ -491,6 +512,30 @@ function initHvvVehicleLayers(initialSourceKey) {
     let currentSource = SOURCES.find((s) => s.key === initialSourceKey) || SOURCES[0];
     let modeToggleControl = null;
     const pollTimers = [];
+    const activeLines = new Set(Object.values(LINE_TOGGLES).flat().map((l) => l.key));
+    // Last fetched lines/stops, re-filtered on line toggle.
+    const referenceData = {};
+
+    // Modes without line toggles and features without line info always pass.
+    function linesVisible(modeKey, lineNames) {
+        if (!LINE_TOGGLES[modeKey] || !lineNames || lineNames.length === 0) {
+            return true;
+        }
+        return lineNames.some((name) => activeLines.has(baseLineName(name)));
+    }
+
+    function markerVisible(modeKey, marker) {
+        return activeModes.has(modeKey) && linesVisible(modeKey, [marker.hvvLine]);
+    }
+
+    // Restricted pages hide disruptions without a mode.
+    function disruptionVisible(properties) {
+        const modes = properties?.modes || [];
+        if (modes.length === 0) {
+            return !PAGE_CONFIG.modes;
+        }
+        return modes.some((mode) => activeModes.has(mode) && linesVisible(mode, properties.lines));
+    }
 
     function setModeVisibility(modeKey, visible) {
         if (visible) {
@@ -504,8 +549,24 @@ function initHvvVehicleLayers(initialSourceKey) {
         map.setLayoutProperty(`hvv-stops-layer-${modeKey}`, 'visibility', visibility);
         map.setLayoutProperty(`hvv-stops-labels-${modeKey}`, 'visibility', visibility);
         positionMarkersByMode[modeKey].forEach((marker) => {
-            marker.getElement().style.display = visible ? '' : 'none';
+            marker.getElement().style.display = markerVisible(modeKey, marker) ? '' : 'none';
         });
+        renderDisruptionLayers();
+    }
+
+    function setLineVisibility(lineKey, visible) {
+        if (visible) {
+            activeLines.add(lineKey);
+        } else {
+            activeLines.delete(lineKey);
+        }
+        MODES.forEach((m) => {
+            positionMarkersByMode[m.key].forEach((marker) => {
+                marker.getElement().style.display = markerVisible(m.key, marker) ? '' : 'none';
+            });
+        });
+        renderReferenceLayer('hvv-lines');
+        renderReferenceLayer('hvv-stops');
         renderDisruptionLayers();
     }
 
@@ -675,11 +736,52 @@ function initHvvVehicleLayers(initialSourceKey) {
             DISRUPTION_CATEGORIES,
             setCategoryVisibility,
             { sources: SOURCES, initialKey: currentSource.key, onSourceChange: switchSource },
+            setLineVisibility,
         );
         map.addControl(modeToggleControl, 'top-right');
         modeToggleControl.setCategoriesVisible(!!currentSource.disruptionsEndpoint);
         map.addControl(new LabelToggleControl(), 'top-right');
         map.addControl(new WakeLockControl(), 'top-right');
+    }
+
+    function activeLineColor(modeKey, lineNames) {
+        const toggles = LINE_TOGGLES[modeKey];
+        if (!toggles || !lineNames) {
+            return null;
+        }
+        for (const name of lineNames) {
+            const toggle = toggles.find((l) => l.key === baseLineName(name));
+            if (toggle && toggle.color && activeLines.has(toggle.key)) {
+                return toggle.color;
+            }
+        }
+        return null;
+    }
+
+    function renderReferenceLayer(sourcePrefix) {
+        const data = referenceData[sourcePrefix];
+        if (!data) {
+            return;
+        }
+        MODES.forEach(function(m) {
+            const filtered = {
+                type: 'FeatureCollection',
+                features: data.features
+                    .filter((f) => (f.properties?.modes || []).includes(m.key))
+                    .filter((f) => linesVisible(m.key, f.properties?.lines))
+                    .map((f) => ({
+                        ...f,
+                        properties: {
+                            ...f.properties,
+                            ...(sourcePrefix === 'hvv-lines' && activeLineColor(m.key, f.properties?.lines)
+                                ? { color: activeLineColor(m.key, f.properties.lines) }
+                                : {}),
+                            isReplacementLine: (f.properties?.lines || []).some((name) => REPLACEMENT_LINE_PATTERN.test(name)),
+                        },
+                    })),
+            };
+            map.getSource(`${sourcePrefix}-${m.key}`).setData(filtered);
+        });
     }
 
     async function refreshReferenceLayer(endpoint, sourcePrefix, layerName) {
@@ -689,22 +791,8 @@ function initHvvVehicleLayers(initialSourceKey) {
                 console.warn(`HVV ${layerName} layer: HTTP`, response.status);
                 return;
             }
-            const data = await response.json();
-            MODES.forEach(function(m) {
-                const filtered = {
-                    type: 'FeatureCollection',
-                    features: data.features
-                        .filter((f) => (f.properties?.modes || []).includes(m.key))
-                        .map((f) => ({
-                            ...f,
-                            properties: {
-                                ...f.properties,
-                                isReplacementLine: (f.properties?.lines || []).some((name) => REPLACEMENT_LINE_PATTERN.test(name)),
-                            },
-                        })),
-                };
-                map.getSource(`${sourcePrefix}-${m.key}`).setData(filtered);
-            });
+            referenceData[sourcePrefix] = await response.json();
+            renderReferenceLayer(sourcePrefix);
         } catch (error) {
             console.warn(`Failed to load HVV ${layerName} layer:`, error);
         }
@@ -734,7 +822,8 @@ function initHvvVehicleLayers(initialSourceKey) {
                 const marker = new maplibregl.Marker({ element, anchor: 'top-left' })
                     .setLngLat(feature.geometry.coordinates)
                     .addTo(map);
-                if (!activeModes.has(modeKey)) {
+                marker.hvvLine = properties.line;
+                if (!markerVisible(modeKey, marker)) {
                     element.style.display = 'none';
                 }
                 if (properties.text) {
@@ -775,11 +864,7 @@ function initHvvVehicleLayers(initialSourceKey) {
                 type: 'FeatureCollection',
                 // Kept in sync regardless of visibility, so toggling a category shows data immediately.
                 features: disruptionRawData.features.filter(function(f) {
-                    if (f.properties?.category !== c.key) {
-                        return false;
-                    }
-                    const modes = f.properties?.modes || [];
-                    return modes.length === 0 || modes.some((mode) => activeModes.has(mode));
+                    return f.properties?.category === c.key && disruptionVisible(f.properties);
                 }),
             };
             source.setData(filtered);
@@ -812,8 +897,7 @@ function initHvvVehicleLayers(initialSourceKey) {
             if (!category || !stationName || !activeCategories.has(category)) {
                 return;
             }
-            const modes = f.properties?.modes || [];
-            if (modes.length > 0 && !modes.some((mode) => activeModes.has(mode))) {
+            if (!disruptionVisible(f.properties)) {
                 return;
             }
             if (STATION_LABEL_COLORS[category]) {
@@ -866,6 +950,7 @@ function initHvvVehicleLayers(initialSourceKey) {
 
     // Wipes markers/sources so stale data from the previous source doesn't linger.
     function clearAllData() {
+        Object.keys(referenceData).forEach((key) => delete referenceData[key]);
         MODES.forEach((m) => {
             map.getSource(`hvv-lines-${m.key}`).setData(EMPTY_FEATURE_COLLECTION);
             map.getSource(`hvv-stops-${m.key}`).setData(EMPTY_FEATURE_COLLECTION);

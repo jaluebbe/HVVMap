@@ -127,7 +127,7 @@ vehicle-type checks) - not part of the installed package.
 
 ## Frontend
 
-`static/` ships four map pages, all served by the same `api.py`:
+`static/` ships five map pages, all served by the same `api.py`:
 
 - `leaflet_map_hvv_live.html` / `_realtime.html` / `_gtfs.html` - three
   near-identical Leaflet pages, one per data source, sharing
@@ -138,6 +138,9 @@ vehicle-type checks) - not part of the installed package.
   (`live`/`realtime`/`gtfs`) at runtime via a dropdown, no page reload
   needed; see `maplibre_map_hvv_base.js`'s `SOURCES`. Defaults to
   `realtime` - see "Notable data quirks" below for why.
+- `maplibre_map_hvv_ubahn.html` - the MapLibre page restricted to the U-Bahn,
+  centered on Betriebshof Barmbek, with U1-U4 toggleable individually. Page
+  options are set via `window.HVV_PAGE_CONFIG` (see `maplibre_map_hvv_base.js`).
 
 `index.html` is the landing page linking to all of them.
 

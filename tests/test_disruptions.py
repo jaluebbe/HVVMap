@@ -81,6 +81,17 @@ def test_build_disruptions_geojson_sets_mode_from_line():
     assert feature["properties"]["modes"] == ["U"]
 
 
+def test_build_disruptions_geojson_lists_line_names():
+    data = {
+        "announcements": [
+            _announcement("U1-Sperrung", "", "Master:1", "Master:1", "U1"),
+            _announcement("U3-Sperrung", "", "Master:1", "Master:1", "U3"),
+        ]
+    }
+    feature = build_disruptions_geojson(data, STATIONS, now=NOW)["features"][0]
+    assert feature["properties"]["lines"] == ["U1", "U3"]
+
+
 def test_build_disruptions_geojson_labels_with_combined_name():
     # Regression: listStations splits some stations into name="Hbf",
     # city="Lübeck" - the popup heading and station_name property must use

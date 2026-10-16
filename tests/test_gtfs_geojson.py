@@ -172,6 +172,14 @@ def test_build_stops_geojson_includes_modes_for_used_stops():
         assert feature["properties"]["modes"] == ["U"]
 
 
+def test_build_stops_geojson_includes_lines_for_used_stops():
+    schedule = _make_schedule()
+    result = build_stops_geojson(schedule, reference_date=date(2025, 6, 2))
+
+    for feature in result["features"]:
+        assert feature["properties"]["lines"] == ["U1"]
+
+
 def test_build_stops_geojson_name_matches_stop_name():
     schedule = _make_schedule()
     result = build_stops_geojson(schedule, reference_date=date(2025, 6, 2))

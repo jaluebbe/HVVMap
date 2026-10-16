@@ -81,6 +81,7 @@ def test_build_stops_geojson_geometry_and_properties():
         "id": "Master:1",
         "name": "Ohlstedt",
         "modes": ["U"],
+        "lines": ["U1"],
         "text": "Ohlstedt",
     }
 
@@ -110,6 +111,7 @@ def test_build_stops_geojson_combines_modes_at_interchange():
     )  # fmt: skip
     feature = build_stops_geojson([u1, s1], STATIONS)["features"][0]
     assert feature["properties"]["modes"] == ["S", "U"]
+    assert feature["properties"]["lines"] == ["S1", "U1"]
 
 
 def test_build_stops_geojson_skips_stations_without_coordinates():
