@@ -23,6 +23,7 @@ from fastapi.staticfiles import StaticFiles
 from hvv_map.announcement_categories import classify_category
 from hvv_map.departures_tree import build_station_tree, build_trip_tree, parse_anchor
 from hvv_map.gti_shapes import DEFAULT_DB_PATH as GTI_SHAPES_DB_PATH
+from hvv_map.gti_shapes import read_course_log
 from hvv_map.gtilive_debug import build_debug_geojson
 from hvv_map.gtilive_geojson import (
     build_lines_geojson as build_gtilive_lines_geojson,
@@ -349,6 +350,13 @@ def get_gtilive_debug():
     by_service = _read_cached_json(REDIS_BY_SERVICE_KEY)
     stations = by_id(load_stations(_redis_client))
     return build_debug_geojson(by_service, stations, _get_gti_shapes_connection())
+
+
+@app.get("/api/hvv/gtilive/courses.json", tags=["hvv_gtilive"])
+def get_gtilive_courses(limit: int = 500):
+    """departureCourse call log from hvvmap-gti-shapes-update, for
+    static/dev_courses.html."""
+    return read_course_log(_get_gti_shapes_connection(), max(1, min(limit, 5000)))
 
 
 # --- GTFS layers -------------------------------------------------------------

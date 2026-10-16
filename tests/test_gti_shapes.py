@@ -12,6 +12,7 @@ from hvv_map.gti_shapes import (
     is_resolved,
     load_schedule,
     open_db,
+    read_course_log,
     store_schedule,
     store_segment,
     subline_key,
@@ -330,3 +331,42 @@ def test_update_gti_shapes_tries_more_trips_while_hops_lack_a_segment(
 
     assert summary["resolved"] == 1
     assert len(client.sent_requests) == 4
+
+
+def test_update_gti_shapes_logs_each_call_with_delays(tmp_path):
+    response = {
+        "courseElements": [
+            {**e, "depDelay": 120, "arrDelay": 300}
+            for e in COURSE_RESPONSE["courseElements"]
+        ]
+    }
+    by_service = {
+        "1": _entry("HHA-U:U1_HHA-U", ("Master:1", "Master:2"), dlid="de:hvv:U1:")
+    }
+    redis_client = _FakeRedis(
+        {
+            "hvv:departures:by_service": by_service,
+            "hvv:departures:anchor_start": {"date": "2026-09-21", "time": "04:00:00"},
+        }
+    )
+    conn = open_db(str(tmp_path / "gti_shapes.db"))
+
+    update_gti_shapes(_FakeClient(response), redis_client, conn)
+    log = read_course_log(conn)
+
+    assert [c["result"] for c in log["calls"]] == ["ok"]
+    assert log["calls"][0]["max_delay_s"] == 300
+    first_leg = log["calls"][0]["legs"][0]
+    assert first_leg["from"] == "Ohlstedt" and first_leg["dep_delay"] == 120
+    assert first_leg["dep_time"] and first_leg["arr_time"]
+    assert log["calls"][0]["segments"] == 2
+    assert log["runs"][0]["calls"] == 1 and log["runs"][0]["ok"] == 1
+    assert log["sublines"][0]["calls"] == 1
+
+
+def test_read_course_log_empty_without_table_or_connection(tmp_path):
+    import sqlite3
+
+    assert read_course_log(None)["calls"] == []
+    bare = sqlite3.connect(str(tmp_path / "bare.db"))
+    assert read_course_log(bare) == {"calls": [], "runs": [], "sublines": []}

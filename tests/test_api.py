@@ -295,3 +295,9 @@ def test_gtilive_debug_returns_lines_stops_and_summary(client, monkeypatch):
 def test_gtilive_debug_503_when_by_service_missing(client, monkeypatch):
     monkeypatch.setattr(api_module, "_redis_client", _FakeRedis({}))
     assert client.get("/api/hvv/gtilive/debug.geojson").status_code == 503
+
+
+def test_gtilive_courses_empty_without_database(client, monkeypatch):
+    monkeypatch.setattr(api_module, "_get_gti_shapes_connection", lambda: None)
+    data = client.get("/api/hvv/gtilive/courses.json").json()
+    assert data == {"calls": [], "runs": [], "sublines": []}

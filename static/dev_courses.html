@@ -1,0 +1,369 @@
+<!DOCTYPE html>
+<html lang="de">
+
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width,initial-scale=1.0">
+    <title>HVV departureCourse-Abrufe - Entwickleransicht</title>
+    <style>
+        :root {
+            --ink: #1a2733;
+            --muted: #5b6b78;
+            --line: #d8dee3;
+            --bg: #f4f6f8;
+            --card: #ffffff;
+            --accent: #1e64a0;
+            --warn: #b3541e;
+            --ok: #2b7a4b;
+        }
+
+        * {
+            box-sizing: border-box;
+        }
+
+        body {
+            margin: 0;
+            font-family: -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            background: var(--bg);
+            color: var(--ink);
+            font-size: 0.88rem;
+        }
+
+        header {
+            position: sticky;
+            top: 0;
+            z-index: 5;
+            background: var(--card);
+            border-bottom: 1px solid var(--line);
+            padding: 12px 16px;
+        }
+
+        h1 {
+            margin: 0 0 2px;
+            font-size: 1.05rem;
+            font-weight: 600;
+        }
+
+        .meta {
+            font-size: 0.78rem;
+            color: var(--muted);
+        }
+
+        .toolbar {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px 14px;
+            align-items: center;
+            margin-top: 10px;
+        }
+
+        .toolbar input[type="search"],
+        .toolbar select {
+            padding: 6px 8px;
+            border: 1px solid var(--line);
+            border-radius: 6px;
+            font: inherit;
+        }
+
+        .toolbar input[type="search"] {
+            flex: 1 1 220px;
+        }
+
+        .tabs button {
+            padding: 6px 12px;
+            border: 1px solid var(--line);
+            background: var(--bg);
+            font: inherit;
+            cursor: pointer;
+        }
+
+        .tabs button:first-child {
+            border-radius: 6px 0 0 6px;
+        }
+
+        .tabs button:last-child {
+            border-radius: 0 6px 6px 0;
+        }
+
+        .tabs button.active {
+            background: var(--accent);
+            color: #fff;
+            border-color: var(--accent);
+        }
+
+        main {
+            padding: 12px 16px 40px;
+            overflow-x: auto;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            background: var(--card);
+            border: 1px solid var(--line);
+        }
+
+        th,
+        td {
+            text-align: left;
+            padding: 6px 10px;
+            border-bottom: 1px solid var(--line);
+            white-space: nowrap;
+        }
+
+        th {
+            background: #eef2f5;
+            font-weight: 600;
+            font-size: 0.78rem;
+            position: sticky;
+            top: 0;
+        }
+
+        td.num,
+        th.num {
+            text-align: right;
+        }
+
+        tr.call {
+            cursor: pointer;
+        }
+
+        tr.call:hover {
+            background: #f0f5fa;
+        }
+
+        tr.detail td {
+            white-space: normal;
+            background: #fafbfc;
+            color: var(--muted);
+            font-size: 0.8rem;
+        }
+
+        .ok {
+            color: var(--ok);
+            font-weight: 600;
+        }
+
+        .bad {
+            color: var(--warn);
+            font-weight: 600;
+        }
+
+        .empty {
+            padding: 24px;
+            color: var(--muted);
+        }
+    </style>
+</head>
+
+<body>
+    <header>
+        <h1>departureCourse-Abrufe</h1>
+        <div class="meta" id="meta">lädt …</div>
+        <div class="toolbar">
+            <span class="tabs">
+                <button data-view="calls" class="active">Abrufe</button>
+                <button data-view="runs">Läufe</button>
+                <button data-view="sublines">Sublines</button>
+            </span>
+            <input type="search" id="search" placeholder="Linie, Station, Subline …">
+            <select id="result">
+                <option value="">alle Ergebnisse</option>
+                <option value="ok">nur ok</option>
+                <option value="bad">nur Fehler</option>
+            </select>
+        </div>
+    </header>
+    <main id="content"></main>
+
+    <script>
+        const ENDPOINT = "/api/hvv/gtilive/courses.json?limit=2000";
+        let data = { calls: [], runs: [], sublines: [] };
+        let view = "calls";
+
+        const content = document.getElementById("content");
+        const search = document.getElementById("search");
+        const resultFilter = document.getElementById("result");
+
+        function stamp(seconds) {
+            return seconds
+                ? new Date(seconds * 1000).toLocaleString("de-DE", {
+                    day: "2-digit", month: "2-digit", hour: "2-digit",
+                    minute: "2-digit", second: "2-digit",
+                })
+                : "–";
+        }
+
+        function delayText(seconds) {
+            if (seconds === null || seconds === undefined) return "–";
+            return `${Math.round(seconds / 60)} min`;
+        }
+
+        function cell(row, text, cls) {
+            const td = document.createElement("td");
+            td.textContent = text;
+            if (cls) td.className = cls;
+            row.appendChild(td);
+            return td;
+        }
+
+        function table(headers, numeric) {
+            const t = document.createElement("table");
+            const head = document.createElement("tr");
+            headers.forEach((h, i) => {
+                const th = document.createElement("th");
+                th.textContent = h;
+                if (numeric.includes(i)) th.className = "num";
+                head.appendChild(th);
+            });
+            t.appendChild(head);
+            return t;
+        }
+
+        function matches(text) {
+            const q = search.value.trim().toLowerCase();
+            return !q || text.toLowerCase().includes(q);
+        }
+
+        function resultMatches(result) {
+            const f = resultFilter.value;
+            return !f || (f === "ok") === (result === "ok");
+        }
+
+        function clock(iso) {
+            return iso ? iso.slice(11, 19) : "–";
+        }
+
+        // planned time, plus the delayed time when the API reports a delay
+        function timeWithDelay(iso, delay) {
+            if (!iso) return "–";
+            if (!delay) return clock(iso);
+            const actual = new Date(new Date(iso).getTime() + delay * 1000);
+            return `${clock(iso)} → ${actual.toLocaleTimeString("de-DE")} (+${Math.round(delay / 60)} min)`;
+        }
+
+        // one row per station: arrival from the previous leg, departure from this one
+        function legTable(call) {
+            const legs = call.legs || [];
+            if (!legs.length) {
+                const note = document.createElement("div");
+                note.textContent = "keine Streckenelemente in der Antwort";
+                return note;
+            }
+            const t = table(["Halt", "Ankunft", "Abfahrt"], []);
+            const stops = legs.map((leg, i) => ({
+                name: leg.from,
+                arr: i ? [legs[i - 1].arr_time, legs[i - 1].arr_delay] : [null, null],
+                dep: [leg.dep_time, leg.dep_delay],
+            }));
+            const last = legs[legs.length - 1];
+            stops.push({ name: last.to, arr: [last.arr_time, last.arr_delay], dep: [null, null] });
+            for (const stop of stops) {
+                const row = document.createElement("tr");
+                cell(row, stop.name || "–");
+                cell(row, timeWithDelay(...stop.arr));
+                cell(row, timeWithDelay(...stop.dep));
+                t.appendChild(row);
+            }
+            return t;
+        }
+
+        function renderCalls() {
+            const t = table(
+                ["Zeit", "Lauf", "Linie", "Fahrt", "Station", "Abfahrt", "Ergebnis",
+                    "Segmente", "max. Verspätung"], [7]);
+            let shown = 0;
+            for (const c of data.calls) {
+                const text = [c.line, c.station, c.subline_key, c.service_id].join(" ");
+                if (!matches(text) || !resultMatches(c.result)) continue;
+                shown++;
+                const row = document.createElement("tr");
+                row.className = "call";
+                cell(row, stamp(c.called_at));
+                cell(row, stamp(c.run_id));
+                cell(row, c.line);
+                cell(row, c.service_id);
+                cell(row, c.station || "–");
+                cell(row, c.dep_time ? c.dep_time.slice(0, 16).replace("T", " ") : "–");
+                cell(row, c.result, c.result === "ok" ? "ok" : "bad");
+                cell(row, String(c.segments), "num");
+                cell(row, delayText(c.max_delay_s), "num");
+                t.appendChild(row);
+
+                const detail = document.createElement("tr");
+                detail.className = "detail";
+                detail.hidden = true;
+                const td = document.createElement("td");
+                td.colSpan = 9;
+                td.appendChild(legTable(c));
+                detail.appendChild(td);
+                t.appendChild(detail);
+                row.addEventListener("click", () => { detail.hidden = !detail.hidden; });
+            }
+            return [t, shown];
+        }
+
+        function renderRuns() {
+            const t = table(["Lauf", "Abrufe", "ok", "Fehler", "von", "bis"], [1, 2, 3]);
+            for (const r of data.runs) {
+                const row = document.createElement("tr");
+                cell(row, stamp(r.run_id));
+                cell(row, String(r.calls), "num");
+                cell(row, String(r.ok), "num ok");
+                cell(row, String(r.calls - r.ok), r.calls - r.ok ? "num bad" : "num");
+                cell(row, stamp(r.first));
+                cell(row, stamp(r.last));
+                t.appendChild(row);
+            }
+            return [t, data.runs.length];
+        }
+
+        function renderSublines() {
+            const t = table(["Linie", "aufgelöst", "Beispielfahrt", "Abrufe", "ok", "letzter Abruf"], [3, 4]);
+            let shown = 0;
+            for (const s of data.sublines) {
+                if (!matches([s.line, s.line_id, s.subline_key].join(" "))) continue;
+                shown++;
+                const row = document.createElement("tr");
+                cell(row, s.line || s.line_id).title = s.subline_key;
+                cell(row, stamp(s.resolved_at));
+                cell(row, s.service_id);
+                cell(row, String(s.calls), "num");
+                cell(row, String(s.ok), "num");
+                cell(row, stamp(s.last_call));
+                t.appendChild(row);
+            }
+            return [t, shown];
+        }
+
+        function render() {
+            const [node, shown] = { calls: renderCalls, runs: renderRuns, sublines: renderSublines }[view]();
+            content.replaceChildren(shown ? node : Object.assign(
+                document.createElement("div"), { className: "empty", textContent: "Keine Einträge." }));
+        }
+
+        document.querySelectorAll(".tabs button").forEach(b => b.addEventListener("click", () => {
+            view = b.dataset.view;
+            document.querySelectorAll(".tabs button").forEach(x => x.classList.toggle("active", x === b));
+            render();
+        }));
+        search.addEventListener("input", render);
+        resultFilter.addEventListener("change", render);
+
+        (async function load() {
+            try {
+                const response = await fetch(ENDPOINT);
+                if (!response.ok) throw new Error(`HTTP ${response.status}`);
+                data = await response.json();
+                const ok = data.calls.filter(c => c.result === "ok").length;
+                document.getElementById("meta").textContent =
+                    `${data.calls.length} Abrufe geladen (${ok} ok), ${data.runs.length} Läufe, ${data.sublines.length} Sublines`;
+            } catch (error) {
+                document.getElementById("meta").textContent = `Fehler beim Laden: ${error.message}`;
+            }
+            render();
+        })();
+    </script>
+</body>
+
+</html>

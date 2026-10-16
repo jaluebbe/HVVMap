@@ -76,6 +76,12 @@ def open_db(db_path: str = DEFAULT_DB_PATH) -> sqlite3.Connection:
         "subline_key TEXT PRIMARY KEY, service_id TEXT, "
         "stop_offsets_json TEXT, resolved_at INTEGER)"
     )
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS course_log ("
+        "id INTEGER PRIMARY KEY AUTOINCREMENT, run_id INTEGER, called_at INTEGER, "
+        "subline_key TEXT, line_name TEXT, service_id TEXT, station TEXT, "
+        "dep_time TEXT, result TEXT, segments INTEGER, delays_json TEXT)"
+    )
     return conn
 
 
@@ -153,6 +159,121 @@ def store_schedule(
         (key, str(service_id), json.dumps(stop_offsets), int(time.time())),
     )
     conn.commit()
+
+
+def log_course(
+    conn: sqlite3.Connection,
+    run_id: int,
+    key: str,
+    line_name: str,
+    service_id: str,
+    info: dict,
+    result: str,
+    segments: int,
+) -> None:
+    """One row per departureCourse attempt (result "ok" or the error kind)."""
+    conn.execute(
+        "INSERT INTO course_log (run_id, called_at, subline_key, line_name, "
+        "service_id, station, dep_time, result, segments, delays_json) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        (
+            run_id,
+            int(time.time()),
+            key,
+            line_name,
+            str(service_id),
+            info.get("station"),
+            info.get("dep_time"),
+            result,
+            segments,
+            json.dumps(info.get("legs") or []),
+        ),
+    )
+    conn.commit()
+
+
+def _max_delay(legs: list[dict]) -> int | None:
+    values = [
+        leg[k]
+        for leg in legs
+        for k in ("dep_delay", "arr_delay")
+        if leg.get(k) is not None
+    ]
+    return max(values) if values else None
+
+
+def read_course_log(conn: sqlite3.Connection | None, limit: int = 500) -> dict:
+    """Overview for the courses debug page: the latest attempts, per-run
+    totals and per-subline totals. Empty if the log table doesn't exist yet."""
+    empty = {"calls": [], "runs": [], "sublines": []}
+    if conn is None:
+        return empty
+    try:
+        rows = conn.execute(
+            "SELECT id, run_id, called_at, subline_key, line_name, service_id, "
+            "station, dep_time, result, segments, delays_json "
+            "FROM course_log ORDER BY id DESC LIMIT ?",
+            (limit,),
+        ).fetchall()
+        runs = conn.execute(
+            "SELECT run_id, COUNT(*), SUM(result = 'ok'), MIN(called_at), "
+            "MAX(called_at) FROM course_log GROUP BY run_id ORDER BY run_id DESC"
+        ).fetchall()
+        sublines = conn.execute(
+            "SELECT s.subline_key, s.service_id, s.resolved_at, "
+            "COUNT(c.id), SUM(c.result = 'ok'), MAX(c.called_at), MAX(c.line_name) "
+            "FROM subline_schedule s LEFT JOIN course_log c "
+            "ON c.subline_key = s.subline_key GROUP BY s.subline_key "
+            "ORDER BY s.resolved_at DESC"
+        ).fetchall()
+    except sqlite3.OperationalError:
+        return empty
+
+    calls = []
+    for row in rows:
+        legs = json.loads(row[10] or "[]")
+        calls.append(
+            {
+                "id": row[0],
+                "run_id": row[1],
+                "called_at": row[2],
+                "subline_key": row[3],
+                "line": row[4],
+                "service_id": row[5],
+                "station": row[6],
+                "dep_time": row[7],
+                "result": row[8],
+                "segments": row[9],
+                "max_delay_s": _max_delay(legs),
+                "legs": legs,
+            }
+        )
+    return {
+        "calls": calls,
+        "runs": [
+            {
+                "run_id": r[0],
+                "calls": r[1],
+                "ok": r[2] or 0,
+                "first": r[3],
+                "last": r[4],
+            }
+            for r in runs
+        ],
+        "sublines": [
+            {
+                "subline_key": r[0],
+                "service_id": r[1],
+                "resolved_at": r[2],
+                "calls": r[3],
+                "ok": r[4] or 0,
+                "last_call": r[5],
+                "line": r[6],
+                "line_id": r[0].split("|", 1)[0],
+            }
+            for r in sublines
+        ],
+    }
 
 
 def _representative_entries(by_service: dict) -> dict[str, tuple[str, dict]]:
@@ -252,6 +373,22 @@ def _extract_course(course_response: dict) -> tuple[list[tuple], list[dict]] | N
     return segments, stop_offsets
 
 
+def _course_legs(course_response: dict) -> list[dict]:
+    """Per course element the stations, planned times and reported delays as
+    the API gives them (None where absent)."""
+    return [
+        {
+            "from": (e.get("fromStation") or {}).get("name"),
+            "to": (e.get("toStation") or {}).get("name"),
+            "dep_time": e.get("depTime"),
+            "arr_time": e.get("arrTime"),
+            "dep_delay": e.get("depDelay"),
+            "arr_delay": e.get("arrDelay"),
+        }
+        for e in course_response.get("courseElements") or []
+    ]
+
+
 def _concat_coordinates(coordinate_lists: list[Coordinates]) -> Coordinates:
     """Join consecutive segments' coordinates into one path, dropping the
     duplicate point at each junction."""
@@ -309,13 +446,15 @@ def _load_by_service(redis_client) -> dict:
 
 def _query_course(
     client: GtiClient, service_id: str, entry: dict, anchor_start: datetime
-) -> tuple[tuple | None, str, str]:
+) -> tuple[tuple | None, str, str, dict]:
     """departureCourse for one trip: (extracted course or None, error kind
-    "no_query"/"api" or "", detail for the first-failure log)."""
+    "no_query"/"api" or "", detail for the first-failure log, log info)."""
     query = _departure_query(entry, anchor_start)
     if query is None:
-        return None, "no_query", f"stops[0]={entry.get('stops', [None])[:1]!r}"
+        detail = f"stops[0]={entry.get('stops', [None])[:1]!r}"
+        return None, "no_query", detail, {}
     station_name, iso_time = query
+    info = {"station": station_name, "dep_time": iso_time}
     request = {
         "station": {"type": "STATION", "name": station_name},
         "time": iso_time,
@@ -328,10 +467,11 @@ def _query_course(
     }
     response = client.send("departureCourse", request)
     time.sleep(1)  # 1 req/s rate limit across all GTI endpoints
+    info["legs"] = _course_legs(response)
     extracted = _extract_course(response)
     if extracted is None:
-        return None, "api", f"request={request!r} response={response!r}"
-    return extracted, "", ""
+        return None, "api", f"request={request!r} response={response!r}", info
+    return extracted, "", "", info
 
 
 def update_gti_shapes(
@@ -351,6 +491,7 @@ def update_gti_shapes(
         return {"resolved": 0, "skipped": 0, "failed": 0}
 
     summary = {"resolved": 0, "skipped": 0, "failed": 0, "no_query": 0}
+    run_id = int(time.time())
     for key, trips in _entries_by_key(by_service).items():
         resolved = is_resolved(conn, key)
         subline = trips[0][1].get("subline") or []
@@ -363,8 +504,18 @@ def update_gti_shapes(
             candidates = trips[:1] + _spread(trips[1:], EXTRA_COURSE_TRIES)
         error, detail = "", ""
         for service_id, entry in candidates:
-            extracted, error, detail = _query_course(
+            extracted, error, detail, info = _query_course(
                 client, service_id, entry, anchor_start
+            )
+            log_course(
+                conn,
+                run_id,
+                key,
+                entry["line"].get("name", ""),
+                service_id,
+                info,
+                "ok" if extracted else error,
+                len(extracted[0]) if extracted else 0,
             )
             if extracted is None:
                 continue
