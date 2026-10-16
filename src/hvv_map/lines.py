@@ -36,10 +36,11 @@ R_BAHN_LINES = ("RB60", "RB61", "RB71", "RB81", "RE8", "RE80")
 # The name must end right after the fixed number, or continue with "-" (a
 # replacement-bus/SEV suffix) - otherwise "RE8" would also match "RE83", an
 # unrelated line one digit longer.
+_R_BAHN_ALTERNATIVES = "|".join(map(re.escape, R_BAHN_LINES))
 LINE_NAME_PATTERN = re.compile(
-    r"^(?:[USA][0-9]{1,2}|" + "|".join(map(re.escape, R_BAHN_LINES)) + r")"
-    r"(?:-.*)?$"
+    r"^(?:[USA][0-9]{1,2}|" + _R_BAHN_ALTERNATIVES + r")(?:-.*)?$"
 )
+_R_BAHN_NAME_PATTERN = re.compile(r"^(?:" + _R_BAHN_ALTERNATIVES + r")(?:-.*)?$")
 FERRY_CARRIER = "HADAG"  # the actual Hamburg harbour ferry operator
 
 # For getAnnouncements' "names" filter (accepts line names OR carrier names).
@@ -66,7 +67,7 @@ def replacement_bus_mode(name: str) -> str:
     match = _REPLACEMENT_BUS_NAME_PREFIX.match(name)
     if match:
         return _REPLACEMENT_BUS_MODE_BY_PREFIX[match.group(1)]
-    if any(name.startswith(rb) for rb in WANTED_R_BAHN_LINES):
+    if _R_BAHN_NAME_PATTERN.match(name):
         return "R"
     return ""
 

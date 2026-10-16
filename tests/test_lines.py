@@ -120,7 +120,8 @@ def test_replacement_bus_mode_by_prefix():
 
 
 def test_replacement_bus_mode_unrelated_name_returns_empty():
-    for name in ["175", "Metrobus 5", ""]:
+    # RE83 must not match just because it starts with "RE8".
+    for name in ["175", "Metrobus 5", "", "RE83", "RE83-SEV", "RB601-SEV"]:
         assert replacement_bus_mode(name) == ""
 
 
