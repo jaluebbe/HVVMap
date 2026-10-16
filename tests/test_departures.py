@@ -4,6 +4,7 @@ from hvv_map.departures import (
     _anchor_set,
     _candidate_match_ids,
     _is_subsequence,
+    _names_match,
     _subline_candidates,
     match_subline,
 )
@@ -161,3 +162,47 @@ def test_match_subline_uses_kuecknitz_anchor_to_tell_re8_variants_apart():
 
     assert match_subline(entry(["HBF"]), sublines_cache) == [short_variant]
     assert match_subline(entry(["HBF", "KUE"]), sublines_cache) == [long_variant]
+
+
+def test_names_match_tolerates_trailing_qualifier_at_word_boundary():
+    assert _names_match("Landungsbrücken", "Landungsbrücken Brücke 1")
+    assert _names_match("AIRBUS", "AIRBUS (Schiffsanleger)")
+    assert _names_match("Neuhof", "Neuhof")
+    assert not _names_match("Altona", "Altonaer Museum")
+    assert not _names_match(None, "Neuhof")
+
+
+def test_match_subline_ferry_short_destination_picks_longest_nested_variant():
+    # Departures name the terminus "Landungsbrücken"; one variant skips a
+    # stop of the other, and a single observed anchor stop fits both.
+    short = [
+        {"id": "NEU", "name": "Neuhof"},
+        {"id": "MID", "name": "Mitte"},
+        {"id": "LB2", "name": "Landungsbrücken Brücke 2"},
+    ]
+    long = [
+        {"id": "NEU", "name": "Neuhof"},
+        {"id": "MID", "name": "Mitte"},
+        {"id": "EXT", "name": "Extra"},
+        {"id": "LB2", "name": "Landungsbrücken Brücke 2"},
+    ]
+    sublines_cache = {"61": {"sublines": [{"stations": short}, {"stations": long}]}}
+    entry = _ring_entry(
+        ["NEU"],
+        line_id="61",
+        line_name="61",
+        origin="Neuhof",
+        destination="Landungsbrücken",
+        short_info="Schiff",
+    )
+    assert match_subline(entry, sublines_cache) == [long]
+
+
+def test_match_subline_keeps_non_nested_variants_ambiguous():
+    a = [{"id": "S", "name": "S"}, {"id": "X", "name": "X"}, {"id": "E", "name": "E"}]
+    b = [{"id": "S", "name": "S"}, {"id": "Y", "name": "Y"}, {"id": "E", "name": "E"}]
+    sublines_cache = {"9": {"sublines": [{"stations": a}, {"stations": b}]}}
+    entry = _ring_entry(
+        ["S"], line_id="9", line_name="9", origin="S", destination="E", short_info="Bus"
+    )
+    assert len(match_subline(entry, sublines_cache)) == 2

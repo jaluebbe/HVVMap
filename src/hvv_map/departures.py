@@ -246,6 +246,18 @@ def group_by_service(departures: list[dict]) -> dict[str, dict]:
     return grouped
 
 
+def _names_match(departure_name: str | None, station_name: str) -> bool:
+    """Equal, or one name is the other plus a trailing qualifier at a word
+    boundary: departures say "Landungsbrücken" or "AIRBUS" where the subline
+    has "Landungsbrücken Brücke 1" or "AIRBUS (Schiffsanleger)"."""
+    if not departure_name:
+        return False
+    if departure_name == station_name:
+        return True
+    shorter, longer = sorted((departure_name, station_name), key=len)
+    return longer.startswith(shorter + " ")
+
+
 def _subline_candidates(
     sublines_cache: dict, line_id: str, origin: str, destination: str
 ) -> list[list[dict]]:
@@ -258,8 +270,8 @@ def _subline_candidates(
         sub["stations"]
         for sub in entry["sublines"]
         if sub["stations"]
-        and sub["stations"][0]["name"] == origin
-        and sub["stations"][-1]["name"] == destination
+        and _names_match(origin, sub["stations"][0]["name"])
+        and _names_match(destination, sub["stations"][-1]["name"])
     ]
 
 
@@ -339,7 +351,16 @@ def match_subline(entry: dict, sublines_cache: dict) -> list[list[dict]]:
         for c in subseq
         if not any(s["name"] in anchors and s["id"] not in observed_ids for s in c[:-1])
     ]
-    return narrowed or subseq
+    result = narrowed or subseq
+    if len(result) > 1:
+        # Variants that only skip stops of the longest one cannot be told
+        # apart by few observed stops (e.g. ferries seen at one anchor);
+        # the longest covers every station any of them serves.
+        longest = max(result, key=len)
+        longest_ids = [s["id"] for s in longest]
+        if all(_is_subsequence([s["id"] for s in c], longest_ids) for c in result):
+            return [longest]
+    return result
 
 
 def match_sublines(by_service: dict[str, dict], sublines_cache: dict) -> None:
