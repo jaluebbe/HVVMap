@@ -89,3 +89,25 @@ def test_is_currently_valid_outside_window():
         ]
     }
     assert not is_currently_valid(announcement, now=NOW)
+
+
+def test_classify_category_sperrung_for_cancelled_trains():
+    announcement = {
+        "summary": "Ganztägig EV - Ahrensburg ⇄ Hamburg Hbf",
+        "description": (
+            "Im angegebenen Zeitraum entfallen die Züge des RE 8, RE 80 sowie der "
+            "RB 81 ganztägig zwischen Ahrensburg und Hamburg Hbf. Es wird folgendes "
+            "Ersatzkonzept bereitgestellt: Direktbus EV 8X"
+        ),
+    }
+    assert classify_category(announcement) == CATEGORY_SPERRUNG
+
+
+def test_classify_category_sperrung_when_trains_are_named_before_entfallen():
+    announcement = {"summary": "", "description": "Die Züge der RB 81 entfallen."}
+    assert classify_category(announcement) == CATEGORY_SPERRUNG
+
+
+def test_classify_category_sonstige_when_a_single_stop_is_skipped():
+    announcement = {"summary": "", "description": "Der Halt in Altona entfällt."}
+    assert classify_category(announcement) == CATEGORY_SONSTIGE

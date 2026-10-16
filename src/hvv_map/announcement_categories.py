@@ -35,6 +35,9 @@ CLOSURE_PATTERNS = [
     re.compile(r"unterbrochen", re.IGNORECASE),
     re.compile(r"kein Zugverkehr", re.IGNORECASE),
     re.compile(r"gesperrt", re.IGNORECASE),
+    # Cancelled trains ("entfallen die Züge ...", "Züge ... entfallen")
+    re.compile(r"\bZüge\b[^.\n]{0,80}\bentfallen", re.IGNORECASE),
+    re.compile(r"\bentfallen\b[^.\n]{0,40}\bZüge\b", re.IGNORECASE),
 ]
 
 
