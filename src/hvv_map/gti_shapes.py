@@ -1,0 +1,411 @@
+"""Real route geometry and scheduled per-stop timing for resolved gti-live
+sublines, fetched via departureCourse - one call per distinct subline
+(line_id + matched station-id sequence, see departures.match_sublines), not
+per trip: a subline's shape and schedule are stable, only per-trip delay
+varies. Once a subline is resolved here, no further departureCourse calls
+are needed for it.
+
+departureCourse's own station ids match listLines/hvv:stations directly
+(e.g. "Master:81950"), so segment geometry is keyed on those - no
+stopPointKey crosswalk needed, unlike the getVehicleMap-era segment_cache.
+
+Two tables in one SQLite file (data/gti_shapes.db by default):
+- segments: per (from_station_id, to_station_id) LineString geometry, from
+  one courseElement's path.track.
+- subline_schedule: per subline_key, the per-stop time offset (seconds from
+  the first stop's departure) - for later live ETA estimation.
+
+Not part of the continuous fetcher loop - run manually or on its own
+schedule, same as departures.py, and after it (needs hvv:departures:by_service
+and hvv:departures:anchor_start).
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import sqlite3
+import sys
+import time
+from datetime import datetime, timedelta
+from typing import TYPE_CHECKING
+from zoneinfo import ZoneInfo
+
+if TYPE_CHECKING:
+    # Type-only: keeps gti_client's requests dependency out of this module's
+    # import graph, since gtilive_geojson.py (imported by api.py) reads
+    # segments/schedules from here.
+    from hvv_map.gti_client import GtiClient
+
+BERLIN_TZ = ZoneInfo("Europe/Berlin")
+
+DEFAULT_DB_PATH = os.environ.get("GTI_SHAPES_DB_PATH", "gti_shapes.db")
+
+# Read locally rather than imported from departures.py/redis_client.py: both
+# pull in gti_client's requests dependency at module level, which the api
+# image doesn't install (see api.py's own REDIS_BY_SERVICE_KEY constant).
+REDIS_BY_SERVICE_KEY = "hvv:departures:by_service"
+REDIS_ANCHOR_KEY = "hvv:departures:anchor_start"
+
+Coordinates = list[list[float]]  # [[lon, lat], ...] - GeoJSON-ready
+
+
+def subline_key(line_id: str, station_ids: tuple[str, ...]) -> str:
+    return line_id + "|" + "|".join(station_ids)
+
+
+def open_db(db_path: str = DEFAULT_DB_PATH) -> sqlite3.Connection:
+    if (
+        db_path != ":memory:"
+        and not os.path.isabs(db_path)
+        and not os.path.exists(db_path)
+    ):
+        print(
+            f"[hvv_map.gti_shapes] warning: {db_path!r} does not exist yet in "
+            f"{os.getcwd()!r} - creating a NEW, EMPTY database there.",
+            file=sys.stderr,
+        )
+    conn = sqlite3.connect(db_path)
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS segments ("
+        "from_id TEXT, to_id TEXT, coordinates_json TEXT, last_seen INTEGER, "
+        "PRIMARY KEY (from_id, to_id))"
+    )
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS subline_schedule ("
+        "subline_key TEXT PRIMARY KEY, service_id TEXT, "
+        "stop_offsets_json TEXT, resolved_at INTEGER)"
+    )
+    return conn
+
+
+def get_segment(
+    conn: sqlite3.Connection, from_id: str, to_id: str
+) -> Coordinates | None:
+    row = conn.execute(
+        "SELECT coordinates_json FROM segments WHERE from_id = ? AND to_id = ?",
+        (from_id, to_id),
+    ).fetchone()
+    return json.loads(row[0]) if row else None
+
+
+MAX_SKIPPED_STOPS = 3  # look-ahead when a hop has no stored segment
+EXTRA_COURSE_TRIES = 3  # further trips per subline while hops lack a segment
+
+
+def subline_hops(
+    conn: sqlite3.Connection | None, station_ids: tuple[str, ...]
+) -> list[tuple[str, str, Coordinates | None]]:
+    """(from_id, to_id, coordinates) per hop of a subline; coordinates is None
+    where no track is stored. A hop without its own segment reuses one that
+    spans it when trips skip the declared intermediate stop(s) (e.g. a
+    variant with an extra, rarely served pier), so from_id/to_id may then
+    be further apart than neighbours."""
+    hops: list[tuple[str, str, Coordinates | None]] = []
+    i = 0
+    while i < len(station_ids) - 1:
+        a, b = station_ids[i], station_ids[i + 1]
+        segment = get_segment(conn, a, b) if conn else None
+        end = i + 1
+        if segment is None and conn:
+            last = min(len(station_ids) - 1, i + 2 + MAX_SKIPPED_STOPS)
+            for j in range(i + 2, last + 1):
+                spanning = get_segment(conn, a, station_ids[j])
+                if spanning is not None:
+                    segment, b, end = spanning, station_ids[j], j
+                    break
+        hops.append((a, b, segment))
+        i = end
+    return hops
+
+
+def store_segment(
+    conn: sqlite3.Connection, from_id: str, to_id: str, coordinates: Coordinates
+) -> None:
+    conn.execute(
+        "INSERT OR REPLACE INTO segments (from_id, to_id, coordinates_json, last_seen) "
+        "VALUES (?, ?, ?, ?)",
+        (from_id, to_id, json.dumps(coordinates), int(time.time())),
+    )
+    conn.commit()
+
+
+def is_resolved(conn: sqlite3.Connection, key: str) -> bool:
+    row = conn.execute(
+        "SELECT 1 FROM subline_schedule WHERE subline_key = ?", (key,)
+    ).fetchone()
+    return row is not None
+
+
+def load_schedule(conn: sqlite3.Connection, key: str) -> list[dict] | None:
+    row = conn.execute(
+        "SELECT stop_offsets_json FROM subline_schedule WHERE subline_key = ?", (key,)
+    ).fetchone()
+    return json.loads(row[0]) if row else None
+
+
+def store_schedule(
+    conn: sqlite3.Connection, key: str, service_id, stop_offsets: list[dict]
+) -> None:
+    conn.execute(
+        "INSERT OR REPLACE INTO subline_schedule "
+        "(subline_key, service_id, stop_offsets_json, resolved_at) VALUES (?, ?, ?, ?)",
+        (key, str(service_id), json.dumps(stop_offsets), int(time.time())),
+    )
+    conn.commit()
+
+
+def _representative_entries(by_service: dict) -> dict[str, tuple[str, dict]]:
+    """One (service_id, entry) pair per distinct resolved subline - any trip
+    on a given subline schedules the same, so the first one seen is as good
+    as any other for a single departureCourse query."""
+    chosen: dict[str, tuple[str, dict]] = {}
+    for service_id, entry in by_service.items():
+        subline = entry.get("subline")
+        if not subline:
+            continue
+        line = entry["line"]
+        key = subline_key(line.get("id", ""), tuple(s["id"] for s in subline))
+        chosen.setdefault(key, (service_id, entry))
+    return chosen
+
+
+def _entries_by_key(by_service: dict) -> dict[str, list[tuple[str, dict]]]:
+    """Every (service_id, entry) per distinct resolved subline key."""
+    grouped: dict[str, list[tuple[str, dict]]] = {}
+    for service_id, entry in by_service.items():
+        subline = entry.get("subline")
+        if not subline:
+            continue
+        key = subline_key(entry["line"].get("id", ""), tuple(s["id"] for s in subline))
+        grouped.setdefault(key, []).append((service_id, entry))
+    return grouped
+
+
+def _spread(items: list, count: int) -> list:
+    """Up to count items evenly spread over the list."""
+    if len(items) <= count:
+        return list(items)
+    step = (len(items) - 1) / (count - 1) if count > 1 else 0
+    return [items[round(i * step)] for i in range(count)]
+
+
+def _has_missing_hops(conn: sqlite3.Connection, subline: list[dict]) -> bool:
+    ids = tuple(s["id"] for s in subline)
+    return any(segment is None for _, _, segment in subline_hops(conn, ids))
+
+
+def _departure_query(entry: dict, anchor_start: datetime) -> tuple[str, str] | None:
+    """(station name, ISO depTime) for the entry's first stop - what
+    departureCourse needs as its own station/time - or None if that stop is
+    missing a name or offset."""
+    stops = entry.get("stops") or []
+    if not stops:
+        return None
+    first = stops[0]
+    # departureList's own station object uses "combinedName", not "name"
+    # (that's StationLight's field, from listLines/hvv:stations).
+    station_name = (first.get("station") or {}).get("combinedName")
+    offset = first.get("timeOffset")
+    if not station_name or offset is None:
+        return None
+    dep_time = anchor_start + timedelta(minutes=offset)
+    return station_name, dep_time.strftime("%Y-%m-%dT%H:%M:%S.000%z")
+
+
+def _extract_course(course_response: dict) -> tuple[list[tuple], list[dict]] | None:
+    """From one departureCourse response: [(from_id, to_id, coordinates), ...]
+    per element with a real track, and the per-stop schedule (station id +
+    offset in seconds from the first element's depTime). None if the
+    response has no courseElements (e.g. an unresolved/expired query)."""
+    elements = course_response.get("courseElements") or []
+    if not elements:
+        return None
+
+    first_dep = datetime.fromisoformat(elements[0]["depTime"])
+    segments = []
+    stop_offsets = [
+        {
+            "id": elements[0]["fromStation"]["id"],
+            "name": elements[0]["fromStation"]["name"],
+            "offset": 0,
+        }
+    ]
+    for element in elements:
+        from_station, to_station = element["fromStation"], element["toStation"]
+        track = (element.get("path") or {}).get("track") or []
+        if track:
+            coordinates = [[p["x"], p["y"]] for p in track]
+        else:
+            from_c, to_c = from_station["coordinate"], to_station["coordinate"]
+            coordinates = [[from_c["x"], from_c["y"]], [to_c["x"], to_c["y"]]]
+        segments.append((from_station["id"], to_station["id"], coordinates))
+
+        arr_time = datetime.fromisoformat(element["arrTime"])
+        stop_offsets.append(
+            {
+                "id": to_station["id"],
+                "name": to_station["name"],
+                "offset": round((arr_time - first_dep).total_seconds()),
+            }
+        )
+    return segments, stop_offsets
+
+
+def _concat_coordinates(coordinate_lists: list[Coordinates]) -> Coordinates:
+    """Join consecutive segments' coordinates into one path, dropping the
+    duplicate point at each junction."""
+    result = list(coordinate_lists[0])
+    for coordinates in coordinate_lists[1:]:
+        result.extend(coordinates[1:] if coordinates[0] == result[-1] else coordinates)
+    return result
+
+
+def _declared_segment_bridges(
+    subline: list[dict], segments: list[tuple[str, str, Coordinates]]
+) -> list[tuple[str, str, Coordinates]]:
+    """Some sublines declare two stations as directly adjacent (per
+    listLines' stationSequence) while the real, observed course actually
+    stops at one or more extra stations in between (e.g. a variant listed as
+    skipping a stop that every real trip still serves). Without this, the
+    declared pair would never get a stored segment - gtilive_geojson's
+    _subline_coordinates() falls back to a straight line for it even though
+    the real geometry is already known, just filed under the intermediate
+    stations' own pairs. Bridges each declared-adjacent pair by concatenating
+    whichever real segments span it, in either direction."""
+    if not segments:
+        return []
+    real_order = [segments[0][0]] + [seg[1] for seg in segments]
+    index_of = {station_id: i for i, station_id in enumerate(real_order)}
+
+    bridges = []
+    for a, b in zip(subline, subline[1:]):
+        i, j = index_of.get(a["id"]), index_of.get(b["id"])
+        if i is None or j is None or i == j:
+            continue
+        if j > i:
+            coordinates = _concat_coordinates([seg[2] for seg in segments[i:j]])
+        else:
+            coordinates = _concat_coordinates(
+                [list(reversed(seg[2])) for seg in reversed(segments[j:i])]
+            )
+        bridges.append((a["id"], b["id"], coordinates))
+    return bridges
+
+
+def _load_anchor_start(redis_client) -> datetime | None:
+    payload = redis_client.get(REDIS_ANCHOR_KEY)
+    if not payload:
+        return None
+    data = json.loads(payload)["data"]
+    naive = datetime.strptime(f"{data['date']} {data['time']}", "%Y-%m-%d %H:%M:%S")
+    return naive.replace(tzinfo=BERLIN_TZ)
+
+
+def _load_by_service(redis_client) -> dict:
+    payload = redis_client.get(REDIS_BY_SERVICE_KEY)
+    return json.loads(payload)["data"] if payload else {}
+
+
+def _query_course(
+    client: GtiClient, service_id: str, entry: dict, anchor_start: datetime
+) -> tuple[tuple | None, str, str]:
+    """departureCourse for one trip: (extracted course or None, error kind
+    "no_query"/"api" or "", detail for the first-failure log)."""
+    query = _departure_query(entry, anchor_start)
+    if query is None:
+        return None, "no_query", f"stops[0]={entry.get('stops', [None])[:1]!r}"
+    station_name, iso_time = query
+    request = {
+        "station": {"type": "STATION", "name": station_name},
+        "time": iso_time,
+        # departureCourse wants "dlid" (e.g. "de:hvv:U1:"), not "id"
+        # (the icon lineKey, e.g. "HHA-U:U1_HHA-U") - the latter is
+        # only for matching against the sublines cache elsewhere.
+        "lineId": entry["line"].get("dlid", ""),
+        "serviceId": int(service_id),
+        "showPath": True,
+    }
+    response = client.send("departureCourse", request)
+    time.sleep(1)  # 1 req/s rate limit across all GTI endpoints
+    extracted = _extract_course(response)
+    if extracted is None:
+        return None, "api", f"request={request!r} response={response!r}"
+    return extracted, "", ""
+
+
+def update_gti_shapes(
+    client: GtiClient, redis_client, conn: sqlite3.Connection
+) -> dict:
+    """For every resolved subline not yet in subline_schedule, query
+    departureCourse once, and persist its segment geometry plus scheduled
+    stop offsets. While a subline still has hops without a stored segment
+    (trips of a variant may skip declared stops), up to EXTRA_COURSE_TRIES
+    further trips are queried, also for already resolved sublines.
+    Rate-limited to 1 req/s across all calls made. Returns a
+    {"resolved": n, "skipped": n, "failed": n} summary."""
+    by_service = _load_by_service(redis_client)
+    anchor_start = _load_anchor_start(redis_client)
+    if anchor_start is None:
+        print("no hvv:departures:anchor_start cached - run hvvmap-departures first")
+        return {"resolved": 0, "skipped": 0, "failed": 0}
+
+    summary = {"resolved": 0, "skipped": 0, "failed": 0, "no_query": 0}
+    for key, trips in _entries_by_key(by_service).items():
+        resolved = is_resolved(conn, key)
+        subline = trips[0][1].get("subline") or []
+        if resolved and not _has_missing_hops(conn, subline):
+            summary["skipped"] += 1
+            continue
+        if resolved:
+            candidates = _spread(trips, EXTRA_COURSE_TRIES + 1)
+        else:
+            candidates = trips[:1] + _spread(trips[1:], EXTRA_COURSE_TRIES)
+        error, detail = "", ""
+        for service_id, entry in candidates:
+            extracted, error, detail = _query_course(
+                client, service_id, entry, anchor_start
+            )
+            if extracted is None:
+                continue
+            segments, stop_offsets = extracted
+            for from_id, to_id, coordinates in segments:
+                store_segment(conn, from_id, to_id, coordinates)
+            for from_id, to_id, coordinates in _declared_segment_bridges(
+                subline, segments
+            ):
+                store_segment(conn, from_id, to_id, coordinates)
+            if not resolved:
+                store_schedule(conn, key, service_id, stop_offsets)
+                resolved = True
+                summary["resolved"] += 1
+            if not _has_missing_hops(conn, subline):
+                break
+        if not resolved:
+            if summary["failed"] == 0:
+                print(f"first failure ({key}, {error}): {detail}")
+            summary["failed"] += 1
+            if error == "no_query":
+                summary["no_query"] += 1
+    return summary
+
+
+def main() -> None:
+    """CLI: resolve every not-yet-resolved gti-live subline via
+    departureCourse."""
+    from hvv_map.gti_client import GtiClient
+    from hvv_map.redis_client import get_redis_client
+
+    client = GtiClient()
+    redis_client = get_redis_client()
+    conn = open_db()
+    summary = update_gti_shapes(client, redis_client, conn)
+    print(
+        f"{summary['resolved']} newly resolved, {summary['skipped']} already "
+        f"resolved, {summary['failed']} failed ({summary['no_query']} of those "
+        "had no usable station/time before any API call was made)"
+    )
+
+
+if __name__ == "__main__":
+    main()
