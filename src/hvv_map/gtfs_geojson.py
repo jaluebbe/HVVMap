@@ -15,7 +15,7 @@ from hvv_map.gtfs_schedule import (
     recently_active_service_ids,
     recently_active_shape_ids,
 )
-from hvv_map.lines import R_BAHN_LINES
+from hvv_map.lines import LINE_COLORS
 
 BERLIN_TZ = ZoneInfo("Europe/Berlin")
 
@@ -28,43 +28,6 @@ MARKER_RADIUS = 2.5
 # HVV data (see occupied-stops dedup below).
 ORIGIN_LEAD_SECONDS = 60
 
-# route_short_name -> hex color (no leading '#'). GTFS route_color is blank
-# for most HVV routes, so this has to be maintained by hand - ported from
-# the earlier hvv_gtfs.py experiment. Consolidating with hvv_map.lines'
-# LINE_COLORS is a possible future cleanup, once its keys are confirmed to
-# use the same route_short_name-style names.
-LINE_COLORS = {
-    "U1": "006ab3",
-    "U2": "e2001a",
-    "U3": "ffdd00",
-    "U4": "0098a1",
-    "S1": "1a962b",
-    "S2": "b51143",
-    "S3": "622181",
-    "S5": "0089bb",
-    "S7": "cc7720",
-    "A1": "FF8000",
-    "A2": "FF8000",
-    "A3": "FF8000",
-    # Ferry: route_color is blank/white in GTFS, using route_text_color
-    # (matches the official ferry icon's fill #009ED4).
-    "61": "009DD1",
-    "62": "009DD1",
-    "64": "009DD1",
-    "65": "009DD1",
-    "72": "009DD1",
-    "73": "009DD1",
-    "75": "009DD1",
-    "U1-DIREKT": "E2001A",
-    "U1-ERSATZ": "E2001A",
-    "A1-SEV": "E2001A",
-    "A2-SEV": "E2001A",
-    "A3-Bus": "E2001A",
-    "S5-SEV": "E2001A",
-    # route_color is blank for regional trains - black, as on the HVV maps.
-    **dict.fromkeys(R_BAHN_LINES, "000000"),
-    "RE80-SEV": "E2001A",
-}
 # geofox icon service lineKey format. GTFS route_short_name has no
 # equivalent field, so this mapping has to be maintained by hand - ported
 # from the earlier hvv_gtfs.py experiment.

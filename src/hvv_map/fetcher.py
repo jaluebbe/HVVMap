@@ -19,7 +19,8 @@ hvv:reference_stops/hvv:reference_lines are rebuilt periodically here
 segment_cache keeps growing between rebuilds. Sublines come from the
 hvv:sublines cache (not read by the running map itself, see hvv_map.lines)
 rather than a fresh listLines call, so the rebuild needs only one API call
-(listStations). hvv:sublines is kept fresh separately on its own SUBLINES_CACHE_INTERVAL,
+(listStations).
+hvv:sublines is kept fresh separately on its own SUBLINES_CACHE_INTERVAL,
 always via a full (non-incremental) listLines call, at an hourly cadence.
 """
 

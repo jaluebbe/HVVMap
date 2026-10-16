@@ -20,6 +20,7 @@ from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
 from pathlib import Path
 
+from hvv_map.gtfs_lines import FERRY_AGENCY
 from hvv_map.lines import R_BAHN_LINES
 
 csv.field_size_limit(10_000_000)
@@ -89,7 +90,8 @@ def _is_route_of_interest(row: dict) -> bool:
         and row["route_short_name"] in ROUTE_TYPE_2_MODE_BY_SHORT_NAME
     ):
         return True
-    if row["route_type"] == "1200" and row["route_short_name"] not in ("5160", "5170"):
+    # Harbour ferries only; the rural Elbe ferries run under other agencies.
+    if row["route_type"] == "1200" and row.get("agency_id") == FERRY_AGENCY:
         return True
     return False
 
