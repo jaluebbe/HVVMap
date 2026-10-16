@@ -1,0 +1,388 @@
+<!DOCTYPE html>
+<html lang="de">
+
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width,initial-scale=1.0">
+    <title>HVV gti-live Karte - Entwickleransicht</title>
+    <link rel="stylesheet" href="maplibre-gl/maplibre-gl.css">
+    <style>
+        :root {
+            --ink: #1a2733;
+            --muted: #5b6b78;
+            --line: #d8dee3;
+            --bg: #f4f6f8;
+            --card: #ffffff;
+            --accent: #1e64a0;
+            --warn: #b3541e;
+            --ok: #2b7a4b;
+        }
+
+        * {
+            box-sizing: border-box;
+        }
+
+        html,
+        body {
+            margin: 0;
+            height: 100%;
+            font-family: -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            color: var(--ink);
+        }
+
+        #map {
+            position: absolute;
+            inset: 0;
+        }
+
+        #panel {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            z-index: 2;
+            width: 290px;
+            max-height: calc(100% - 20px);
+            overflow-y: auto;
+            background: var(--card);
+            border: 1px solid var(--line);
+            border-radius: 8px;
+            padding: 10px 12px;
+            font-size: 0.8rem;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+        }
+
+        #panel h1 {
+            margin: 0 0 2px;
+            font-size: 0.95rem;
+        }
+
+        #panel h2 {
+            margin: 12px 0 4px;
+            font-size: 0.78rem;
+            color: var(--muted);
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.03em;
+        }
+
+        .meta {
+            color: var(--muted);
+        }
+
+        #search {
+            width: 100%;
+            margin-top: 8px;
+            padding: 6px 8px;
+            border: 1px solid var(--line);
+            border-radius: 6px;
+            font-size: 0.82rem;
+        }
+
+        label {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            margin: 3px 0;
+        }
+
+        .swatch {
+            display: inline-block;
+            width: 22px;
+            height: 0;
+            border-top: 3px solid #666;
+        }
+
+        .swatch.dashed {
+            border-top-style: dashed;
+        }
+
+        .dot {
+            display: inline-block;
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            border: 2px solid #444;
+            background: #fff;
+        }
+
+        .dot.orphan {
+            border-color: #d32f2f;
+        }
+
+        table.unresolved {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        table.unresolved td {
+            padding: 2px 0;
+            border-bottom: 1px solid var(--line);
+        }
+
+        table.unresolved td:last-child {
+            text-align: right;
+            color: var(--warn);
+        }
+
+        .popup {
+            font-size: 0.8rem;
+            max-width: 300px;
+        }
+
+        .popup h3 {
+            margin: 0 0 4px;
+            font-size: 0.9rem;
+        }
+
+        .popup dl {
+            display: grid;
+            grid-template-columns: max-content 1fr;
+            gap: 2px 8px;
+            margin: 0;
+        }
+
+        .popup dt {
+            color: var(--muted);
+        }
+
+        .popup dd {
+            margin: 0;
+            word-break: break-word;
+        }
+
+        .bad {
+            color: var(--warn);
+        }
+
+        .good {
+            color: var(--ok);
+        }
+    </style>
+</head>
+
+<body>
+    <div id="map"></div>
+    <div id="panel">
+        <h1>HVV gti-live Karte</h1>
+        <div class="meta" id="summary">lädt …</div>
+        <input type="search" id="search" placeholder="Filter: Linie oder Station …">
+
+        <h2>Verkehrsmittel</h2>
+        <div id="modes"></div>
+
+        <h2>Ebenen</h2>
+        <label><input type="checkbox" id="show-lines" checked> Linien (Sublines)</label>
+        <label><input type="checkbox" id="show-straight" checked> Luftlinien (Abschnitte ohne Strecke)</label>
+        <label><input type="checkbox" id="show-stops" checked> Haltestellen</label>
+        <label><input type="checkbox" id="show-orphans" checked> Stationen ohne Subline</label>
+
+        <h2>Legende</h2>
+        <label><span class="swatch"></span> Abschnitt mit echter Strecke (departureCourse)</label>
+        <label><span class="swatch dashed"></span> Abschnitt als Luftlinie (keine Strecke, oder nur Start und Ziel gespeichert)</label>
+        <label><span class="dot"></span> Station auf aufgelöster Subline</label>
+        <label><span class="dot orphan"></span> nur in Fahrten ohne Subline</label>
+        <div class="meta">Graue Linie: keine Farbe in LINE_COLORS.</div>
+
+        <h2>Fahrten ohne Subline</h2>
+        <div class="meta">Fahrten, für die keine eindeutige Subline bestimmt werden konnte (keine oder mehrere Kandidaten). Sie werden nicht als Linie gezeichnet.</div>
+        <div id="unresolved" class="meta">–</div>
+
+        <h2>Stationen ohne Koordinate</h2>
+        <div class="meta">Auf einer Subline oder in Fahrten, aber nicht in hvv:stations - deshalb ohne Punkt.</div>
+        <div id="missing" class="meta">–</div>
+    </div>
+
+    <script src="maplibre-gl/maplibre-gl.js"></script>
+    <script>
+        const ENDPOINT = '/api/hvv/gtilive/debug.geojson';
+        const MODE_LABELS = {
+            U: 'U-Bahn', S: 'S-Bahn', AKN: 'AKN', R: 'Regionalzüge', FERRY: 'Fähren',
+        };
+        const SOURCE = 'debug';
+        const LAYERS = {
+            straight: 'lines-straight',
+            real: 'lines-real',
+            stops: 'stops-resolved',
+            orphans: 'stops-orphan',
+        };
+
+        const state = { modes: new Set(Object.keys(MODE_LABELS)), query: '' };
+
+        const map = new maplibregl.Map({
+            container: 'map',
+            style: '/api/vector/style/positron.json',
+            center: [9.99, 53.55],
+            zoom: 9,
+        });
+        map.addControl(new maplibregl.NavigationControl(), 'top-right');
+
+        const isKind = kind => ['==', ['get', 'kind'], kind];
+        const straight = ['get', 'straight'];
+
+        function commonFilter(kind) {
+            // A station can serve several modes (e.g. S and U), so it matches
+            // if any active mode is among its own.
+            const modeMatch = kind === 'line'
+                ? ['in', ['get', 'mode'], ['literal', [...state.modes]]]
+                : ['any', ...[...state.modes].map(m => ['in', m, ['get', 'modes']])];
+            const conditions = [modeMatch];
+            if (state.query) conditions.push(['in', state.query, ['get', 'search']]);
+            return conditions;
+        }
+
+        function applyFilters() {
+            if (!map.getLayer(LAYERS.real)) return;
+            const lineCommon = commonFilter('line');
+            const stopCommon = commonFilter('stop');
+            const show = id => document.getElementById(id).checked;
+            const visibility = (on) => on ? 'visible' : 'none';
+            const geometry = {
+                [LAYERS.straight]: ['==', straight, true],
+                [LAYERS.real]: ['==', straight, false],
+            };
+            for (const [id, extra] of Object.entries(geometry)) {
+                map.setFilter(id, ['all', isKind('line'), extra, ...lineCommon]);
+                const wanted = show('show-lines') && (id !== LAYERS.straight || show('show-straight'));
+                map.setLayoutProperty(id, 'visibility', visibility(wanted));
+            }
+            map.setFilter(LAYERS.stops, ['all', isKind('stop'), ['==', ['get', 'resolved'], true], ...stopCommon]);
+            map.setLayoutProperty(LAYERS.stops, 'visibility', visibility(show('show-stops')));
+            map.setFilter(LAYERS.orphans, ['all', isKind('stop'), ['==', ['get', 'resolved'], false], ...stopCommon]);
+            map.setLayoutProperty(LAYERS.orphans, 'visibility', visibility(show('show-orphans')));
+        }
+
+        function addLayers() {
+            const lineBase = { type: 'line', source: SOURCE, layout: { 'line-cap': 'round', 'line-join': 'round' } };
+            const paint = extra => ({ 'line-color': ['get', 'color'], 'line-width': 3, 'line-opacity': 0.85, ...extra });
+            map.addLayer({ ...lineBase, id: LAYERS.straight, paint: paint({ 'line-dasharray': [2, 2] }) });
+            map.addLayer({ ...lineBase, id: LAYERS.real, paint: paint({}) });
+            map.addLayer({
+                id: LAYERS.stops, type: 'circle', source: SOURCE,
+                paint: { 'circle-radius': 3.5, 'circle-color': '#fff', 'circle-stroke-color': '#444', 'circle-stroke-width': 1.5 },
+            });
+            map.addLayer({
+                id: LAYERS.orphans, type: 'circle', source: SOURCE,
+                paint: { 'circle-radius': 4, 'circle-color': '#fff', 'circle-stroke-color': '#d32f2f', 'circle-stroke-width': 2 },
+            });
+            applyFilters();
+        }
+
+        function boundsOf(features) {
+            const bounds = new maplibregl.LngLatBounds();
+            features.forEach(f => {
+                const coords = f.geometry.type === 'Point' ? [f.geometry.coordinates] : f.geometry.coordinates;
+                coords.forEach(c => bounds.extend(c));
+            });
+            return bounds;
+        }
+
+        function esc(text) {
+            return String(text ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+        }
+
+        function parsed(value) {
+            // MapLibre hands array properties back as JSON strings.
+            if (typeof value !== 'string') return value;
+            try { return JSON.parse(value); } catch { return value; }
+        }
+
+        function popupHtml(p) {
+            const rows = [];
+            const add = (k, v) => rows.push(`<dt>${k}</dt><dd>${v}</dd>`);
+            if (p.kind === 'stop') {
+                add('ID', esc(p.id));
+                add('Verkehrsmittel', esc([].concat(parsed(p.modes)).join(', ')));
+                add('Linien', esc([].concat(parsed(p.lines)).join(', ')));
+                add('Fahrten', esc(p.services));
+                add('Subline', p.resolved ? '<span class="good">auf aufgelöster Subline</span>' : '<span class="bad">nur in Fahrten ohne Subline</span>');
+                return `<div class="popup"><h3>${esc(p.name)}</h3><dl>${rows.join('')}</dl></div>`;
+            }
+            const names = [].concat(parsed(p.lines));
+            const stops = [].concat(parsed(p.stops));
+            add('Verkehrsmittel', esc(MODE_LABELS[p.mode] || p.mode));
+            add('Fahrten', esc(p.services));
+            add('Dieser Abschnitt', p.straight ? '<span class="bad">Luftlinie</span>' : '<span class="good">echte Strecke</span>');
+            add('Subline gesamt', `${esc(p.real_hops)} von ${esc(p.hops)} Abschnitten echt`);
+            add('Farbe', `<span style="color:${esc(p.color)}">■</span> ${esc(p.color)}` +
+                (p.color_known ? '' : ' <span class="bad">(nicht in LINE_COLORS)</span>'));
+            add('Halte', `${stops.length}: ${esc(stops.join(' → '))}`);
+            add('Line-ID', esc(p.line_id));
+            add('Subline-Key', esc(p.subline_key));
+            return `<div class="popup"><h3>${esc(names.join(', '))}</h3><dl>${rows.join('')}</dl></div>`;
+        }
+
+        function renderPanel(data) {
+            const d = data.debug;
+            document.getElementById('summary').textContent =
+                `${d.services} Fahrten, ${d.resolved} mit Subline, ${d.unresolved} ohne` +
+                (d.missing_stations.length ? ` · ${d.missing_stations.length} Stationen ohne Koordinate` : '');
+            const present = new Set(data.features.flatMap(f => [].concat(f.properties.modes || f.properties.mode)));
+            const box = document.getElementById('modes');
+            box.replaceChildren();
+            Object.entries(MODE_LABELS).forEach(([mode, label]) => {
+                if (!present.has(mode)) return;
+                const wrap = document.createElement('label');
+                wrap.innerHTML = `<input type="checkbox" checked> ${label}`;
+                wrap.querySelector('input').addEventListener('change', e => {
+                    if (e.target.checked) state.modes.add(mode); else state.modes.delete(mode);
+                    applyFilters();
+                });
+                box.append(wrap);
+            });
+            const missing = document.getElementById('missing');
+            missing.innerHTML = d.missing_stations.length
+                ? '<table class="unresolved">' + d.missing_stations.map(m =>
+                    `<tr><td>${esc(m.name)} <span class="meta">${esc(m.id)} · ${esc(m.lines.join(', '))}</span></td></tr>`
+                ).join('') + '</table>'
+                : 'keine';
+            const list = document.getElementById('unresolved');
+            if (!d.unresolved_by_line.length) {
+                list.textContent = 'keine';
+                return;
+            }
+            list.innerHTML = '<table class="unresolved">' + d.unresolved_by_line.map(u =>
+                `<tr><td>${esc(u.line)} <span class="meta">${esc(MODE_LABELS[u.mode] || u.mode)}</span></td><td>${u.count}</td></tr>`
+            ).join('') + '</table>';
+        }
+
+        async function load() {
+            try {
+                const response = await fetch(ENDPOINT);
+                if (!response.ok) {
+                    throw new Error(`${response.status}: ${(await response.json()).detail || response.statusText}`);
+                }
+                const data = await response.json();
+                renderPanel(data);
+                map.addSource(SOURCE, { type: 'geojson', data });
+                addLayers();
+                if (data.features.length) map.fitBounds(boundsOf(data.features), { padding: 60, duration: 0 });
+            } catch (error) {
+                document.getElementById('summary').textContent = 'Fehler beim Laden: ' + error.message;
+            }
+        }
+
+        map.on('load', load);
+        map.on('click', event => {
+            const layers = [LAYERS.orphans, LAYERS.stops, LAYERS.real, LAYERS.straight]
+                .filter(id => map.getLayer(id));
+            const box = [[event.point.x - 5, event.point.y - 5], [event.point.x + 5, event.point.y + 5]];
+            const hit = map.queryRenderedFeatures(box, { layers })[0];
+            if (!hit) return;
+            new maplibregl.Popup({ maxWidth: '320px' })
+                .setLngLat(event.lngLat).setHTML(popupHtml(hit.properties)).addTo(map);
+        });
+        map.on('mousemove', event => {
+            const layers = Object.values(LAYERS).filter(id => map.getLayer(id));
+            map.getCanvas().style.cursor = map.queryRenderedFeatures(event.point, { layers }).length ? 'pointer' : '';
+        });
+
+        document.getElementById('search').addEventListener('input', event => {
+            state.query = event.target.value.trim().toLowerCase();
+            applyFilters();
+        });
+        ['show-lines', 'show-straight', 'show-stops', 'show-orphans'].forEach(id =>
+            document.getElementById(id).addEventListener('change', applyFilters));
+    </script>
+</body>
+
+</html>

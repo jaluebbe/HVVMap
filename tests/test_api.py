@@ -173,3 +173,125 @@ def test_redis_connection_error_does_not_crash_import():
     # get_redis_client() only opens a lazy connection object - importing
     # api.py must not require a live Redis server.
     assert isinstance(api_module._redis_client, redis.Redis)
+
+
+class _FakeRedis:
+    def __init__(self, values):
+        self.values = values
+
+    def get(self, key):
+        value = self.values.get(key)
+        return json.dumps(value) if value is not None else None
+
+
+_ANCHOR = {"fetched_at": 1, "data": {"date": "2026-10-16", "time": "04:00:00"}}
+
+
+def _departure(offset):
+    return {
+        "line": {"id": "L", "name": "U1", "type": {"shortInfo": "U"}},
+        "station": {"id": "s1", "combinedName": "Ohlstedt"},
+        "timeOffset": offset,
+        "serviceId": "1",
+    }
+
+
+def test_departures_by_station_returns_tree_with_meta(client, monkeypatch):
+    fake = _FakeRedis(
+        {
+            "hvv:departures:merged": {
+                "fetched_at": 42,
+                "data": {"departures": [_departure(5)]},
+            },
+            "hvv:departures:anchor_start": _ANCHOR,
+        }
+    )
+    monkeypatch.setattr(api_module, "_redis_client", fake)
+
+    data = client.get("/api/hvv/live/departures-by-station.json").json()
+
+    assert data["fetched_at"] == 42
+    assert data["anchor"] == "2026-10-16 04:00"
+    line = data["modes"][0]["lines"][0]
+    assert line["stations"][0]["departures"][0]["time"] == "04:05"
+
+
+def test_departures_by_trip_returns_tree(client, monkeypatch):
+    service = {
+        "line": {"id": "L", "name": "U1", "type": {"shortInfo": "U"}},
+        "directionId": 1,
+        "destination": "B",
+        "subline": None,
+        "stops": [{"timeOffset": 5, "station": {"id": "s1", "combinedName": "A"}}],
+    }
+    fake = _FakeRedis(
+        {
+            "hvv:departures:by_service": {"fetched_at": 1, "data": {"9": service}},
+            "hvv:departures:anchor_start": _ANCHOR,
+        }
+    )
+    monkeypatch.setattr(api_module, "_redis_client", fake)
+
+    data = client.get("/api/hvv/live/departures-by-trip.json").json()
+
+    assert data["modes"][0]["lines"][0]["trips"][0]["service_id"] == "9"
+
+
+def test_departures_endpoints_work_without_anchor(client, monkeypatch):
+    fake = _FakeRedis(
+        {
+            "hvv:departures:merged": {
+                "fetched_at": 1,
+                "data": {"departures": [_departure(5)]},
+            }
+        }
+    )
+    monkeypatch.setattr(api_module, "_redis_client", fake)
+
+    data = client.get("/api/hvv/live/departures-by-station.json").json()
+
+    assert data["anchor"] is None
+
+
+def test_departures_endpoints_503_when_cache_missing(client, monkeypatch):
+    monkeypatch.setattr(api_module, "_redis_client", _FakeRedis({}))
+    assert client.get("/api/hvv/live/departures-by-station.json").status_code == 503
+    assert client.get("/api/hvv/live/departures-by-trip.json").status_code == 503
+
+
+def test_gtilive_debug_returns_lines_stops_and_summary(client, monkeypatch):
+    stations = [
+        {
+            "id": sid,
+            "name": sid,
+            "city": "",
+            "lon": lon,
+            "lat": 53.5,
+            "combined_name": sid,
+        }
+        for sid, lon in (("A", 10.0), ("B", 10.1))
+    ]
+    service = {
+        "line": {"id": "L", "name": "U1", "type": {"shortInfo": "U"}},
+        "stops": [],
+        "subline": [{"id": "A", "name": "A"}, {"id": "B", "name": "B"}],
+    }
+    fake = _FakeRedis(
+        {
+            "hvv:departures:by_service": {"fetched_at": 1, "data": {"1": service}},
+            "hvv:stations": {"fetched_at": 1, "data": stations},
+        }
+    )
+    monkeypatch.setattr(api_module, "_redis_client", fake)
+    monkeypatch.setattr(api_module, "_get_gti_shapes_connection", lambda: None)
+
+    data = client.get("/api/hvv/gtilive/debug.geojson").json()
+
+    kinds = sorted(f["properties"]["kind"] for f in data["features"])
+    assert kinds == ["line", "stop", "stop"]
+    assert data["debug"]["resolved"] == 1
+
+
+def test_gtilive_debug_503_when_by_service_missing(client, monkeypatch):
+    monkeypatch.setattr(api_module, "_redis_client", _FakeRedis({}))
+    assert client.get("/api/hvv/gtilive/debug.geojson").status_code == 503

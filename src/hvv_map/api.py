@@ -21,6 +21,15 @@ from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
 from hvv_map.announcement_categories import classify_category
+from hvv_map.departures_tree import build_station_tree, build_trip_tree, parse_anchor
+from hvv_map.gti_shapes import DEFAULT_DB_PATH as GTI_SHAPES_DB_PATH
+from hvv_map.gtilive_debug import build_debug_geojson
+from hvv_map.gtilive_geojson import (
+    build_lines_geojson as build_gtilive_lines_geojson,
+)
+from hvv_map.gtilive_geojson import (
+    build_stops_geojson as build_gtilive_stops_geojson,
+)
 from hvv_map.redis_client import get_redis_client
 from hvv_map.stations import by_id, load_stations
 
@@ -153,16 +162,26 @@ def get_vector_style(style_name: str, request: Request):
 _redis_client = get_redis_client()
 
 SUBLINES_REDIS_KEY = "hvv:sublines"
+# Kept as a plain string (not imported from departures.py): that module pulls
+# in gti_client's requests dependency, which the api image doesn't install.
+REDIS_BY_SERVICE_KEY = "hvv:departures:by_service"
+REDIS_MERGED_KEY = "hvv:departures:merged"
+REDIS_ANCHOR_KEY = "hvv:departures:anchor_start"
 
 
-def _read_cached_json(key: str) -> dict:
+def _read_cached_payload(key: str) -> dict:
+    """The full {"fetched_at", "data"} payload stored under key."""
     raw = _redis_client.get(key)
     if raw is None:
         raise HTTPException(
             status_code=503,
             detail=f"No data under Redis key '{key}' - is hvvmap-fetcher running?",
         )
-    return json.loads(raw)["data"]
+    return json.loads(raw)
+
+
+def _read_cached_json(key: str) -> dict:
+    return _read_cached_payload(key)["data"]
 
 
 def _read_sublines_cache() -> dict:
@@ -251,6 +270,85 @@ def get_live_sublines():
             sublines.append({"vehicle_type": sub["vehicle_type"], "stations": stops})
         result[line_id] = {"line_name": entry["line_name"], "sublines": sublines}
     return result
+
+
+# --- Departures debug trees (static/dev_departures.html) --------------------
+# Snapshot of the daily 4:00 departureList run (departures.py), grouped for
+# browsing - not linked from any map page.
+
+
+def _read_anchor():
+    raw = _redis_client.get(REDIS_ANCHOR_KEY)
+    return parse_anchor(json.loads(raw)["data"]) if raw else None
+
+
+def _departures_meta(payload: dict, anchor) -> dict:
+    return {
+        "fetched_at": payload.get("fetched_at"),
+        "anchor": anchor.strftime("%Y-%m-%d %H:%M") if anchor else None,
+    }
+
+
+@app.get("/api/hvv/live/departures-by-station.json", tags=["hvv_live"])
+def get_departures_by_station():
+    """Mode -> line -> station -> departures, from hvv:departures:merged."""
+    payload = _read_cached_payload(REDIS_MERGED_KEY)
+    anchor = _read_anchor()
+    tree = build_station_tree(payload["data"].get("departures", []), anchor)
+    return {**_departures_meta(payload, anchor), **tree}
+
+
+@app.get("/api/hvv/live/departures-by-trip.json", tags=["hvv_live"])
+def get_departures_by_trip():
+    """Mode -> line -> trip (serviceId) -> stops, from by_service."""
+    payload = _read_cached_payload(REDIS_BY_SERVICE_KEY)
+    anchor = _read_anchor()
+    tree = build_trip_tree(payload["data"], anchor)
+    return {**_departures_meta(payload, anchor), **tree}
+
+
+# --- gti-live layers: departureList/sublines based, no getVehicleMap -------
+# Built on the fly from departures.py's cached grouping (hvv:departures:by_service)
+# and hvv:stations - cheap enough, and by_service itself only changes once a day.
+
+
+@app.get("/api/hvv/gtilive/stops.geojson", tags=["hvv_gtilive"])
+def get_gtilive_stops():
+    by_service = _read_cached_json(REDIS_BY_SERVICE_KEY)
+    stations = by_id(load_stations(_redis_client))
+    return build_gtilive_stops_geojson(by_service, stations)
+
+
+_gti_shapes_connection: sqlite3.Connection | None = None
+
+
+def _get_gti_shapes_connection() -> sqlite3.Connection | None:
+    """Read-only; None (no real geometry, straight lines only) if the
+    fetcher-side hvvmap-gti-shapes-update hasn't run yet - not an error."""
+    global _gti_shapes_connection
+    if _gti_shapes_connection is None and Path(GTI_SHAPES_DB_PATH).is_file():
+        _gti_shapes_connection = sqlite3.connect(
+            f"file:{GTI_SHAPES_DB_PATH}?mode=ro", uri=True, check_same_thread=False
+        )
+    return _gti_shapes_connection
+
+
+@app.get("/api/hvv/gtilive/lines.geojson", tags=["hvv_gtilive"])
+def get_gtilive_lines():
+    by_service = _read_cached_json(REDIS_BY_SERVICE_KEY)
+    stations = by_id(load_stations(_redis_client))
+    return build_gtilive_lines_geojson(
+        by_service, stations, _get_gti_shapes_connection()
+    )
+
+
+@app.get("/api/hvv/gtilive/debug.geojson", tags=["hvv_gtilive"])
+def get_gtilive_debug():
+    """gti-live lines and stops with debug properties, for
+    static/dev_gtilive_map.html."""
+    by_service = _read_cached_json(REDIS_BY_SERVICE_KEY)
+    stations = by_id(load_stations(_redis_client))
+    return build_debug_geojson(by_service, stations, _get_gti_shapes_connection())
 
 
 # --- GTFS layers -------------------------------------------------------------
