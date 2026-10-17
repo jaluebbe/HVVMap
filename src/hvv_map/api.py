@@ -168,6 +168,7 @@ SUBLINES_REDIS_KEY = "hvv:sublines"
 REDIS_BY_SERVICE_KEY = "hvv:departures:by_service"
 REDIS_MERGED_KEY = "hvv:departures:merged"
 REDIS_ANCHOR_KEY = "hvv:departures:anchor_start"
+REDIS_LIVE_KEY = "hvv:departures:live"
 
 
 def _read_cached_payload(key: str) -> dict:
@@ -295,6 +296,16 @@ def get_departures_by_station():
     """Mode -> line -> station -> departures, from hvv:departures:merged."""
     payload = _read_cached_payload(REDIS_MERGED_KEY)
     anchor = _read_anchor()
+    tree = build_station_tree(payload["data"].get("departures", []), anchor)
+    return {**_departures_meta(payload, anchor), **tree}
+
+
+@app.get("/api/hvv/live/departures-live.json", tags=["hvv_live"])
+def get_departures_live():
+    """Mode -> line -> station -> realtime departures (delay, model,
+    vehicles), from hvv:departures:live."""
+    payload = _read_cached_payload(REDIS_LIVE_KEY)
+    anchor = parse_anchor(payload["data"].get("anchor"))
     tree = build_station_tree(payload["data"].get("departures", []), anchor)
     return {**_departures_meta(payload, anchor), **tree}
 

@@ -229,6 +229,7 @@
         <div class="toolbar">
             <button id="view-station" class="active">Nach Station</button>
             <button id="view-trip">Nach Fahrt</button>
+            <button id="view-live">Live (Echtzeit)</button>
             <input type="search" id="search" placeholder="Filter: Linie, Station, Richtung, Fahrt-ID …">
             <button id="expand-top">Linien aufklappen</button>
             <button id="collapse-all">Alle einklappen</button>
@@ -244,7 +245,10 @@
         const ENDPOINTS = {
             station: '/api/hvv/live/departures-by-station.json',
             trip: '/api/hvv/live/departures-by-trip.json',
+            live: '/api/hvv/live/departures-live.json',
         };
+        const LIVE_MAX_AGE_MS = 30000;
+        const loadedAt = {};
         const MODE_LABELS = {
             U: 'U-Bahn', S: 'S-Bahn', AKN: 'AKN', R: 'Regionalzüge',
             FERRY: 'Fähren', OTHER: 'Sonstige',
@@ -325,7 +329,7 @@
                         .map(st => {
                             const stHit = lineHit || matches(query, st.name);
                             const deps = st.departures.filter(d =>
-                                stHit || matches(query, d.direction, d.service_id));
+                                stHit || matches(query, d.direction, d.service_id, d.vehicles, d.model));
                             return deps.length ? { ...st, departures: deps } : null;
                         })
                         .filter(Boolean);
@@ -346,13 +350,18 @@
             return { root, summary: `${shownDepartures} Abfahrten` };
         }
 
+        function delayCell(seconds) {
+            if (seconds === null || seconds === undefined) return '–';
+            return seconds ? `+${Math.round(seconds / 60)} min` : 'pünktlich';
+        }
+
         function stationNode(parentPath, st) {
             return makeNode(`${parentPath}/${st.id}`, st.name, '',
                 [badge(`${st.departures.length} Abfahrten`)],
                 body => body.append(table(
-                    ['Zeit', 'Richtung', 'Gleis', 'Fahrt', 'Rtg-ID'],
-                    st.departures.map(d => [timeCell(d), d.direction, d.platform,
-                        d.service_id, d.direction_id]))));
+                    ['Zeit', 'Verspätung', 'Richtung', 'Gleis', 'Fahrt', 'Rtg-ID', 'Modell', 'Fahrzeug'],
+                    st.departures.map(d => [timeCell(d), delayCell(d.delay), d.direction, d.platform,
+                        d.service_id, d.direction_id, d.model, d.vehicles]))));
         }
 
         // --- trip view: mode -> line -> trip -> stops ------------------------
@@ -367,7 +376,8 @@
                     const trips = line.trips.filter(t =>
                         (!onlyUnresolved || t.subline_stop_count === null) &&
                         (lineHit || matches(query, t.service_id, t.origin, t.destination,
-                            ...t.stops.map(s => s.name))));
+                            ...t.stops.map(s => s.name),
+                            ...t.stops.map(s => s.vehicles))));
                     if (!trips.length) return;
                     shownTrips += trips.length;
                     const resolved = trips.filter(t => t.subline_stop_count !== null).length;
@@ -393,21 +403,24 @@
                 `${when}  ${trip.origin || '?'} → ${trip.destination || '?'}`,
                 `Fahrt ${trip.service_id}`,
                 [badge(`${trip.stop_count} Halte`),
+                 ...(trip.model ? [badge(trip.model)] : []),
                  badge(resolved ? `Subline: ${trip.subline_stop_count} Halte` : 'keine Subline',
                     resolved ? 'ok' : 'warn')],
                 body => body.append(table(
-                    ['Zeit', 'Station', 'Gleis'],
-                    trip.stops.map(s => [timeCell(s), s.name, s.platform]))));
+                    ['Zeit', 'Station', 'Gleis', 'Fahrzeug'],
+                    trip.stops.map(s => [timeCell(s), s.name, s.platform, s.vehicles]))));
         }
 
         // --- page plumbing -----------------------------------------------------
         async function load(which) {
-            if (datasets[which]) return datasets[which];
+            const stale = which === 'live' && Date.now() - (loadedAt.live || 0) > LIVE_MAX_AGE_MS;
+            if (datasets[which] && !stale) return datasets[which];
             const response = await fetch(ENDPOINTS[which]);
             if (!response.ok) {
                 throw new Error(`${response.status}: ${(await response.json()).detail || response.statusText}`);
             }
             datasets[which] = await response.json();
+            loadedAt[which] = Date.now();
             return datasets[which];
         }
 
@@ -416,8 +429,8 @@
             try {
                 const data = await load(view);
                 const query = document.getElementById('search').value.trim().toLowerCase();
-                const { root, summary } = view === 'station'
-                    ? renderStationView(data, query) : renderTripView(data, query);
+                const { root, summary } = view === 'trip'
+                    ? renderTripView(data, query) : renderStationView(data, query);
                 tree.replaceChildren(root.childNodes.length ? root : el('div', 'empty', 'Keine Treffer.'));
                 document.getElementById('count-line').textContent = summary;
                 document.getElementById('meta').textContent =
@@ -432,12 +445,14 @@
             view = next;
             document.getElementById('view-station').classList.toggle('active', next === 'station');
             document.getElementById('view-trip').classList.toggle('active', next === 'trip');
+            document.getElementById('view-live').classList.toggle('active', next === 'live');
             document.getElementById('only-unresolved-label').hidden = next !== 'trip';
             render();
         }
 
         document.getElementById('view-station').addEventListener('click', () => setView('station'));
         document.getElementById('view-trip').addEventListener('click', () => setView('trip'));
+        document.getElementById('view-live').addEventListener('click', () => setView('live'));
         document.getElementById('only-unresolved').addEventListener('change', render);
         document.getElementById('search').addEventListener('input', render);
         document.getElementById('collapse-all').addEventListener('click', () => {

@@ -5,6 +5,9 @@ from hvv_map.departures_tree import (
     build_station_tree,
     build_trip_tree,
     parse_anchor,
+    refined_model,
+    ubahn_series,
+    vehicles_text,
 )
 
 ANCHOR = datetime(2026, 10, 16, 4, 0)
@@ -129,3 +132,71 @@ def test_trip_tree_orders_trips_by_first_stop():
     }
     trips = build_trip_tree(by_service, ANCHOR)["modes"][0]["lines"][0]["trips"]
     assert [t["service_id"] for t in trips] == ["early", "late"]
+
+
+def test_vehicles_text_formats_number_and_falls_back_to_id():
+    assert vehicles_text([{"id": "9001", "number": "4711"}, {"id": "7"}]) == (
+        "4711, (id 7)"
+    )
+    assert vehicles_text(None) == ""
+    assert vehicles_text([{}]) == ""
+
+
+def test_station_and_trip_tree_carry_vehicles():
+    vehicles = [{"id": "9001", "number": "4711"}]
+    dep = _dep("U1", "U", "Ochsenzoll", 2, vehicles=vehicles)
+    station = build_station_tree([dep], ANCHOR)["modes"][0]["lines"][0]["stations"][0]
+    assert station["departures"][0]["vehicles"] == "4711"
+
+    by_service = {
+        "1": {
+            "line": dep["line"],
+            "stops": [
+                {"timeOffset": 2, "station": dep["station"], "vehicles": vehicles}
+            ],
+        }
+    }
+    trip = build_trip_tree(by_service, ANCHOR)["modes"][0]["lines"][0]["trips"][0]
+    assert trip["stops"][0]["vehicles"] == "4711"
+
+
+def test_station_and_trip_tree_carry_line_model():
+    dep = _dep("U1", "U", "Ochsenzoll", 2)
+    dep["line"]["type"]["model"] = "DT5"
+    station = build_station_tree([dep], ANCHOR)["modes"][0]["lines"][0]["stations"][0]
+    assert station["departures"][0]["model"] == "DT5"
+
+    by_service = {"1": {"line": dep["line"], "stops": []}}
+    trip = build_trip_tree(by_service, ANCHOR)["modes"][0]["lines"][0]["trips"][0]
+    assert trip["model"] == "DT5"
+
+
+def test_station_tree_carries_delay():
+    dep = _dep("S1", "S", "Altona", 4, delay=120)
+    station = build_station_tree([dep], ANCHOR)["modes"][0]["lines"][0]["stations"][0]
+    assert station["departures"][0]["delay"] == 120
+
+
+def test_ubahn_series_by_unit_number():
+    assert ubahn_series("101") == "DT4.1"
+    assert ubahn_series(226) == "DT4.6"
+    assert ubahn_series("417") == "DT5.1"
+    assert ubahn_series("437") == "DT5.2"
+    assert ubahn_series("4711") is None
+    assert ubahn_series(None) is None
+
+
+def test_vehicles_text_adds_series_for_ubahn_only():
+    vehicles = [{"id": "9", "number": "355"}]
+    assert vehicles_text(vehicles, ubahn=True) == "355 [DT5.1]"
+    assert vehicles_text(vehicles) == "355"
+
+
+def test_refined_model_prefers_vehicle_numbers_on_ubahn():
+    line = {"type": {"shortInfo": "U", "model": "DT4"}}
+    three_dt5 = [{"number": n} for n in ("417", "355", "437")]
+    assert refined_model(line, three_dt5) == "DT5"
+    assert refined_model(line, [{"number": "129"}, {"number": "420"}]) == "DT4/DT5"
+    assert refined_model(line, []) == "DT4"
+    bus = {"type": {"shortInfo": "Bus", "model": "Solobus"}}
+    assert refined_model(bus, [{"number": "417"}]) == "Solobus"

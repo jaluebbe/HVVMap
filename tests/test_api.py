@@ -301,3 +301,30 @@ def test_gtilive_courses_empty_without_database(client, monkeypatch):
     monkeypatch.setattr(api_module, "_get_gti_shapes_connection", lambda: None)
     data = client.get("/api/hvv/gtilive/courses.json").json()
     assert data == {"calls": [], "runs": []}
+
+
+def test_departures_live_returns_tree_with_delay_and_live_anchor(client, monkeypatch):
+    dep = {**_departure(5), "delay": 120}
+    fake = _FakeRedis(
+        {
+            "hvv:departures:live": {
+                "fetched_at": 7,
+                "data": {
+                    "departures": [dep],
+                    "anchor": {"date": "2026-10-17", "time": "00:20:00"},
+                },
+            }
+        }
+    )
+    monkeypatch.setattr(api_module, "_redis_client", fake)
+
+    data = client.get("/api/hvv/live/departures-live.json").json()
+
+    assert data["anchor"] == "2026-10-17 00:20"
+    departure = data["modes"][0]["lines"][0]["stations"][0]["departures"][0]
+    assert departure["time"] == "00:25" and departure["delay"] == 120
+
+
+def test_departures_live_503_when_cache_missing(client, monkeypatch):
+    monkeypatch.setattr(api_module, "_redis_client", _FakeRedis({}))
+    assert client.get("/api/hvv/live/departures-live.json").status_code == 503

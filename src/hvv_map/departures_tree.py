@@ -44,6 +44,70 @@ def _station_name(station: dict) -> str:
     )
 
 
+# Hamburg U-Bahn fleet: (first, last number, series). GTI's line.type.model
+# is the planned type and can be wrong, the vehicle numbers are authoritative.
+UBAHN_SERIES = [
+    (101, 130, "DT4.1"),
+    (131, 151, "DT4.2"),
+    (152, 171, "DT4.3"),
+    (172, 186, "DT4.4"),
+    (187, 211, "DT4.5"),
+    (212, 226, "DT4.6"),
+    (301, 418, "DT5.1"),
+    (419, 463, "DT5.2"),
+]
+
+
+def ubahn_series(number) -> str | None:
+    """Series ("DT4.3", "DT5.1", ...) of a U-Bahn unit number, None if unknown."""
+    try:
+        value = int(number)
+    except (TypeError, ValueError):
+        return None
+    for first, last, series in UBAHN_SERIES:
+        if first <= value <= last:
+            return series
+    return None
+
+
+def vehicles_text(vehicles, ubahn: bool = False) -> str:
+    """ "4711 [DT5.1], ..." for a departure's vehicles list, "" if none; the
+    series is added for U-Bahn units, the id only when there is no number."""
+    parts = []
+    for vehicle in vehicles or []:
+        number, vehicle_id = vehicle.get("number"), vehicle.get("id")
+        series = ubahn_series(number) if ubahn else None
+        text = " ".join(
+            filter(
+                None,
+                [
+                    number and str(number),
+                    series and f"[{series}]",
+                    not number and vehicle_id and f"(id {vehicle_id})",
+                ],
+            )
+        )
+        if text:
+            parts.append(text)
+    return ", ".join(parts)
+
+
+def _is_ubahn(line: dict) -> bool:
+    return (line.get("type") or {}).get("shortInfo") == "U"
+
+
+def refined_model(line: dict, vehicles) -> str | None:
+    """line.type.model, replaced by the type derived from the U-Bahn vehicle
+    numbers (DT4/DT5, "DT4/DT5" if mixed) when they are known."""
+    model = (line.get("type") or {}).get("model")
+    if not _is_ubahn(line):
+        return model
+    types = {
+        s[:3] for s in map(ubahn_series, (v.get("number") for v in vehicles or [])) if s
+    }
+    return "/".join(sorted(types)) if types else model
+
+
 def _mode_of(line: dict) -> str:
     return mode_for_line(line) or OTHER_MODE
 
@@ -78,6 +142,9 @@ def build_station_tree(departures: list[dict], anchor: datetime | None) -> dict:
                 "service_id": dep.get("serviceId"),
                 "direction_id": dep.get("directionId"),
                 "platform": dep.get("realtimePlatform") or dep.get("platform"),
+                "delay": dep.get("delay"),
+                "vehicles": vehicles_text(dep.get("vehicles"), _is_ubahn(line)),
+                "model": refined_model(line, dep.get("vehicles")),
             }
         )
 
@@ -127,6 +194,7 @@ def build_trip_tree(by_service: dict, anchor: datetime | None) -> dict:
                     "next_day": next_day,
                     "name": _station_name(stop.get("station") or {}),
                     "platform": stop.get("realtimePlatform") or stop.get("platform"),
+                    "vehicles": vehicles_text(stop.get("vehicles"), _is_ubahn(line)),
                 }
             )
         subline = entry.get("subline")
@@ -135,6 +203,17 @@ def build_trip_tree(by_service: dict, anchor: datetime | None) -> dict:
             "direction_id": entry.get("directionId"),
             "origin": line.get("origin"),
             "destination": entry.get("destination"),
+            "model": refined_model(
+                line,
+                next(
+                    (
+                        st["vehicles"]
+                        for st in entry.get("stops", [])
+                        if st.get("vehicles")
+                    ),
+                    None,
+                ),
+            ),
             "stop_count": len(stops),
             "subline_stop_count": len(subline) if subline else None,
             "stops": stops,
