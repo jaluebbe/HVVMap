@@ -429,3 +429,112 @@ def test_open_db_adds_meta_column_to_an_older_course_log(tmp_path):
     conn = open_db(path)
 
     assert "meta_json" in {r[1] for r in conn.execute("PRAGMA table_info(course_log)")}
+
+
+def test_subline_hops_finds_a_segment_spanning_many_skipped_stops():
+    conn = open_db(":memory:")
+    ids = tuple("ABCDEFGH")
+    store_segment(conn, "A", "H", [[0, 0], [1, 1], [2, 2]])
+
+    assert subline_hops(conn, ids) == [("A", "H", [[0, 0], [1, 1], [2, 2]])]
+
+
+def test_subline_hops_reverses_a_spanning_segment_of_the_opposite_direction():
+    conn = open_db(":memory:")
+    store_segment(conn, "H", "A", [[0, 0], [1, 1], [2, 2]])
+
+    assert subline_hops(conn, tuple("ABCDEFGH")) == [
+        ("A", "H", [[2, 2], [1, 1], [0, 0]])
+    ]
+
+
+def test_update_gti_shapes_counts_an_http_error_and_continues(tmp_path, monkeypatch):
+    import requests
+
+    from hvv_map import gti_shapes
+
+    monkeypatch.setattr(gti_shapes.time, "sleep", lambda _: None)
+
+    class _Failing(_FakeClient):
+        def send(self, endpoint, request):
+            raise requests.HTTPError("500 Server Error")
+
+    redis_client = _FakeRedis(
+        {
+            "hvv:departures:by_service": {
+                "1": _entry("HHA-U:U1_HHA-U", ("Master:1", "Master:2"), dlid="x")
+            },
+            "hvv:departures:anchor_start": {"date": "2026-09-21", "time": "04:00:00"},
+        }
+    )
+    conn = open_db(str(tmp_path / "gti_shapes.db"))
+
+    summary = update_gti_shapes(_Failing(None), redis_client, conn)
+
+    assert summary["failed"] == 1 and summary["resolved"] == 0
+
+
+def test_store_segment_keeps_a_real_track_over_a_straight_fallback():
+    conn = open_db(":memory:")
+    store_segment(conn, "A", "B", [[0, 0], [1, 1], [2, 2]])
+
+    store_segment(conn, "A", "B", [[0, 0], [2, 2]])
+
+    assert len(get_segment(conn, "A", "B")) == 3
+
+
+def _service(line_id, station_ids, destination="Z", short_info="Bus", matched=True):
+    entry = _entry(line_id, station_ids)
+    entry["line"]["type"] = {"shortInfo": short_info}
+    entry["destination"] = destination
+    entry["stops"] = [
+        {"station": {"id": sid, "combinedName": sid}, "timeOffset": 5 + i}
+        for i, sid in enumerate(station_ids)
+    ]
+    if not matched:
+        entry["subline"] = None
+    return entry
+
+
+def test_derive_one_course_per_variant_and_replace_a_wrongly_matched_subline(tmp_path):
+    from hvv_map.gti_shapes import apply_derived_sublines, derive_unresolved_sublines
+
+    conn = open_db(str(tmp_path / "gti_shapes.db"))
+    long_subline = _service("L1", ("A", "B", "C"))  # matched to the long variant
+    direct = _service("L1", ("A", "C"))  # observed at its ends only
+    direct["subline"] = long_subline["subline"]
+    by_service = {
+        "1": long_subline,
+        "2": _service("L1", ("A", "B", "C")),  # same variant as 1
+        "3": direct,
+        "4": _service("U1", ("A", "B"), short_info="U"),  # matched rail: untouched
+        "5": _service("L2", ("A", "B"), matched=False),
+    }
+    client = _FakeClient(COURSE_RESPONSE)
+    anchor = datetime(2026, 9, 21, 4, 0, tzinfo=BERLIN_TZ)
+
+    summary = derive_unresolved_sublines(client, by_service, anchor, conn)
+
+    assert summary == {"derived": 3, "failed": 0, "remaining": 0}
+    assert len(client.sent_requests) == 3  # variants of 1/2, 3 and 5
+    assert get_segment(conn, "Master:1", "Master:2")[1] == [10.12, 53.69]
+    applied = apply_derived_sublines(conn, by_service)
+    assert [s["id"] for s in applied["3"]["subline"]] == [
+        "Master:1",
+        "Master:2",
+        "Master:3",
+    ]
+    assert [s["id"] for s in applied["4"]["subline"]] == ["A", "B"]
+    derive_unresolved_sublines(client, by_service, anchor, conn)
+    assert len(client.sent_requests) == 3  # nothing left to fetch
+
+
+def test_apply_derived_sublines_without_database_or_table_changes_nothing():
+    import sqlite3
+
+    from hvv_map.gti_shapes import apply_derived_sublines
+
+    by_service = {"1": _service("L1", ("A", "B"))}
+
+    assert apply_derived_sublines(None, by_service) == by_service
+    assert apply_derived_sublines(sqlite3.connect(":memory:"), by_service) == by_service

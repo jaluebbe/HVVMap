@@ -82,6 +82,10 @@ def open_db(db_path: str = DEFAULT_DB_PATH) -> sqlite3.Connection:
         "subline_key TEXT, line_name TEXT, service_id TEXT, station TEXT, "
         "dep_time TEXT, result TEXT, segments INTEGER, delays_json TEXT)"
     )
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS variant_sublines ("
+        "variant_key TEXT PRIMARY KEY, subline_json TEXT, resolved_at INTEGER)"
+    )
     columns = {row[1] for row in conn.execute("PRAGMA table_info(course_log)")}
     if "meta_json" not in columns:
         conn.execute("ALTER TABLE course_log ADD COLUMN meta_json TEXT")
@@ -98,7 +102,6 @@ def get_segment(
     return json.loads(row[0]) if row else None
 
 
-MAX_SKIPPED_STOPS = 3  # look-ahead when a hop has no stored segment
 EXTRA_COURSE_TRIES = 3  # further trips per subline while hops lack a segment
 
 
@@ -110,7 +113,8 @@ def subline_hops(
     opposite direction's track (reversed) if known, else one that
     spans it when trips skip the declared intermediate stop(s) (e.g. a
     variant with an extra, rarely served pier), so from_id/to_id may then
-    be further apart than neighbours."""
+    be further apart than neighbours (e.g. a replacement bus that skips most
+    stops of the rail line)."""
     hops: list[tuple[str, str, Coordinates | None]] = []
     i = 0
     while i < len(station_ids) - 1:
@@ -121,9 +125,11 @@ def subline_hops(
             segment = opposite[::-1] if opposite else None
         end = i + 1
         if segment is None and conn:
-            last = min(len(station_ids) - 1, i + 2 + MAX_SKIPPED_STOPS)
-            for j in range(i + 2, last + 1):
+            for j in range(i + 2, len(station_ids)):
                 spanning = get_segment(conn, a, station_ids[j])
+                if spanning is None:
+                    opposite = get_segment(conn, station_ids[j], a)
+                    spanning = opposite[::-1] if opposite else None
                 if spanning is not None:
                     segment, b, end = spanning, station_ids[j], j
                     break
@@ -135,6 +141,9 @@ def subline_hops(
 def store_segment(
     conn: sqlite3.Connection, from_id: str, to_id: str, coordinates: Coordinates
 ) -> None:
+    existing = get_segment(conn, from_id, to_id)
+    if existing and len(existing) > 2 and len(coordinates) <= 2:
+        return  # keep a real track over a straight-line fallback
     conn.execute(
         "INSERT OR REPLACE INTO segments (from_id, to_id, coordinates_json, last_seen) "
         "VALUES (?, ?, ?, ?)",
@@ -468,7 +477,13 @@ def _query_course(
         "serviceId": int(service_id),
         "showPath": True,
     }
-    response = client.send("departureCourse", request)
+    import requests  # lazy: the api image does not install it
+
+    try:
+        response = client.send("departureCourse", request)
+    except requests.RequestException as error:
+        time.sleep(1)
+        return None, "api", f"request={request!r} error={error}", info
     time.sleep(1)  # 1 req/s rate limit across all GTI endpoints
     info["legs"] = _course_legs(response)
     info["meta"] = _course_meta(response)
@@ -545,6 +560,110 @@ def update_gti_shapes(
     return summary
 
 
+DERIVED_MAX_PER_RUN = 20  # departureCourse calls for service variants per run
+
+
+def variant_key(entry: dict) -> str:
+    """Services of one line and destination that were observed at the same
+    stations in the same order are taken to run the same variant."""
+    ids: list[str] = []
+    for stop in entry.get("stops") or []:
+        station_id = (stop.get("station") or {}).get("id")
+        if station_id and (not ids or ids[-1] != station_id):
+            ids.append(station_id)
+    return "|".join([entry["line"].get("id", ""), str(entry.get("destination")), *ids])
+
+
+def _needs_course(entry: dict) -> bool:
+    """No matched subline, or a replacement bus: its anchors alone cannot tell
+    a direct run from one that serves every stop of the rail line."""
+    return (
+        not entry.get("subline")
+        or (entry["line"].get("type") or {}).get("shortInfo") == "Bus"
+    )
+
+
+def store_variant_subline(
+    conn: sqlite3.Connection, key: str, subline: list[dict]
+) -> None:
+    conn.execute(
+        "INSERT OR REPLACE INTO variant_sublines (variant_key, subline_json, "
+        "resolved_at) VALUES (?, ?, ?)",
+        (key, json.dumps(subline), int(time.time())),
+    )
+    conn.commit()
+
+
+def apply_derived_sublines(conn: sqlite3.Connection | None, by_service: dict) -> dict:
+    """Replace the subline of services without one, and of replacement buses,
+    by the station sequence of their variant's own departureCourse (see
+    derive_unresolved_sublines)."""
+    if conn is None:
+        return by_service
+    try:
+        rows = dict(
+            conn.execute("SELECT variant_key, subline_json FROM variant_sublines")
+        )
+    except sqlite3.OperationalError:
+        return by_service
+    for entry in by_service.values():
+        if not _needs_course(entry):
+            continue
+        subline_json = rows.get(variant_key(entry))
+        if subline_json:
+            entry["subline"] = json.loads(subline_json)
+    return by_service
+
+
+def derive_unresolved_sublines(
+    client: GtiClient,
+    by_service: dict,
+    anchor_start: datetime,
+    conn: sqlite3.Connection,
+) -> dict:
+    """One departureCourse per variant (see variant_key) of the services that
+    need one, for stations and track. At most DERIVED_MAX_PER_RUN calls;
+    failed variants are tried again next run."""
+    summary = {"derived": 0, "failed": 0, "remaining": 0}
+    done = {row[0] for row in conn.execute("SELECT variant_key FROM variant_sublines")}
+    run_id = int(time.time())
+    seen: set[str] = set()
+    for service_id, entry in by_service.items():
+        key = variant_key(entry)
+        if not _needs_course(entry) or key in done or key in seen:
+            continue
+        seen.add(key)
+        if summary["derived"] + summary["failed"] >= DERIVED_MAX_PER_RUN:
+            summary["remaining"] += 1
+            continue
+        extracted, error, _, info = _query_course(
+            client, service_id, entry, anchor_start
+        )
+        log_course(
+            conn,
+            run_id,
+            "derived",
+            entry["line"].get("name", ""),
+            service_id,
+            info,
+            "ok" if extracted else error,
+            len(extracted[0]) if extracted else 0,
+        )
+        if extracted is None:
+            summary["failed"] += 1
+            continue
+        segments, stop_offsets = extracted
+        for from_id, to_id, coordinates in segments:
+            store_segment(conn, from_id, to_id, coordinates)
+        store_variant_subline(
+            conn,
+            key,
+            [{"id": stop["id"], "name": stop["name"]} for stop in stop_offsets],
+        )
+        summary["derived"] += 1
+    return summary
+
+
 def main() -> None:
     """CLI: resolve every not-yet-resolved gti-live subline via
     departureCourse."""
@@ -560,6 +679,15 @@ def main() -> None:
         f"resolved, {summary['failed']} failed ({summary['no_query']} of those "
         "had no usable station/time before any API call was made)"
     )
+    anchor_start = _load_anchor_start(redis_client)
+    if anchor_start is not None:
+        derived = derive_unresolved_sublines(
+            client, _load_by_service(redis_client), anchor_start, conn
+        )
+        print(
+            f"{derived['derived']} service variants got a subline from their "
+            f"course, {derived['failed']} failed, {derived['remaining']} still waiting"
+        )
 
 
 if __name__ == "__main__":

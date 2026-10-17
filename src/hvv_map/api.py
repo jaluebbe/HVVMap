@@ -23,7 +23,7 @@ from fastapi.staticfiles import StaticFiles
 from hvv_map.announcement_categories import classify_category
 from hvv_map.departures_tree import build_station_tree, build_trip_tree, parse_anchor
 from hvv_map.gti_shapes import DEFAULT_DB_PATH as GTI_SHAPES_DB_PATH
-from hvv_map.gti_shapes import read_course_log
+from hvv_map.gti_shapes import apply_derived_sublines, read_course_log
 from hvv_map.gtilive_debug import build_debug_geojson
 from hvv_map.gtilive_geojson import (
     build_lines_geojson as build_gtilive_lines_geojson,
@@ -340,7 +340,7 @@ def get_departures_by_trip():
 
 @app.get("/api/hvv/gtilive/stops.geojson", tags=["hvv_gtilive"])
 def get_gtilive_stops():
-    by_service = _read_cached_json(REDIS_BY_SERVICE_KEY)
+    by_service = _by_service_with_derived()
     stations = by_id(load_stations(_redis_client))
     return build_gtilive_stops_geojson(by_service, stations)
 
@@ -359,9 +359,17 @@ def _get_gti_shapes_connection() -> sqlite3.Connection | None:
     return _gti_shapes_connection
 
 
+def _by_service_with_derived() -> dict:
+    """by_service with course-derived sublines for services listLines did not
+    match (see gti_shapes.derive_unresolved_sublines)."""
+    return apply_derived_sublines(
+        _get_gti_shapes_connection(), _read_cached_json(REDIS_BY_SERVICE_KEY)
+    )
+
+
 @app.get("/api/hvv/gtilive/lines.geojson", tags=["hvv_gtilive"])
 def get_gtilive_lines():
-    by_service = _read_cached_json(REDIS_BY_SERVICE_KEY)
+    by_service = _by_service_with_derived()
     stations = by_id(load_stations(_redis_client))
     return build_gtilive_lines_geojson(
         by_service, stations, _get_gti_shapes_connection()
@@ -372,7 +380,7 @@ def get_gtilive_lines():
 def get_gtilive_debug():
     """gti-live lines and stops with debug properties, for
     static/dev_gtilive_map.html."""
-    by_service = _read_cached_json(REDIS_BY_SERVICE_KEY)
+    by_service = _by_service_with_derived()
     stations = by_id(load_stations(_redis_client))
     return build_debug_geojson(by_service, stations, _get_gti_shapes_connection())
 
