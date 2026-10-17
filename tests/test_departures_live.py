@@ -76,11 +76,33 @@ def test_failed_request_is_counted_and_the_rest_kept(monkeypatch):
     assert data["departures"]
 
 
+class _NoRedis:
+    def get(self, key):
+        return None
+
+
 def test_run_live_snapshot_stores_result(monkeypatch):
     stored = {}
     monkeypatch.setattr(
-        live, "fetch_live_departures", lambda client, start: {"departures": [1]}
+        live,
+        "fetch_live_departures",
+        lambda client, start, sev: {"departures": [1]},
     )
     monkeypatch.setattr(live, "_store", lambda r, key, data: stored.update({key: data}))
-    assert live.run_live_snapshot(object(), object()) == {"departures": [1]}
+    assert live.run_live_snapshot(object(), _NoRedis()) == {"departures": [1]}
     assert stored == {live.REDIS_LIVE_KEY: {"departures": [1]}}
+
+
+def test_announcement_stations_add_a_filtered_replacement_bus_category(monkeypatch):
+    monkeypatch.setattr(live.time, "sleep", lambda _: None)
+    client = _FakeClient()
+
+    data = fetch_live_departures(client, START, {"Ohlsdorf"})
+
+    stations, types = client.requests[-1][1]["stations"], client.requests[-1][1]
+    assert len(client.requests) == len(live.LIVE_CATEGORIES) + 1
+    assert stations == [{"type": "STATION", "name": "Ohlsdorf"}]
+    assert types["serviceTypes"] == live.SEV_SERVICE_TYPES
+    ids = {d["serviceId"] for d in data["departures"]}
+    assert len(client.requests) - 1 in ids  # RE8 of the SEV request passes
+    assert 100 + len(client.requests) - 1 not in ids  # "ICE 1" is dropped

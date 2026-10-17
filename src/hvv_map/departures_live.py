@@ -3,6 +3,7 @@ vehicle models and numbers, which the daily plan snapshot (departures.py)
 cannot carry. Stored under hvv:departures:live, independent of that snapshot.
 """
 
+import json
 import time
 from datetime import datetime
 
@@ -11,6 +12,9 @@ from hvv_map.departures import (
     ANCHOR_STATIONS_R,
     MAIN_SERVICE_TYPES,
     R_SERVICE_TYPES,
+    REDIS_ANNOUNCEMENT_STATIONS_KEY,
+    SEV_SERVICE_TYPES,
+    _is_wanted_departure,
     _store,
     berlin_now,
     merge_departures,
@@ -44,11 +48,18 @@ def _live_request(stations: set[str], service_types: list[str], start: datetime)
     }
 
 
-def fetch_live_departures(client: GtiClient, start: datetime) -> dict:
+def fetch_live_departures(
+    client: GtiClient, start: datetime, sev_stations: set[str] | None = None
+) -> dict:
     """Realtime departures per category at 1 req/s: {"departures", "anchor",
-    "failed_requests"} with timeOffsets relative to the anchor (= start)."""
+    "failed_requests"} with timeOffsets relative to the anchor (= start).
+    sev_stations (stations of active announcements) adds a replacement-bus
+    category."""
+    categories = list(LIVE_CATEGORIES)
+    if sev_stations:
+        categories.append((sev_stations, SEV_SERVICE_TYPES))
     responses, failed = [], 0
-    for index, (stations, service_types) in enumerate(LIVE_CATEGORIES):
+    for index, (stations, service_types) in enumerate(categories):
         if index:
             time.sleep(1)  # 1 req/s rate limit across all GTI endpoints
         response = client.send(
@@ -57,7 +68,11 @@ def fetch_live_departures(client: GtiClient, start: datetime) -> dict:
         if response.get("returnCode") != "OK":
             failed += 1
             continue
-        if service_types == R_SERVICE_TYPES:
+        if service_types == SEV_SERVICE_TYPES:
+            response["departures"] = [
+                d for d in response.get("departures", []) if _is_wanted_departure(d)
+            ]
+        elif service_types == R_SERVICE_TYPES:
             response["departures"] = [
                 d
                 for d in response.get("departures", [])
@@ -77,7 +92,9 @@ def fetch_live_departures(client: GtiClient, start: datetime) -> dict:
 def run_live_snapshot(client: GtiClient, redis_client) -> dict:
     """Fetch one realtime snapshot starting now and store it in Redis."""
     start = berlin_now().replace(second=0, microsecond=0)
-    data = fetch_live_departures(client, start)
+    payload = redis_client.get(REDIS_ANNOUNCEMENT_STATIONS_KEY)
+    sev_stations = set(json.loads(payload)["data"]) if payload else set()
+    data = fetch_live_departures(client, start, sev_stations)
     _store(redis_client, REDIS_LIVE_KEY, data)
     return data
 
