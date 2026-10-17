@@ -170,6 +170,7 @@
                 <option value="">alle Ergebnisse</option>
                 <option value="ok">nur ok</option>
                 <option value="bad">nur Fehler</option>
+                <option value="vehicle">nur mit Fahrzeug</option>
             </select>
         </div>
     </header>
@@ -224,13 +225,83 @@
             return !q || text.toLowerCase().includes(q);
         }
 
-        function resultMatches(result) {
+        function resultMatches(call) {
             const f = resultFilter.value;
-            return !f || (f === "ok") === (result === "ok");
+            if (f === "vehicle") return vehicleInfo(call).length > 0;
+            return !f || (f === "ok") === (call.result === "ok");
         }
 
         function clock(iso) {
             return iso ? iso.slice(11, 19) : "–";
+        }
+
+        const VEHICLE_KEY = /vehicle|fahrzeug|train|wagen|nummer|number|fleet|model/i;
+
+        function flatten(value, path, out) {
+            if (value && typeof value === "object") {
+                for (const [k, v] of Object.entries(value)) {
+                    flatten(v, path ? `${path}.${k}` : k, out);
+                }
+            } else if (value !== null && value !== "") {
+                out.push([path, value]);
+            }
+            return out;
+        }
+
+        // Hamburg U-Bahn fleet; keep in sync with UBAHN_SERIES in departures_tree.py
+        const UBAHN_SERIES = [
+            [101, 130, "DT4.1"], [131, 151, "DT4.2"], [152, 171, "DT4.3"],
+            [172, 186, "DT4.4"], [187, 211, "DT4.5"], [212, 226, "DT4.6"],
+            [301, 418, "DT5.1"], [419, 463, "DT5.2"],
+        ];
+
+        function ubahnSeries(number) {
+            const n = parseInt(number, 10);
+            const hit = UBAHN_SERIES.find(([first, last]) => n >= first && n <= last);
+            return hit ? hit[2] : null;
+        }
+
+        const isUbahn = call => /^U\d+$/.test(call.line || "");
+
+        // vehicle numbers with the U-Bahn series, e.g. "355 [DT5.1]"
+        function vehicleNumbers(call) {
+            return ((call.meta && call.meta.vehicles) || []).map(v => {
+                const series = isUbahn(call) ? ubahnSeries(v.number) : null;
+                return [v.number, series && `[${series}]`].filter(Boolean).join(" ") || v.id;
+            }).filter(Boolean);
+        }
+
+        // type from the U-Bahn numbers (DT4/DT5), else the model the API sends
+        function modelOf(call, apiModel) {
+            if (isUbahn(call)) {
+                const types = new Set(((call.meta && call.meta.vehicles) || [])
+                    .map(v => ubahnSeries(v.number)).filter(Boolean).map(x => x.slice(0, 3)));
+                if (types.size) return [...types].sort().join("/");
+            }
+            return apiModel;
+        }
+
+        // vehicle numbers plus other vehicle-like response fields (model is derived)
+        function vehicleInfo(call) {
+            const found = new Set(vehicleNumbers(call));
+            const sources = [call.meta, ...(call.legs || []).map(l => l.extra)];
+            for (const source of sources) {
+                for (const [path, value] of flatten(source, "", [])) {
+                    const key = path.split(".").pop();
+                    if (path.startsWith("vehicles.") || key === "model" || key === "id") continue;
+                    if (VEHICLE_KEY.test(path)) found.add(`${key}: ${value}`);
+                }
+            }
+            return [...found].filter(Boolean);
+        }
+
+        // every field beyond the known ones, to spot what the API really sends
+        function extraFields(call) {
+            const extra = {};
+            if (call.meta && Object.keys(call.meta).length) extra.antwort = call.meta;
+            const legs = (call.legs || []).map(l => l.extra).filter(e => e && Object.keys(e).length);
+            if (legs.length) extra.streckenelemente = legs;
+            return Object.keys(extra).length ? JSON.stringify(extra, null, 2) : "";
         }
 
         // planned time, plus the delayed time when the API reports a delay
@@ -249,11 +320,12 @@
                 note.textContent = "keine Streckenelemente in der Antwort";
                 return note;
             }
-            const t = table(["Halt", "Ankunft", "Abfahrt"], []);
+            const t = table(["Halt", "Ankunft", "Abfahrt", "Modell"], []);
             const stops = legs.map((leg, i) => ({
                 name: leg.from,
                 arr: i ? [legs[i - 1].arr_time, legs[i - 1].arr_delay] : [null, null],
                 dep: [leg.dep_time, leg.dep_delay],
+                model: modelOf(call, (leg.extra || {}).model),
             }));
             const last = legs[legs.length - 1];
             stops.push({ name: last.to, arr: [last.arr_time, last.arr_delay], dep: [null, null] });
@@ -262,19 +334,38 @@
                 cell(row, stop.name || "–");
                 cell(row, timeWithDelay(...stop.arr));
                 cell(row, timeWithDelay(...stop.dep));
+                cell(row, stop.model || "–");
                 t.appendChild(row);
             }
-            return t;
+            const box = document.createElement("div");
+            const vehicle = vehicleInfo(call);
+            if (vehicle.length) {
+                const line = document.createElement("div");
+                line.textContent = `Fahrzeug: ${vehicle.join(" · ")}`;
+                box.appendChild(line);
+            }
+            box.appendChild(t);
+            const raw = extraFields(call);
+            if (raw) {
+                const details = document.createElement("details");
+                const summary = document.createElement("summary");
+                summary.textContent = "Weitere Felder der Antwort";
+                const pre = document.createElement("pre");
+                pre.textContent = raw;
+                details.append(summary, pre);
+                box.appendChild(details);
+            }
+            return box;
         }
 
         function renderCalls() {
             const t = table(
                 ["Zeit", "Lauf", "Linie", "Fahrt", "Station", "Abfahrt", "Ergebnis",
-                    "Segmente", "max. Verspätung"], [7]);
+                    "Segmente", "max. Verspätung", "Fahrzeug"], [7]);
             let shown = 0;
             for (const c of data.calls) {
-                const text = [c.line, c.station, c.service_id].join(" ");
-                if (!matches(text) || !resultMatches(c.result)) continue;
+                const text = [c.line, c.station, c.service_id, ...vehicleInfo(c)].join(" ");
+                if (!matches(text) || !resultMatches(c)) continue;
                 shown++;
                 const row = document.createElement("tr");
                 row.className = "call";
@@ -287,13 +378,14 @@
                 cell(row, c.result, c.result === "ok" ? "ok" : "bad");
                 cell(row, String(c.segments), "num");
                 cell(row, delayText(c.max_delay_s), "num");
+                cell(row, vehicleInfo(c).slice(0, 2).join(" · ") || "–");
                 t.appendChild(row);
 
                 const detail = document.createElement("tr");
                 detail.className = "detail";
                 detail.hidden = true;
                 const td = document.createElement("td");
-                td.colSpan = 9;
+                td.colSpan = 10;
                 td.appendChild(legTable(c));
                 detail.appendChild(td);
                 t.appendChild(detail);
