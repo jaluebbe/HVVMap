@@ -4,7 +4,9 @@ const HAMBURG_CENTER = [9.9937, 53.5511]; // MapLibre wants [lon, lat]
 const HAMBURG_DEFAULT_ZOOM = 12;
 
 // Optional page overrides (window.HVV_PAGE_CONFIG): center [lon, lat], zoom, modes,
-// lineToggles {mode: [{key, color, icon}]} - per-line checkboxes replacing that mode's.
+// lineToggles {mode: [{key, color, icon}]} - per-line checkboxes replacing that mode's,
+// sourceKeys - restricts the data source choices, straightToggle - checkbox that shows
+// hops without a stored track (features with properties.straight) as dashed lines.
 const PAGE_CONFIG = window.HVV_PAGE_CONFIG || {};
 const LINE_TOGGLES = PAGE_CONFIG.lineToggles || {};
 
@@ -284,7 +286,8 @@ function buildIconNode(icon) {
 
 // One checkbox per mode + disruption category; collapsible on narrow/short screens.
 class ModeToggleControl {
-    constructor(onModeToggle, categories, onCategoryToggle, sourceConfig, onLineToggle) {
+    constructor(onModeToggle, categories, onCategoryToggle, sourceConfig, onLineToggle, extraToggles) {
+        this._extraToggles = extraToggles || [];
         this._onModeToggle = onModeToggle;
         this._onLineToggle = onLineToggle;
         this._categories = categories || [];
@@ -360,7 +363,14 @@ class ModeToggleControl {
         }
         items.appendChild(this._categoriesSection);
 
-        if (this._sourceConfig) {
+        if (this._extraToggles.length > 0) {
+            const extraDivider = document.createElement('div');
+            extraDivider.className = 'hvv-mode-control-divider';
+            items.appendChild(extraDivider);
+            this._extraToggles.forEach((t) => this._appendItem(items, t.key, t.name, t.icon || '', t.checked, t.onToggle));
+        }
+
+        if (this._sourceConfig && this._sourceConfig.sources.length > 1) {
             const sourceDivider = document.createElement('div');
             sourceDivider.className = 'hvv-mode-control-divider';
             items.appendChild(sourceDivider);
@@ -474,7 +484,7 @@ function buildMarkerElement(properties) {
 
 
 // Built-in data sources - GTFS has no disruptions endpoint (null skips that layer).
-const SOURCES = [
+const ALL_SOURCES = [
     {
         key: 'live',
         name: 'Live',
@@ -499,7 +509,20 @@ const SOURCES = [
         stopsEndpoint: '/api/hvv/gtfs/stops.geojson',
         disruptionsEndpoint: null,
     },
+    {
+        // departureList/sublines based, no vehicles.
+        key: 'gtilive',
+        name: 'GTI-Live',
+        pageOnly: true, // only offered where a page lists it in sourceKeys
+        positionsEndpoint: null,
+        linesEndpoint: '/api/hvv/gtilive/lines.geojson',
+        stopsEndpoint: '/api/hvv/gtilive/stops.geojson',
+        disruptionsEndpoint: '/api/hvv/live/disruptions.geojson',
+    },
 ];
+const SOURCES = PAGE_CONFIG.sourceKeys
+    ? ALL_SOURCES.filter((s) => PAGE_CONFIG.sourceKeys.includes(s.key))
+    : ALL_SOURCES.filter((s) => !s.pageOnly);
 
 // initialSourceKey defaults to 'live' when omitted or unknown.
 function initHvvVehicleLayers(initialSourceKey) {
@@ -511,6 +534,7 @@ function initHvvVehicleLayers(initialSourceKey) {
     MODES.forEach((m) => { positionMarkersByMode[m.key] = []; });
     let currentSource = SOURCES.find((s) => s.key === initialSourceKey) || SOURCES[0];
     let modeToggleControl = null;
+    let showStraight = false;
     const pollTimers = [];
     const activeLines = new Set(Object.values(LINE_TOGGLES).flat().map((l) => l.key));
     // Last fetched lines/stops, re-filtered on line toggle.
@@ -546,6 +570,7 @@ function initHvvVehicleLayers(initialSourceKey) {
         const visibility = visible ? 'visible' : 'none';
         map.setLayoutProperty(`hvv-lines-layer-${modeKey}`, 'visibility', visibility);
         map.setLayoutProperty(`hvv-lines-layer-${modeKey}-replacement`, 'visibility', visibility);
+        map.setLayoutProperty(`hvv-lines-layer-${modeKey}-straight`, 'visibility', visibility);
         map.setLayoutProperty(`hvv-stops-layer-${modeKey}`, 'visibility', visibility);
         map.setLayoutProperty(`hvv-stops-labels-${modeKey}`, 'visibility', visibility);
         positionMarkersByMode[modeKey].forEach((marker) => {
@@ -570,6 +595,11 @@ function initHvvVehicleLayers(initialSourceKey) {
         renderDisruptionLayers();
     }
 
+    function setStraightVisibility(_key, visible) {
+        showStraight = visible;
+        renderReferenceLayer('hvv-lines');
+    }
+
     function setCategoryVisibility(categoryKey, visible) {
         if (visible) {
             activeCategories.add(categoryKey);
@@ -591,7 +621,7 @@ function initHvvVehicleLayers(initialSourceKey) {
                 id: `hvv-lines-layer-${m.key}`,
                 type: 'line',
                 source: `hvv-lines-${m.key}`,
-                filter: ['!', ['get', 'isReplacementLine']],
+                filter: ['all', ['!', ['get', 'isReplacementLine']], ['!', ['coalesce', ['get', 'straight'], false]]],
                 paint: {
                     'line-color': ['coalesce', ['get', 'color'], '#888888'],
                     'line-width': 1.5,
@@ -603,11 +633,25 @@ function initHvvVehicleLayers(initialSourceKey) {
                 id: `hvv-lines-layer-${m.key}-replacement`,
                 type: 'line',
                 source: `hvv-lines-${m.key}`,
-                filter: ['==', ['get', 'isReplacementLine'], true],
+                filter: ['all', ['==', ['get', 'isReplacementLine'], true], ['!', ['coalesce', ['get', 'straight'], false]]],
                 paint: {
                     'line-color': ['coalesce', ['get', 'color'], '#888888'],
                     'line-width': 1.5,
                     'line-dasharray': [1, 3],
+                },
+            });
+
+            // Hops without a stored track; only present while the straight-line toggle is on.
+            map.addLayer({
+                id: `hvv-lines-layer-${m.key}-straight`,
+                type: 'line',
+                source: `hvv-lines-${m.key}`,
+                filter: ['==', ['coalesce', ['get', 'straight'], false], true],
+                paint: {
+                    'line-color': ['coalesce', ['get', 'color'], '#888888'],
+                    'line-width': 1.5,
+                    'line-opacity': 0.7,
+                    'line-dasharray': [2, 2],
                 },
             });
 
@@ -737,6 +781,9 @@ function initHvvVehicleLayers(initialSourceKey) {
             setCategoryVisibility,
             { sources: SOURCES, initialKey: currentSource.key, onSourceChange: switchSource },
             setLineVisibility,
+            PAGE_CONFIG.straightToggle
+                ? [{ key: 'straight', name: 'Luftlinien', icon: '⋯', checked: false, onToggle: setStraightVisibility }]
+                : [],
         );
         map.addControl(modeToggleControl, 'top-right');
         modeToggleControl.setCategoriesVisible(!!currentSource.disruptionsEndpoint);
@@ -769,6 +816,7 @@ function initHvvVehicleLayers(initialSourceKey) {
                 features: data.features
                     .filter((f) => (f.properties?.modes || []).includes(m.key))
                     .filter((f) => linesVisible(m.key, f.properties?.lines))
+                    .filter((f) => showStraight || !f.properties?.straight)
                     .map((f) => ({
                         ...f,
                         properties: {
@@ -799,6 +847,9 @@ function initHvvVehicleLayers(initialSourceKey) {
     }
 
     async function refreshHvvPositions() {
+        if (!currentSource.positionsEndpoint) {
+            return;
+        }
         try {
             const response = await fetch(currentSource.positionsEndpoint, { cache: 'no-store' });
             if (!response.ok) {

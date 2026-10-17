@@ -101,15 +101,32 @@ def _subline_coordinates(
     return coordinates
 
 
+def _hop_runs(station_ids: tuple[str, ...], shapes_conn) -> list[tuple[bool, tuple]]:
+    """Consecutive hops grouped by whether each has a real track:
+    [(is_real, station ids of the run), ...]. A stored segment of just two
+    points is the straight-line fallback gti_shapes keeps when
+    departureCourse returned no track (typical for replacement buses), so it
+    counts as straight. A hop may span skipped stops (see subline_hops)."""
+    runs: list[tuple[bool, list[str]]] = []
+    for a, b, segment in subline_hops(shapes_conn, station_ids):
+        real = segment is not None and len(segment) > 2
+        if runs and runs[-1][0] == real:
+            runs[-1][1].append(b)
+        else:
+            runs.append((real, [a, b]))
+    return [(real, tuple(ids)) for real, ids in runs]
+
+
 def build_lines_geojson(
     by_service: dict,
     stations: dict[str, StationInfo],
     shapes_conn: sqlite3.Connection | None = None,
 ) -> dict:
-    """One LineString per distinct resolved subline (station-id sequence),
-    deduplicated across repeat trips on the same route. Draws each segment's
-    real track wherever gti_shapes.py has resolved it via departureCourse,
-    straight lines elsewhere - see _subline_coordinates(). Skipped only if
+    """LineStrings per distinct resolved subline (station-id sequence),
+    deduplicated across repeat trips on the same route, split into runs of
+    hops with a stored track and runs without (properties.straight, drawn as
+    a straight station-to-station line) - see _hop_runs() and
+    _subline_coordinates(). A run is skipped only if
     that leaves fewer than two usable points - a single missing station
     doesn't drop the whole line, since a resolved segment carries its own
     coordinates regardless of hvv:stations."""
@@ -128,20 +145,22 @@ def build_lines_geojson(
 
     features = []
     for (_line_id, station_ids), info in by_station_ids.items():
-        coordinates = _subline_coordinates(station_ids, stations, shapes_conn)
-        if len(coordinates) < 2:
-            continue
         line_names = sorted(info["line_names"])
         color = LINE_COLORS.get(line_names[0], "888888")
-        features.append(
-            {
-                "type": "Feature",
-                "geometry": {"type": "LineString", "coordinates": coordinates},
-                "properties": {
-                    "lines": line_names,
-                    "modes": sorted(info["modes"]),
-                    "color": f"#{color}",
-                },
-            }
-        )
+        for real, run_ids in _hop_runs(station_ids, shapes_conn):
+            coordinates = _subline_coordinates(run_ids, stations, shapes_conn)
+            if len(coordinates) < 2:
+                continue
+            features.append(
+                {
+                    "type": "Feature",
+                    "geometry": {"type": "LineString", "coordinates": coordinates},
+                    "properties": {
+                        "lines": line_names,
+                        "modes": sorted(info["modes"]),
+                        "color": f"#{color}",
+                        "straight": not real,
+                    },
+                }
+            )
     return {"type": "FeatureCollection", "features": features}

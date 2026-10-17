@@ -157,7 +157,33 @@ def test_build_lines_geojson_geometry_and_properties():
         "lines": ["U1"],
         "modes": ["U"],
         "color": "#006ab3",
+        "straight": True,
     }
+
+
+def test_build_lines_geojson_splits_real_track_from_straight_hops():
+    stations = {
+        **STATIONS,
+        "Master:3": StationInfo(
+            id="Master:3",
+            name="Berne",
+            city="Hamburg",
+            lon=10.2,
+            lat=53.66,
+            combined_name="Berne",
+        ),  # fmt: skip
+    }
+    conn = open_db(":memory:")
+    track = [[10.1, 53.7], [10.12, 53.69], [10.15, 53.68]]
+    store_segment(conn, "Master:1", "Master:2", track)
+    subline = [*SUBLINE, {"id": "Master:3", "name": "Berne"}]
+    by_service = {"1": _entry("U1", "U", subline)}
+
+    features = build_lines_geojson(by_service, stations, conn)["features"]
+
+    assert [f["properties"]["straight"] for f in features] == [False, True]
+    assert features[0]["geometry"]["coordinates"] == track
+    assert features[1]["geometry"]["coordinates"] == [[10.15, 53.68], [10.2, 53.66]]
 
 
 def test_build_lines_geojson_dedupes_repeat_trips_on_the_same_route():

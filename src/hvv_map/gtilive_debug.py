@@ -6,8 +6,8 @@ geometry, and which services found no subline at all.
 
 import sqlite3
 
-from hvv_map.gti_shapes import subline_hops, subline_key
-from hvv_map.gtilive_geojson import _subline_coordinates, mode_for_line
+from hvv_map.gti_shapes import subline_key
+from hvv_map.gtilive_geojson import _hop_runs, _subline_coordinates, mode_for_line
 from hvv_map.lines import LINE_COLORS
 from hvv_map.stations import StationInfo
 
@@ -17,22 +17,6 @@ UNKNOWN_COLOR = "888888"  # same fallback as gtilive_geojson
 def _station_name(station_id: str, fallback: str, stations: dict) -> str:
     station = stations.get(station_id)
     return station.combined_name if station else fallback
-
-
-def _hop_runs(station_ids: tuple[str, ...], shapes_conn) -> list[tuple[bool, tuple]]:
-    """Consecutive hops grouped by whether each has a real track:
-    [(is_real, station ids of the run), ...]. A stored segment of just two
-    points is the straight-line fallback gti_shapes keeps when
-    departureCourse returned no track (typical for replacement buses), so it
-    counts as straight. A hop may span skipped stops (see subline_hops)."""
-    runs: list[tuple[bool, list[str]]] = []
-    for a, b, segment in subline_hops(shapes_conn, station_ids):
-        real = segment is not None and len(segment) > 2
-        if runs and runs[-1][0] == real:
-            runs[-1][1].append(b)
-        else:
-            runs.append((real, [a, b]))
-    return [(real, tuple(ids)) for real, ids in runs]
 
 
 def _line_features(key, info, stations, shapes_conn) -> list[dict]:
