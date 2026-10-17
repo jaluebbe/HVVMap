@@ -328,3 +328,60 @@ def test_departures_live_returns_tree_with_delay_and_live_anchor(client, monkeyp
 def test_departures_live_503_when_cache_missing(client, monkeypatch):
     monkeypatch.setattr(api_module, "_redis_client", _FakeRedis({}))
     assert client.get("/api/hvv/live/departures-live.json").status_code == 503
+
+
+def test_trips_endpoint_matches_plan_with_live(client, monkeypatch):
+    plan_stop = {
+        "timeOffset": 302,
+        "direction": "Z",
+        "station": {"id": "A", "name": "A"},
+        "platform": "Gleis 1",
+    }
+    line = {"name": "U1", "type": {"shortInfo": "U"}}
+    fake = _FakeRedis(
+        {
+            "hvv:departures:by_service": {
+                "fetched_at": 1,
+                "data": {
+                    "5": {
+                        "line": line,
+                        "directionId": 6,
+                        "destination": "Z",
+                        "stops": [plan_stop],
+                    }
+                },
+            },
+            "hvv:departures:anchor_start": {
+                "fetched_at": 1,
+                "data": {"date": "2026-10-17", "time": "04:00:00"},
+            },
+            "hvv:departures:live": {
+                "fetched_at": 9,
+                "data": {
+                    "anchor": {"date": "2026-10-17", "time": "09:00:00"},
+                    "departures": [
+                        {
+                            "line": {**line, "direction": "Z"},
+                            "station": {"id": "A", "name": "A"},
+                            "timeOffset": 2,
+                            "directionId": 6,
+                            "serviceId": 77,
+                            "delay": 60,
+                        }
+                    ],
+                },
+            },
+        }
+    )
+    monkeypatch.setattr(api_module, "_redis_client", fake)
+
+    data = client.get("/api/hvv/live/trips.json").json()
+
+    assert data["fetched_at"] == 9
+    assert data["summary"]["live_matched"] == 1
+    assert data["trips"][0]["live_ids"] == ["77"]
+
+
+def test_trips_endpoint_503_when_cache_missing(client, monkeypatch):
+    monkeypatch.setattr(api_module, "_redis_client", _FakeRedis({}))
+    assert client.get("/api/hvv/live/trips.json").status_code == 503

@@ -1,0 +1,433 @@
+<!DOCTYPE html>
+<html lang="de">
+
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width,initial-scale=1.0">
+    <title>HVV Fahrten (U-Bahn) - Entwickleransicht</title>
+    <style>
+        :root {
+            --ink: #1a2733;
+            --muted: #5b6b78;
+            --line: #d8dee3;
+            --bg: #f4f6f8;
+            --card: #ffffff;
+            --accent: #1e64a0;
+            --warn: #b3541e;
+            --ok: #2b7a4b;
+        }
+
+        * {
+            box-sizing: border-box;
+        }
+
+        body {
+            margin: 0;
+            font-family: -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            background: var(--bg);
+            color: var(--ink);
+            font-size: 0.88rem;
+        }
+
+        header {
+            position: sticky;
+            top: 0;
+            z-index: 5;
+            background: var(--card);
+            border-bottom: 1px solid var(--line);
+            padding: 12px 16px;
+        }
+
+        h1 {
+            margin: 0 0 2px;
+            font-size: 1.05rem;
+            font-weight: 600;
+        }
+
+        .meta {
+            font-size: 0.78rem;
+            color: var(--muted);
+        }
+
+        .toolbar {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px 14px;
+            align-items: center;
+            margin-top: 10px;
+        }
+
+        .toolbar input[type="search"],
+        .toolbar select {
+            padding: 6px 8px;
+            border: 1px solid var(--line);
+            border-radius: 6px;
+            font: inherit;
+        }
+
+        .toolbar input[type="search"] {
+            flex: 1 1 220px;
+        }
+
+        .tabs button {
+            padding: 6px 12px;
+            border: 1px solid var(--line);
+            background: var(--bg);
+            font: inherit;
+            cursor: pointer;
+        }
+
+        .tabs button:first-child {
+            border-radius: 6px 0 0 6px;
+        }
+
+        .tabs button:last-child {
+            border-radius: 0 6px 6px 0;
+            border-left: 0;
+        }
+
+        .tabs button.active {
+            background: var(--accent);
+            border-color: var(--accent);
+            color: #fff;
+        }
+
+        main {
+            padding: 12px 16px 40px;
+        }
+
+        .summary {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+            gap: 8px;
+            margin-bottom: 12px;
+        }
+
+        .stat {
+            background: var(--card);
+            border: 1px solid var(--line);
+            border-radius: 6px;
+            padding: 8px 10px;
+        }
+
+        .stat b {
+            display: block;
+            font-size: 1.15rem;
+        }
+
+        .stat span {
+            color: var(--muted);
+            font-size: 0.75rem;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            background: var(--card);
+            border: 1px solid var(--line);
+        }
+
+        th,
+        td {
+            text-align: left;
+            padding: 5px 8px;
+            border-bottom: 1px solid var(--line);
+            vertical-align: top;
+        }
+
+        th {
+            background: #eef1f4;
+            font-weight: 600;
+            font-size: 0.78rem;
+        }
+
+        tr.trip {
+            cursor: pointer;
+        }
+
+        tr.trip:hover {
+            background: #f0f6fb;
+        }
+
+        tr.detail td {
+            background: #fafbfc;
+            padding: 0 8px 8px 28px;
+        }
+
+        .ok {
+            color: var(--ok);
+        }
+
+        .warn {
+            color: var(--warn);
+        }
+
+        .muted {
+            color: var(--muted);
+        }
+
+        .small {
+            font-size: 0.8rem;
+        }
+
+        table.inner {
+            border: 0;
+            width: auto;
+            min-width: 60%;
+        }
+
+        .inner td,
+        .inner th {
+            padding: 2px 10px 2px 0;
+            border: 0;
+            background: none;
+        }
+
+        .inner tr.expected td {
+            font-weight: 600;
+        }
+
+        .inner tr.between td {
+            color: var(--muted);
+        }
+
+        .inner tr.next td {
+            background: #fff3c4;
+            font-weight: 600;
+        }
+
+        .inner tr.next td:first-child::before {
+            content: "▶ ";
+        }
+
+        .interp {
+            font-style: italic;
+            color: var(--muted);
+        }
+
+        .badge {
+            display: inline-block;
+            padding: 0 6px;
+            border-radius: 8px;
+            font-size: 0.74rem;
+            border: 1px solid currentColor;
+        }
+
+        .warning {
+            background: #fde8e0;
+            border: 1px solid var(--warn);
+            color: var(--warn);
+            border-radius: 6px;
+            padding: 8px 10px;
+            margin-bottom: 12px;
+        }
+
+        .err {
+            color: var(--warn);
+            padding: 16px;
+        }
+    </style>
+</head>
+
+<body>
+    <header>
+        <h1>U-Bahn-Fahrten: Plan gegen Echtzeit</h1>
+        <div class="meta" id="meta">lade …</div>
+        <div class="toolbar">
+            <span class="tabs">
+                <button data-tab="trips" class="active">Fahrten</button>
+                <button data-tab="live_only">Nur live</button>
+            </span>
+            <select id="line"></select>
+            <select id="status"></select>
+            <input type="search" id="q" placeholder="Suche (Ziel, Fahrzeug, Haltestelle, ID) …">
+            <label><input type="checkbox" id="running"> nur laufende Fahrten (±<input type="number" id="buffer" value="5" min="0" max="60" style="width:3.2em"> min)</label>
+            <label><input type="checkbox" id="auto" checked> alle 30 s</label>
+        </div>
+    </header>
+    <main>
+        <div id="warnings"></div>
+        <div class="summary" id="summary"></div>
+        <div id="content"></div>
+    </main>
+    <script>
+        const ENDPOINT = '/api/hvv/live/trips.json';
+        let data = null;
+        let tab = 'trips';
+        const open = new Set();
+
+        const esc = s => String(s ?? '').replace(/[&<>"]/g,
+            c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+        const delayText = d => d == null ? '' : (d === 0 ? '±0' : (d > 0 ? '+' : '−') + Math.round(Math.abs(d) / 60 * 10) / 10 + ' min');
+        // Index of the first stop not yet reached (planned time + delay >= now),
+        // -1 if the trip has ended, -2 if it has not started yet.
+        function nextStopIndex(t, now) {
+            const times = t.stops.map(s => {
+                if (!s.at) return null;
+                const delay = (s.match && s.match.delay != null) ? s.match.delay : (s.course_delay ?? 0);
+                return new Date(s.at).getTime() + delay * 1000;
+            });
+            const known = times.filter(x => x != null);
+            if (!known.length) return -2;
+            if (now < Math.min(...known)) return -2;
+            const index = times.findIndex(x => x != null && x >= now - 30000);
+            return index;
+        }
+
+        const lineKey = l => parseInt(String(l).replace(/\D/g, ''), 10) || 0;
+
+        async function load() {
+            try {
+                const res = await fetch(ENDPOINT);
+                if (!res.ok) throw new Error('HTTP ' + res.status);
+                data = await res.json();
+                render();
+            } catch (e) {
+                document.getElementById('content').innerHTML =
+                    `<div class="err">Fehler beim Laden: ${esc(e.message)}</div>`;
+            }
+        }
+
+        function fillSelects() {
+            const lineSel = document.getElementById('line');
+            const statusSel = document.getElementById('status');
+            if (lineSel.options.length) return;
+            const lines = Object.keys(data.summary.by_line || {});
+            lineSel.innerHTML = '<option value="">Alle Linien</option>' +
+                lines.map(l => `<option>${esc(l)}</option>`).join('');
+            statusSel.innerHTML = '<option value="">Alle Status</option>' +
+                '<option value="bestätigt">bestätigt</option>' +
+                '<option value="nicht gesehen">nicht gesehen</option>' +
+                '<option value="ausgefallen">ausgefallen</option>' +
+                '<option value="geändert">Ziel geändert</option>';
+        }
+
+        function renderWarnings() {
+            const warnings = [];
+            const s = data.summary || {};
+            if (data.trips.length && !data.trips.some(t => t.stops.some(x => 'at' in x))) {
+                warnings.push('Die API liefert noch keine Zeitstempel (<code>at</code>) - ' +
+                    'Markierung des nächsten Halts und Filter „laufende Fahrten“ gehen erst nach Update von trips.py.');
+            }
+            if (s.live_anchor) {
+                const lagMin = Math.round((Date.now() - new Date(s.live_anchor.replace(' ', 'T')).getTime()) / 60000);
+                if (Math.abs(lagMin) > 10) {
+                    warnings.push(`Live-Anker ${esc(s.live_anchor)} weicht ${lagMin} min von der Browserzeit ab - ` +
+                        'die Daten sind veraltet (Fetcher läuft nicht oder mit falscher Zeitzone) oder der Browser steht in einer anderen Zeitzone.');
+                }
+            }
+            document.getElementById('warnings').innerHTML =
+                warnings.map(w => `<div class="warning">${w}</div>`).join('');
+        }
+
+        function renderSummary() {
+            const s = data.summary || {};
+            const q = Object.entries(s.quality || {})
+                .map(([k, v]) => `${esc(k)}: ${v}`).join(', ') || '–';
+            const rate = s.live_total ? Math.round(100 * s.live_matched / s.live_total) : 0;
+            const stat = (v, l) => `<div class="stat"><b>${v}</b><span>${l}</span></div>`;
+            document.getElementById('summary').innerHTML =
+                stat(s.live_total ?? 0, 'Live-Abfahrten (U)') +
+                stat(`${s.live_matched ?? 0} (${rate} %)`, 'davon einem Plan-Halt zugeordnet') +
+                stat(s.live_unmatched ?? 0, 'ohne Zuordnung') +
+                stat(s.trips ?? 0, 'Fahrten im Fenster') +
+                stat(s.confirmed ?? 0, 'bestätigt') +
+                stat(s.not_seen ?? 0, 'nicht gesehen') +
+                stat(s.cancelled ?? 0, 'ausgefallen (cancelled)') +
+                stat(s.extra ?? 0, 'Zusatzfahrten (extra)') +
+                `<div class="stat"><b class="small">${q}</b><span>Trefferqualität</span></div>`;
+            document.getElementById('meta').textContent =
+                `Live-Anker ${s.live_anchor || '?'} · Plan-Anker ${s.plan_anchor || '?'}` +
+                (data.fetched_at ? ` · Live-Stand ${new Date(data.fetched_at * 1000).toLocaleTimeString('de-DE')}` : '');
+        }
+
+        function tripRows(list) {
+            return list.map(t => {
+                const isOpen = open.has(t.id);
+                const status = t.status === 'bestätigt'
+                    ? '<span class="ok">bestätigt</span>'
+                    : `<span class="warn">${esc(t.status)}</span>`;
+                const nextIdx = nextStopIndex(t, Date.now());
+                const nextText = nextIdx >= 0 ? `${esc(t.stops[nextIdx].station)} <span class="muted">${esc(t.stops[nextIdx].planned)}</span>`
+                    : (nextIdx === -1 ? '<span class="muted">Ziel erreicht</span>' : '<span class="muted">noch nicht gestartet</span>');
+                const changed = t.destination_changed ? ' <span class="badge warn">Ziel geändert</span>' : '';
+                let html = `<tr class="trip" data-id="${esc(t.id)}">
+                    <td>${isOpen ? '▾' : '▸'} ${esc(t.start_time)} <span class="muted">${esc(t.start_station)}</span></td>
+                    <td>${esc(t.window_time)} <span class="muted">${esc(t.window_station)}</span></td><td><b>${esc(t.line)}</b></td>
+                    <td>${esc(t.destination)}${changed}</td><td>${nextText}</td><td>${status}</td>
+                    <td>${esc(delayText(t.max_delay))}</td>
+                    <td>${esc(t.vehicles)}</td><td class="muted">${esc(t.id)}${t.live_ids.length ? ' → ' + esc(t.live_ids.join(', ')) : ''}</td></tr>`;
+                if (isOpen) {
+                    const stops = t.stops.map((s, idx) => {
+                        const m = s.match;
+                        const time = s.planned == null ? '<span class="muted">–</span>'
+                            : s.interpolated ? `<span class="interp" title="interpoliert zwischen zwei Ankerstationen">~${esc(s.planned)}</span>`
+                                : esc(s.planned);
+                        return `<tr class="${s.expected ? 'expected' : ''} ${s.anchor ? '' : 'between'} ${idx === nextIdx ? 'next' : ''}"><td>${time}</td><td>${esc(s.station)}</td>` +
+                            (m ? `<td class="ok">${esc(m.quality)}</td><td>${esc(delayText(m.delay))}</td><td>${esc(m.vehicles)}</td><td>${esc(m.destination)}${m.destination_changed ? ' <span class="warn">≠ Plan</span>' : ''}</td>`
+                                : `<td class="${s.expected ? 'warn' : 'muted'}">${s.expected ? 'erwartet, nicht gesehen' : ''}</td><td class="muted" title="Verspätung laut departureCourse">${esc(delayText(s.course_delay))}</td><td></td><td></td>`) + '</tr>';
+                    }).join('');
+                    html += `<tr class="detail"><td colspan="9"><div class="muted small">Normale Zeiten: Plan bzw. departureCourse. ~Zeiten sind linear zwischen den Ankerstationen interpoliert, „–“ = keine Zeit bekannt. Graue Verspätung: laut departureCourse.</div><table class="inner small"><tr><th>Plan</th><th>Halt</th><th>Treffer</th><th>Verspätung</th><th>Fahrzeuge</th><th>Live-Ziel</th></tr>${stops}</table></td></tr>`;
+                }
+                return html;
+            }).join('');
+        }
+
+        function render() {
+            fillSelects();
+            renderSummary();
+            renderWarnings();
+            const line = document.getElementById('line').value;
+            const status = document.getElementById('status').value;
+            const q = document.getElementById('q').value.trim().toLowerCase();
+            const running = document.getElementById('running').checked;
+            const buffer = Math.max(0, +document.getElementById('buffer').value || 0);
+            const box = document.getElementById('content');
+
+            if (tab === 'live_only') {
+                const rows = data.live_only.filter(e =>
+                    (!line || e.line === line) &&
+                    (!q || JSON.stringify(e).toLowerCase().includes(q)));
+                box.innerHTML = `<table><tr><th>Plan</th><th>Linie</th><th>Halt</th><th>Ziel</th><th>Gleis</th><th>Verspätung</th><th>Fahrzeuge</th><th>Grund</th><th>Live-ID</th></tr>` +
+                    rows.map(e => `<tr><td>${esc(e.planned)}</td><td><b>${esc(e.line)}</b></td><td>${esc(e.station)}</td><td>${esc(e.destination)}</td><td>${esc(e.platform)}</td><td>${esc(delayText(e.delay))}</td><td>${esc(e.vehicles)}</td><td class="warn">${esc(e.reason)}</td><td class="muted">${esc(e.service_id)}</td></tr>`).join('') +
+                    '</table>' + (rows.length ? '' : '<div class="err muted">Keine Einträge.</div>');
+                return;
+            }
+
+            const rows = data.trips.filter(t => {
+                if (line && t.line !== line) return false;
+                if (running) {
+                    const now = Date.now(), pad = buffer * 60000;
+                    if (now < new Date(t.route_start).getTime() - pad ||
+                        now > new Date(t.route_end).getTime() + pad) return false;
+                }
+                if (status === 'geändert' ? !t.destination_changed : (status && t.status !== status)) return false;
+                if (!q) return true;
+                const hay = [t.destination, t.vehicles, t.id, t.live_ids.join(' '), t.stops.map(s => s.station).join(' ')].join(' ').toLowerCase();
+                return hay.includes(q);
+            });
+            box.innerHTML = `<table><tr><th>Start (erster Anker)</th><th>Im Live-Fenster</th><th>Linie</th><th>Ziel (Plan)</th><th>Nächster Halt</th><th>Status</th><th>Max. Verspätung</th><th>Fahrzeuge</th><th>Plan-ID → Live-ID</th></tr>${tripRows(rows)}</table>` +
+                (rows.length ? '' : '<div class="err muted">Keine Fahrten.</div>');
+        }
+
+        document.addEventListener('click', e => {
+            const tr = e.target.closest('tr.trip');
+            if (tr) {
+                const id = tr.dataset.id;
+                open.has(id) ? open.delete(id) : open.add(id);
+                render();
+            }
+            const tabBtn = e.target.closest('.tabs button');
+            if (tabBtn) {
+                tab = tabBtn.dataset.tab;
+                document.querySelectorAll('.tabs button').forEach(b => b.classList.toggle('active', b === tabBtn));
+                if (data) render();
+            }
+        });
+        ['line', 'status', 'q', 'running', 'buffer'].forEach(id => document.getElementById(id).addEventListener('input', () => data && render()));
+        setInterval(() => document.getElementById('auto').checked && load(), 30000);
+        load();
+    </script>
+</body>
+
+</html>

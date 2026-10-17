@@ -33,6 +33,7 @@ from hvv_map.gtilive_geojson import (
 )
 from hvv_map.redis_client import get_redis_client
 from hvv_map.stations import by_id, load_stations
+from hvv_map.trips import build_trip_table
 
 mimetypes.add_type("text/javascript", ".cjs")
 
@@ -169,6 +170,7 @@ REDIS_BY_SERVICE_KEY = "hvv:departures:by_service"
 REDIS_MERGED_KEY = "hvv:departures:merged"
 REDIS_ANCHOR_KEY = "hvv:departures:anchor_start"
 REDIS_LIVE_KEY = "hvv:departures:live"
+REDIS_TRIP_COURSES_KEY = "hvv:trips:courses"  # written by trip_courses.py
 
 
 def _read_cached_payload(key: str) -> dict:
@@ -308,6 +310,18 @@ def get_departures_live():
     anchor = parse_anchor(payload["data"].get("anchor"))
     tree = build_station_tree(payload["data"].get("departures", []), anchor)
     return {**_departures_meta(payload, anchor), **tree}
+
+
+@app.get("/api/hvv/live/trips.json", tags=["hvv_live"])
+def get_trips():
+    """Planned U-Bahn trips (by_service) matched against the realtime
+    departures, for static/dev_trips.html."""
+    plan = _read_cached_json(REDIS_BY_SERVICE_KEY)
+    live_payload = _read_cached_payload(REDIS_LIVE_KEY)
+    raw_courses = _redis_client.get(REDIS_TRIP_COURSES_KEY)
+    courses = json.loads(raw_courses)["data"] if raw_courses else {}
+    table = build_trip_table(plan, _read_anchor(), live_payload["data"], courses)
+    return {"fetched_at": live_payload.get("fetched_at"), **table}
 
 
 @app.get("/api/hvv/live/departures-by-trip.json", tags=["hvv_live"])
