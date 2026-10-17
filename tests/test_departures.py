@@ -222,3 +222,21 @@ def test_group_by_service_keeps_vehicles_per_stop():
     ]
     stops = group_by_service(departures)["1"]["stops"]
     assert stops[0]["vehicles"] == vehicles
+
+
+def test_berlin_now_follows_berlin_time_regardless_of_container_timezone(monkeypatch):
+    import os
+    from datetime import datetime
+    import time as time_module
+
+    from hvv_map.departures import berlin_now
+
+    monkeypatch.setenv("TZ", "UTC")
+    time_module.tzset()
+    try:
+        utc_now = datetime.now()
+        assert 1 <= (berlin_now() - utc_now).total_seconds() / 3600 <= 2.1
+    finally:
+        monkeypatch.delenv("TZ")
+        time_module.tzset()
+        os.environ.pop("TZ", None)

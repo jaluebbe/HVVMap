@@ -8,6 +8,7 @@ fetcher loop - run manually or on its own schedule.
 import json
 import time
 from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
 
 from hvv_map.gti_client import GtiClient
 from hvv_map.lines import LINE_NAME_PATTERN, WANTED_R_BAHN_LINES, load_sublines_cache
@@ -75,6 +76,12 @@ REDIS_ANCHOR_KEY = "hvv:departures:anchor_start"
 
 
 QUERY_ANCHOR_HOUR = 4  # most services first run around here
+
+
+def berlin_now() -> datetime:
+    """Current Berlin wall-clock time, naive - GTI takes local times and the
+    container clock may run in UTC."""
+    return datetime.now(ZoneInfo("Europe/Berlin")).replace(tzinfo=None)
 
 
 def _query_start_time(now: datetime) -> datetime:
@@ -394,7 +401,7 @@ def run_daily_snapshots(client: GtiClient, redis_client) -> None:
     """Run the three departureList snapshots, store raw in Redis - each
     skipped once its cache already reflects today's anchor time - then
     rebuild the merged and by-service views."""
-    start = _query_start_time(datetime.now())
+    start = _query_start_time(berlin_now())
     _store(
         redis_client,
         REDIS_ANCHOR_KEY,

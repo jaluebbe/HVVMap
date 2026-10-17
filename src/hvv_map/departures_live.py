@@ -12,6 +12,7 @@ from hvv_map.departures import (
     MAIN_SERVICE_TYPES,
     R_SERVICE_TYPES,
     _store,
+    berlin_now,
     merge_departures,
 )
 from hvv_map.gti_client import GtiClient
@@ -75,7 +76,7 @@ def fetch_live_departures(client: GtiClient, start: datetime) -> dict:
 
 def run_live_snapshot(client: GtiClient, redis_client) -> dict:
     """Fetch one realtime snapshot starting now and store it in Redis."""
-    start = datetime.now().replace(second=0, microsecond=0)
+    start = berlin_now().replace(second=0, microsecond=0)
     data = fetch_live_departures(client, start)
     _store(redis_client, REDIS_LIVE_KEY, data)
     return data
