@@ -409,3 +409,98 @@ def test_finished_or_future_trips_without_window_stop_are_not_listed():
         plan, PLAN_ANCHOR, {"anchor": LIVE_ANCHOR, "departures": []}
     )
     assert table["trips"] == []
+
+
+def _with_delays(course, delays, fetched_at):
+    """Copy of a _course with arr/dep delays per stop and a fetch time."""
+    stops = [dict(s) for s in course["stops"]]
+    for stop, delay in zip(stops, delays):
+        stop["dep_delay"] = delay if stop["dep"] else None
+        stop["arr_delay"] = delay if stop["arr"] else None
+    return {"fetched_at": fetched_at, "stops": stops}
+
+
+def _alias(stops, until=None, joined=None, fetched_at=0):
+    return {
+        "service_id": "999",
+        "shared_until": until,
+        "shared_from": joined,
+        "fetched_at": fetched_at,
+        "stops": stops,
+    }
+
+
+def _route(*delays):
+    names = "abcd"
+    return [
+        {"station": names[i], "delay": d, "match": None} for i, d in enumerate(delays)
+    ]
+
+
+def test_shared_section_takes_the_delay_of_the_newer_course():
+    from hvv_map.trips import unify_shared_delays
+
+    course = _course(("A", "a", None, "09:00"), ("B", "b", "09:05", "09:06"))
+    alias = _alias(
+        _with_delays(course, [120, 180], 200)["stops"], until="b", fetched_at=200
+    )
+    rows = _route(0, 60)
+
+    unify_shared_delays(rows, 100, [alias])
+
+    assert [r["delay"] for r in rows] == [120, 180]
+    assert [s["delay"] for s in alias["stops"]] == [120, 180]
+
+
+def test_shared_section_keeps_the_newer_main_course():
+    from hvv_map.trips import unify_shared_delays
+
+    course = _course(("A", "a", None, "09:00"))
+    alias = _alias(_with_delays(course, [240], 100)["stops"], until="a", fetched_at=100)
+    rows = _route(60)
+
+    unify_shared_delays(rows, 300, [alias])
+
+    assert rows[0]["delay"] == alias["stops"][0]["delay"] == 60
+
+
+def test_shared_section_prefers_live_delay_over_both_courses():
+    from hvv_map.trips import unify_shared_delays
+
+    course = _course(("A", "a", None, "09:00"))
+    alias = _alias(_with_delays(course, [240], 900)["stops"], until="a", fetched_at=900)
+    rows = _route(60)
+    rows[0]["match"] = {"delay": 120}
+    rows[0]["delay"] = 120
+
+    unify_shared_delays(rows, 100, [alias])
+
+    assert rows[0]["delay"] == alias["stops"][0]["delay"] == 120
+
+
+def test_shared_section_with_equal_age_takes_the_larger_delay():
+    from hvv_map.trips import unify_shared_delays
+
+    course = _course(("A", "a", None, "09:00"))
+    alias = _alias(_with_delays(course, [180], 100)["stops"], until="a", fetched_at=100)
+    rows = _route(60)
+
+    unify_shared_delays(rows, 100, [alias])
+
+    assert rows[0]["delay"] == alias["stops"][0]["delay"] == 180
+
+
+def test_unshared_alias_stops_keep_their_own_delay():
+    from hvv_map.trips import unify_shared_delays
+
+    course = _course(("A", "a", None, "09:00"), ("D", "d", "09:10", None))
+    alias = _alias(
+        _with_delays(course, [60, 300], 50)["stops"], until="a", fetched_at=50
+    )
+    rows = _route(0, None)
+    rows[1]["station"] = "other"
+
+    unify_shared_delays(rows, 10, [alias])
+
+    assert [s["delay"] for s in alias["stops"]] == [60, 300]
+    assert rows[1]["delay"] is None

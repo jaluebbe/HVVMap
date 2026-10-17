@@ -163,6 +163,8 @@ def run_trip_courses(client: GtiClient, redis_client, now: datetime | None = Non
 
     # (cache key, request) - live-only entries (alias ids) first
     jobs = []
+    queued = set()
+    by_id = {trip["id"]: trip for trip in trips}
     raw_live = redis_client.get(REDIS_LIVE_KEY)
     if raw_live:
         live = json.loads(raw_live)["data"]
@@ -175,9 +177,16 @@ def run_trip_courses(client: GtiClient, redis_client, now: datetime | None = Non
                 )
                 if request and not _is_current(cached.get(key), running=True):
                     jobs.append((key, request))
+                    queued.add(key)
+                    # refresh the split train's own course alongside its twin
+                    main = by_id.get(row["id"])
+                    main_request = _query(main) if main else None
+                    if main_request and course_key(main) not in queued:
+                        jobs.append((course_key(main), main_request))
+                        queued.add(course_key(main))
     for trip in due_trips(trips, cached, now):
         request = _query(trip)
-        if request:
+        if request and course_key(trip) not in queued:
             jobs.append((course_key(trip), request))
 
     fetched = failed = 0

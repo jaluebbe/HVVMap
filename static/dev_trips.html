@@ -390,7 +390,7 @@
             const until = a.stops.findIndex(s => s.name === a.shared_until);
             const from = a.stops.findIndex(s => s.name === a.shared_from);
             const rows = a.stops.map((s, i) => {
-                const delay = s.dep_delay ?? s.arr_delay;
+                const delay = s.delay;
                 const cls = (until >= 0 && i <= until) || (from >= 0 && i >= from) ? 'shared' : '';
                 return `<tr class="${cls}"><td>${esc(s.name)}</td><td>${esc(clock(s.arr))}</td><td>${esc(clock(s.dep))}</td><td>${esc(delayText(delay))}</td><td>${esc(s.platform)}</td></tr>`;
             }).join('');
@@ -424,7 +424,7 @@
                         const dep = s.interpolated
                             ? `<span class="interp" title="interpoliert zwischen zwei Ankerstationen">~${esc(s.dep)}</span>`
                             : esc(s.dep);
-                        const delay = m ? m.delay : s.course_delay;
+                        const delay = s.delay;
                         const cells = m
                             ? `<td class="ok">${esc(m.quality)}</td><td>${esc(m.vehicles)}</td><td>${esc(m.destination)}${m.destination_changed ? ' <span class="warn">≠ Plan</span>' : ''}</td>`
                             : `<td class="${s.expected ? 'warn' : 'muted'}">${s.expected ? 'erwartet, nicht gesehen' : ''}</td><td></td><td></td>`;

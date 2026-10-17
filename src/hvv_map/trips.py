@@ -142,6 +142,13 @@ def _base_stations(trip: dict, course: dict | None) -> list[dict]:
     ]
 
 
+def _live_or_course(match: dict | None, course_delay: int | None) -> int | None:
+    """Delay of a stop: the live value if matched, else the course's."""
+    if match and match.get("delay") is not None:
+        return match["delay"]
+    return course_delay
+
+
 def _anchor_positions(anchors: list[dict], stations: list[dict]) -> list[int]:
     """Index of every anchor stop within the station sequence, in order;
     empty if one of them cannot be placed."""
@@ -192,6 +199,7 @@ def _route_rows(
             "at": stop["planned"].isoformat(timespec="minutes"),
             "source": "plan",
             "course_delay": station["delay"] if station else None,
+            "delay": _live_or_course(match, station["delay"] if station else None),
             "interpolated": False,
             "anchor": True,
             "expected": live_anchor <= stop["planned"] <= window_end,
@@ -228,6 +236,7 @@ def _route_rows(
                 "at": at.isoformat(timespec="minutes") if at else None,
                 "source": source,
                 "course_delay": station["delay"],
+                "delay": station["delay"],
                 "interpolated": source == "interpolated",
                 "anchor": False,
                 "expected": False,
@@ -329,6 +338,56 @@ def _shared_from(main: list[dict], other: list[dict]) -> str | None:
             break
         first = a["name"]
     return first
+
+
+def _stop_delay(stop: dict) -> int | None:
+    return (
+        stop["dep_delay"]
+        if stop.get("dep") and stop["dep_delay"] is not None
+        else (stop.get("arr_delay"))
+    )
+
+
+def _pick_delay(
+    first: int | None, first_at: float, second: int | None, second_at: float
+) -> tuple[int | None, float]:
+    """Delay of one physical train seen by two courses: the newer course
+    wins; equal or unknown age falls back to the larger delay."""
+    if first is None:
+        return second, second_at
+    if second is None or first == second:
+        return first, max(first_at, second_at)
+    if first_at != second_at:
+        return (first, first_at) if first_at > second_at else (second, second_at)
+    return max(first, second), first_at
+
+
+def unify_shared_delays(rows: list[dict], main_at: float, aliases: list[dict]):
+    """One delay per stop where a split train still runs as one: live values
+    win, else the newer course; sets "delay" on route rows and alias stops."""
+    by_name = {row["station"]: row for row in rows}
+    ages = {id(row): main_at or 0 for row in rows}
+    for alias in aliases:
+        stops = alias["stops"] = [dict(s) for s in alias["stops"]]
+        names = [s["name"] for s in stops]
+        until = names.index(alias["shared_until"]) if alias["shared_until"] else -1
+        joined = names.index(alias["shared_from"]) if alias["shared_from"] else None
+        alias_at = alias.get("fetched_at") or 0
+        for index, stop in enumerate(stops):
+            own = _stop_delay(stop)
+            stop["delay"] = own
+            shared = index <= until or (joined is not None and index >= joined)
+            row = by_name.get(stop["name"]) if shared else None
+            if row is None:
+                continue
+            live = row["match"] and row["match"].get("delay")
+            if live is not None:
+                delay = live
+            else:
+                delay, ages[id(row)] = _pick_delay(
+                    row["delay"], ages[id(row)], own, alias_at
+                )
+            row["delay"] = stop["delay"] = delay
 
 
 def _alias_courses(aliases: list[dict], main: dict | None, courses: dict) -> list:
@@ -587,6 +646,9 @@ def build_trip_table(
                 ),
                 "_sort": trip["stops"][0]["planned"],
             }
+        )
+        unify_shared_delays(
+            rows[-1]["stops"], rows[-1]["course_fetched_at"], rows[-1]["alias_courses"]
         )
         per_line[trip["line"]]["trips"] += 1
         per_line[trip["line"]][_COUNTER_KEY[status]] += 1
