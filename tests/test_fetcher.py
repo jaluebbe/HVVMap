@@ -179,3 +179,24 @@ def test_rebuild_positions_realtime_reinterpolates_without_new_fetch():
     second = json.loads(fetcher.redis_client.get("hvv:positions_realtime"))
     second_progress = second["data"]["features"][0]["properties"]["progress"]
     assert second_progress > first_progress
+
+
+def test_fetch_gti_shapes_runs_the_update_and_closes_the_database():
+    class _Conn:
+        closed = False
+
+        def close(self):
+            self.closed = True
+
+    conn = _Conn()
+    summary = {"resolved": 2, "skipped": 0, "failed": 1, "no_query": 0}
+    with (
+        patch.object(fetcher, "open_shapes_db", return_value=conn),
+        patch.object(
+            fetcher, "run_gti_shapes_update", return_value=(summary, None)
+        ) as update,
+    ):
+        fetcher.fetch_gti_shapes()
+
+    update.assert_called_once()
+    assert conn.closed

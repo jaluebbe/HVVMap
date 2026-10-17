@@ -538,3 +538,13 @@ def test_apply_derived_sublines_without_database_or_table_changes_nothing():
 
     assert apply_derived_sublines(None, by_service) == by_service
     assert apply_derived_sublines(sqlite3.connect(":memory:"), by_service) == by_service
+
+
+def test_run_update_skips_derivation_without_anchor(tmp_path):
+    from hvv_map.gti_shapes import run_update
+
+    conn = open_db(str(tmp_path / "gti_shapes.db"))
+
+    summary, derived = run_update(_FakeClient({}), _FakeRedis({}), conn)
+
+    assert summary["resolved"] == 0 and derived is None

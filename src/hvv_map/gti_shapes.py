@@ -664,26 +664,34 @@ def derive_unresolved_sublines(
     return summary
 
 
+def run_update(
+    client: GtiClient, redis_client, conn: sqlite3.Connection
+) -> tuple[dict, dict | None]:
+    """Resolve new sublines and derive variant sublines; returns both
+    summaries (the second is None without a cached anchor)."""
+    summary = update_gti_shapes(client, redis_client, conn)
+    anchor_start = _load_anchor_start(redis_client)
+    if anchor_start is None:
+        return summary, None
+    derived = derive_unresolved_sublines(
+        client, _load_by_service(redis_client), anchor_start, conn
+    )
+    return summary, derived
+
+
 def main() -> None:
     """CLI: resolve every not-yet-resolved gti-live subline via
     departureCourse."""
     from hvv_map.gti_client import GtiClient
     from hvv_map.redis_client import get_redis_client
 
-    client = GtiClient()
-    redis_client = get_redis_client()
-    conn = open_db()
-    summary = update_gti_shapes(client, redis_client, conn)
+    summary, derived = run_update(GtiClient(), get_redis_client(), open_db())
     print(
         f"{summary['resolved']} newly resolved, {summary['skipped']} already "
         f"resolved, {summary['failed']} failed ({summary['no_query']} of those "
         "had no usable station/time before any API call was made)"
     )
-    anchor_start = _load_anchor_start(redis_client)
-    if anchor_start is not None:
-        derived = derive_unresolved_sublines(
-            client, _load_by_service(redis_client), anchor_start, conn
-        )
+    if derived:
         print(
             f"{derived['derived']} service variants got a subline from their "
             f"course, {derived['failed']} failed, {derived['remaining']} still waiting"

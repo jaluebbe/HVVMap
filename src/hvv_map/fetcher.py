@@ -42,6 +42,8 @@ from hvv_map.departures_live import run_live_snapshot
 from hvv_map.trip_courses import run_trip_courses
 from hvv_map.geojson import build_positions_geojson, mode_for_journey
 from hvv_map.gti_client import GtiClient
+from hvv_map.gti_shapes import open_db as open_shapes_db
+from hvv_map.gti_shapes import run_update as run_gti_shapes_update
 from hvv_map.lines import (
     ANNOUNCEMENT_FILTER_NAMES,
     WANTED_R_BAHN_LINES,
@@ -67,6 +69,7 @@ SUBLINES_CACHE_INTERVAL = 3600.0  # seconds between hvv:sublines updates (1h) -
 # always a full (non-incremental) listLines call, see module docstring
 LIVE_DEPARTURES_INTERVAL = 240.0  # seconds between live departure snapshots (4 min)
 TRIP_COURSES_INTERVAL = 120.0  # seconds between trip course fetches (2 min)
+GTI_SHAPES_INTERVAL = 1800.0  # seconds between subline/track updates (30 min)
 DAILY_DEPARTURES_INTERVAL = 3600.0  # seconds between daily snapshot checks (1h)
 VEHICLE_MAP_TTL = 10  # seconds - stale data expires fast if fetcher dies
 ANNOUNCEMENTS_TTL = 7200  # seconds - generous headroom above refresh interval
@@ -240,6 +243,20 @@ def fetch_trip_courses() -> None:
         print(f"[hvvmap-fetcher] trip courses: {failed} failed", flush=True)
 
 
+def fetch_gti_shapes() -> None:
+    conn = open_shapes_db()
+    try:
+        summary, derived = run_gti_shapes_update(gti, redis_client, conn)
+    finally:
+        conn.close()
+    done = summary["resolved"] + (derived or {}).get("derived", 0)
+    failed = summary["failed"] + (derived or {}).get("failed", 0)
+    if done or failed:
+        print(
+            f"[hvvmap-fetcher] gti shapes: {done} resolved, {failed} failed", flush=True
+        )
+
+
 def fetch_daily_departures() -> None:
     run_daily_snapshots(gti, redis_client)
 
@@ -277,6 +294,7 @@ def main() -> None:
     last_live_departures = 0.0
     last_daily_departures = 0.0
     last_trip_courses = 0.0
+    last_gti_shapes = 0.0
     realtime_toggle = True
     while True:
         cycle_start = time.time()
@@ -304,6 +322,9 @@ def main() -> None:
             elif cycle_start - last_trip_courses >= TRIP_COURSES_INTERVAL:
                 last_trip_courses = cycle_start
                 fetch_trip_courses()
+            elif cycle_start - last_gti_shapes >= GTI_SHAPES_INTERVAL:
+                last_gti_shapes = cycle_start
+                fetch_gti_shapes()
             elif cycle_start - last_vehicle_map_fetch >= VEHICLE_MAP_FETCH_INTERVAL:
                 fetch_vehicle_map(realtime=realtime_toggle)
                 realtime_toggle = not realtime_toggle
