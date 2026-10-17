@@ -82,6 +82,9 @@ def open_db(db_path: str = DEFAULT_DB_PATH) -> sqlite3.Connection:
         "subline_key TEXT, line_name TEXT, service_id TEXT, station TEXT, "
         "dep_time TEXT, result TEXT, segments INTEGER, delays_json TEXT)"
     )
+    columns = {row[1] for row in conn.execute("PRAGMA table_info(course_log)")}
+    if "meta_json" not in columns:
+        conn.execute("ALTER TABLE course_log ADD COLUMN meta_json TEXT")
     return conn
 
 
@@ -103,7 +106,8 @@ def subline_hops(
     conn: sqlite3.Connection | None, station_ids: tuple[str, ...]
 ) -> list[tuple[str, str, Coordinates | None]]:
     """(from_id, to_id, coordinates) per hop of a subline; coordinates is None
-    where no track is stored. A hop without its own segment reuses one that
+    where no track is stored. A hop without its own segment reuses the
+    opposite direction's track (reversed) if known, else one that
     spans it when trips skip the declared intermediate stop(s) (e.g. a
     variant with an extra, rarely served pier), so from_id/to_id may then
     be further apart than neighbours."""
@@ -112,6 +116,9 @@ def subline_hops(
     while i < len(station_ids) - 1:
         a, b = station_ids[i], station_ids[i + 1]
         segment = get_segment(conn, a, b) if conn else None
+        if segment is None and conn:
+            opposite = get_segment(conn, b, a)
+            segment = opposite[::-1] if opposite else None
         end = i + 1
         if segment is None and conn:
             last = min(len(station_ids) - 1, i + 2 + MAX_SKIPPED_STOPS)
@@ -174,8 +181,8 @@ def log_course(
     """One row per departureCourse attempt (result "ok" or the error kind)."""
     conn.execute(
         "INSERT INTO course_log (run_id, called_at, subline_key, line_name, "
-        "service_id, station, dep_time, result, segments, delays_json) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "service_id, station, dep_time, result, segments, delays_json, meta_json) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         (
             run_id,
             int(time.time()),
@@ -187,6 +194,7 @@ def log_course(
             result,
             segments,
             json.dumps(info.get("legs") or []),
+            json.dumps(info.get("meta") or {}),
         ),
     )
     conn.commit()
@@ -194,10 +202,10 @@ def log_course(
 
 def _max_delay(legs: list[dict]) -> int | None:
     values = [
-        leg[k]
+        leg[key]
         for leg in legs
-        for k in ("dep_delay", "arr_delay")
-        if leg.get(k) is not None
+        for key in ("dep_delay", "arr_delay")
+        if leg.get(key) is not None
     ]
     return max(values) if values else None
 
@@ -209,9 +217,11 @@ def read_course_log(conn: sqlite3.Connection | None, limit: int = 500) -> dict:
     if conn is None:
         return empty
     try:
+        columns = {row[1] for row in conn.execute("PRAGMA table_info(course_log)")}
+        meta_column = "meta_json" if "meta_json" in columns else "NULL"
         rows = conn.execute(
             "SELECT id, run_id, called_at, subline_key, line_name, service_id, "
-            "station, dep_time, result, segments, delays_json "
+            f"station, dep_time, result, segments, delays_json, {meta_column} "
             "FROM course_log ORDER BY id DESC LIMIT ?",
             (limit,),
         ).fetchall()
@@ -239,6 +249,7 @@ def read_course_log(conn: sqlite3.Connection | None, limit: int = 500) -> dict:
                 "segments": row[9],
                 "max_delay_s": _max_delay(legs),
                 "legs": legs,
+                "meta": json.loads(row[11] or "{}"),
             }
         )
     return {
@@ -353,9 +364,15 @@ def _extract_course(course_response: dict) -> tuple[list[tuple], list[dict]] | N
     return segments, stop_offsets
 
 
+_LEG_KEYS = {
+    "fromStation", "toStation", "path", "depTime", "arrTime", "depDelay", "arrDelay"
+}  # fmt: skip
+
+
 def _course_legs(course_response: dict) -> list[dict]:
-    """Per course element the stations, planned times and reported delays as
-    the API gives them (None where absent)."""
+    """Per course element the stations, times and delays (seconds) as the API
+    gives them, None where absent (not every operator reports delays);
+    "extra" carries every other field (platforms, model, ...)."""
     return [
         {
             "from": (e.get("fromStation") or {}).get("name"),
@@ -364,9 +381,15 @@ def _course_legs(course_response: dict) -> list[dict]:
             "arr_time": e.get("arrTime"),
             "dep_delay": e.get("depDelay"),
             "arr_delay": e.get("arrDelay"),
+            "extra": {k: v for k, v in e.items() if k not in _LEG_KEYS},
         }
         for e in course_response.get("courseElements") or []
     ]
+
+
+def _course_meta(course_response: dict) -> dict:
+    """Top-level response fields besides the course elements themselves."""
+    return {k: v for k, v in course_response.items() if k != "courseElements"}
 
 
 def _concat_coordinates(coordinate_lists: list[Coordinates]) -> Coordinates:
@@ -448,6 +471,7 @@ def _query_course(
     response = client.send("departureCourse", request)
     time.sleep(1)  # 1 req/s rate limit across all GTI endpoints
     info["legs"] = _course_legs(response)
+    info["meta"] = _course_meta(response)
     extracted = _extract_course(response)
     if extracted is None:
         return None, "api", f"request={request!r} response={response!r}", info

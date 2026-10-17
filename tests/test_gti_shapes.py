@@ -304,6 +304,20 @@ def test_subline_hops_reuses_a_segment_spanning_a_skipped_stop(tmp_path):
     assert hops == [("A", "C", [[0, 0], [1, 1], [2, 2]]), ("C", "D", None)]
 
 
+def test_subline_hops_uses_the_opposite_direction_reversed(tmp_path):
+    conn = open_db(str(tmp_path / "gti_shapes.db"))
+    store_segment(conn, "B", "A", [[1, 1], [0.5, 0.5], [0, 0]])
+    hops = subline_hops(conn, ("A", "B"))
+    assert hops == [("A", "B", [[0, 0], [0.5, 0.5], [1, 1]])]
+
+
+def test_subline_hops_prefers_own_direction_over_the_opposite(tmp_path):
+    conn = open_db(str(tmp_path / "gti_shapes.db"))
+    store_segment(conn, "A", "B", [[0, 0], [1, 0]])
+    store_segment(conn, "B", "A", [[1, 1], [0, 1]])
+    assert subline_hops(conn, ("A", "B")) == [("A", "B", [[0, 0], [1, 0]])]
+
+
 def test_subline_hops_without_connection_has_no_coordinates():
     assert subline_hops(None, ("A", "B")) == [("A", "B", None)]
 
@@ -333,10 +347,10 @@ def test_update_gti_shapes_tries_more_trips_while_hops_lack_a_segment(
     assert len(client.sent_requests) == 4
 
 
-def test_update_gti_shapes_logs_each_call_with_delays(tmp_path):
+def test_update_gti_shapes_logs_each_call_with_legs_and_delays(tmp_path):
     response = {
         "courseElements": [
-            {**e, "depDelay": 120, "arrDelay": 300}
+            {**e, "model": "DT5", "depDelay": 120, "arrDelay": 300}
             for e in COURSE_RESPONSE["courseElements"]
         ]
     }
@@ -357,8 +371,10 @@ def test_update_gti_shapes_logs_each_call_with_delays(tmp_path):
     assert [c["result"] for c in log["calls"]] == ["ok"]
     assert log["calls"][0]["max_delay_s"] == 300
     first_leg = log["calls"][0]["legs"][0]
-    assert first_leg["from"] == "Ohlstedt" and first_leg["dep_delay"] == 120
+    assert first_leg["dep_delay"] == 120
+    assert first_leg["from"] == "Ohlstedt" and first_leg["extra"] == {"model": "DT5"}
     assert first_leg["dep_time"] and first_leg["arr_time"]
+    assert log["calls"][0]["meta"] == {}
     assert log["calls"][0]["segments"] == 2
     assert log["runs"][0]["calls"] == 1 and log["runs"][0]["ok"] == 1
 
@@ -369,3 +385,47 @@ def test_read_course_log_empty_without_table_or_connection(tmp_path):
     assert read_course_log(None)["calls"] == []
     bare = sqlite3.connect(str(tmp_path / "bare.db"))
     assert read_course_log(bare) == {"calls": [], "runs": []}
+
+
+def test_update_gti_shapes_keeps_unknown_response_fields(tmp_path):
+    response = {
+        "returnCode": "OK",
+        "courseElements": [
+            {**e, "vehicleNumber": "4711"} for e in COURSE_RESPONSE["courseElements"]
+        ],
+    }
+    by_service = {
+        "1": _entry("HHA-U:U1_HHA-U", ("Master:1", "Master:2"), dlid="de:hvv:U1:")
+    }
+    redis_client = _FakeRedis(
+        {
+            "hvv:departures:by_service": by_service,
+            "hvv:departures:anchor_start": {"date": "2026-09-21", "time": "04:00:00"},
+        }
+    )
+    conn = open_db(str(tmp_path / "gti_shapes.db"))
+
+    update_gti_shapes(_FakeClient(response), redis_client, conn)
+    call = read_course_log(conn)["calls"][0]
+
+    assert call["meta"] == {"returnCode": "OK"}
+    assert call["legs"][0]["extra"] == {"vehicleNumber": "4711"}
+
+
+def test_open_db_adds_meta_column_to_an_older_course_log(tmp_path):
+    import sqlite3
+
+    path = str(tmp_path / "old.db")
+    old = sqlite3.connect(path)
+    old.execute(
+        "CREATE TABLE course_log (id INTEGER PRIMARY KEY AUTOINCREMENT, "
+        "run_id INTEGER, called_at INTEGER, subline_key TEXT, line_name TEXT, "
+        "service_id TEXT, station TEXT, dep_time TEXT, result TEXT, "
+        "segments INTEGER, delays_json TEXT)"
+    )
+    old.commit()
+    old.close()
+
+    conn = open_db(path)
+
+    assert "meta_json" in {r[1] for r in conn.execute("PRAGMA table_info(course_log)")}
