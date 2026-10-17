@@ -417,7 +417,7 @@
                     <td>${esc(t.window_time)} <span class="muted">${esc(t.window_station)}</span></td><td><b>${esc(t.line)}</b> <span class="muted small">${esc(t.mode)}</span></td>
                     <td>${esc(t.destination)}${changed}</td><td>${nextText}</td><td>${status}</td>
                     <td>${esc(delayText(t.max_delay))}</td>
-                    <td>${esc(t.vehicles)}</td><td class="muted">${esc(t.id)}${t.live_ids.length ? ' → ' + esc(t.live_ids.join(', ')) : ''}</td></tr>`;
+                    <td>${esc(t.vehicles)}</td><td class="muted">${esc(t.id)}${t.live_ids.length && !(t.live_ids.length === 1 && t.live_ids[0] === String(t.id)) ? ' → ' + esc(t.live_ids.join(', ')) : ''}</td></tr>`;
                 if (isOpen) {
                     const stops = t.stops.map((s, idx) => {
                         const m = s.match;
