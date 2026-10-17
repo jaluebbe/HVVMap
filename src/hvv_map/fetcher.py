@@ -39,6 +39,7 @@ from hvv_map.disruptions import (
 )
 from hvv_map.departures import run_daily_snapshots
 from hvv_map.departures_live import run_live_snapshot
+from hvv_map.trip_courses import run_trip_courses
 from hvv_map.geojson import build_positions_geojson, mode_for_journey
 from hvv_map.gti_client import GtiClient
 from hvv_map.lines import (
@@ -65,6 +66,7 @@ REFERENCE_REBUILD_INTERVAL = 1800.0  # seconds between reference layer rebuilds 
 SUBLINES_CACHE_INTERVAL = 3600.0  # seconds between hvv:sublines updates (1h) -
 # always a full (non-incremental) listLines call, see module docstring
 LIVE_DEPARTURES_INTERVAL = 240.0  # seconds between live departure snapshots (4 min)
+TRIP_COURSES_INTERVAL = 120.0  # seconds between trip course fetches (2 min)
 DAILY_DEPARTURES_INTERVAL = 3600.0  # seconds between daily snapshot checks (1h)
 VEHICLE_MAP_TTL = 10  # seconds - stale data expires fast if fetcher dies
 ANNOUNCEMENTS_TTL = 7200  # seconds - generous headroom above refresh interval
@@ -232,6 +234,12 @@ def fetch_live_departures_snapshot() -> None:
         )
 
 
+def fetch_trip_courses() -> None:
+    fetched, failed = run_trip_courses(gti, redis_client)
+    if failed:
+        print(f"[hvvmap-fetcher] trip courses: {failed} failed", flush=True)
+
+
 def fetch_daily_departures() -> None:
     run_daily_snapshots(gti, redis_client)
 
@@ -268,6 +276,7 @@ def main() -> None:
     last_sublines_cache_update = 0.0
     last_live_departures = 0.0
     last_daily_departures = 0.0
+    last_trip_courses = 0.0
     realtime_toggle = True
     while True:
         cycle_start = time.time()
@@ -292,6 +301,9 @@ def main() -> None:
             elif cycle_start - last_live_departures >= LIVE_DEPARTURES_INTERVAL:
                 last_live_departures = cycle_start
                 fetch_live_departures_snapshot()
+            elif cycle_start - last_trip_courses >= TRIP_COURSES_INTERVAL:
+                last_trip_courses = cycle_start
+                fetch_trip_courses()
             elif cycle_start - last_vehicle_map_fetch >= VEHICLE_MAP_FETCH_INTERVAL:
                 fetch_vehicle_map(realtime=realtime_toggle)
                 realtime_toggle = not realtime_toggle

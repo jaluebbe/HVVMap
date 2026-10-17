@@ -30,7 +30,8 @@ hvvmap-fetch-vehiclemap = "hvv_map.fetcher:fetch_once_vehicle_map"
 hvvmap-gtfs-fetcher = "hvv_map.gtfs_fetcher:main"
 hvvmap-gtfs-fetch-once = "hvv_map.gtfs_fetcher:fetch_once"
 hvvmap-departures = "hvv_map.departures:main"
-hvvmap-gti-shapes-update = "hvv_map.gti_shapes:main"
+hvvmap-departures-live = "hvv_map.departures_live:main"
+hvvmap-trip-courses = "hvv_map.trip_courses:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/hvv_map"]
