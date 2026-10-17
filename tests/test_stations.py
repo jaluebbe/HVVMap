@@ -43,7 +43,7 @@ def test_fetch_stations_parses_fields():
         city="Hamburg",
         lon=9.9,
         lat=53.5,
-        combined_name="Neumühlen/Övelgönne",  # falls back to name, no combinedName given
+        combined_name="Neumühlen/Övelgönne",  # falls back to name
     )
 
 

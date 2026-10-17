@@ -178,7 +178,7 @@ def test_s1_non_realtime_kept_for_non_airport_direction():
 
 
 def test_s1_filter_does_not_apply_to_other_lines():
-    # Same situation that would be dropped on S1, but on S3 - the rule only applies to S1.
+    # Would be dropped on S1, but the rule only applies to S1.
     journey = {
         "journeyID": "id.test",
         "line": {
