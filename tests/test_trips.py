@@ -53,17 +53,38 @@ def test_live_departure_matches_plan_stop_by_line_station_direction_and_minute()
     assert table["live_only"] == []
 
 
-def test_neighbouring_minute_matches_with_lower_quality():
+def test_same_service_id_matches_despite_a_minute_offset():
+    live = {
+        "anchor": LIVE_ANCHOR,
+        "departures": [_live("U1", "A", 3, 6, service_id=1)],
+    }
+    table = build_trip_table(PLAN, PLAN_ANCHOR, live)
+    assert table["trips"][0]["stops"][0]["match"]["quality"] == "ID, ±1 min"
+
+
+def test_without_a_known_service_id_only_the_exact_minute_matches():
     live = {"anchor": LIVE_ANCHOR, "departures": [_live("U1", "A", 3, 6)]}
     table = build_trip_table(PLAN, PLAN_ANCHOR, live)
-    assert table["trips"][0]["stops"][0]["match"]["quality"] == "±1 min"
+    assert table["summary"]["live_matched"] == 0
+    assert table["live_only"][0]["reason"] == "ohne Plan-Treffer"
 
 
-def test_different_direction_does_not_match():
+def test_unique_plan_stop_matches_despite_different_direction_id():
     live = {"anchor": LIVE_ANCHOR, "departures": [_live("U1", "A", 2, 1)]}
     table = build_trip_table(PLAN, PLAN_ANCHOR, live)
-    assert len(table["live_only"]) == 1
-    assert table["trips"][0]["status"] == "nicht gesehen"
+    assert table["live_only"] == []
+    quality = table["trips"][0]["stops"][0]["match"]["quality"]
+    assert quality == "exakt, ohne Richtung"
+
+
+def test_ambiguous_plan_stops_without_direction_stay_unmatched():
+    plan = {
+        "1": _plan_entry("U1", 6, [("A", 302)]),
+        "2": _plan_entry("U1", 7, [("A", 302)]),
+    }
+    live = {"anchor": LIVE_ANCHOR, "departures": [_live("U1", "A", 2, 1)]}
+    table = build_trip_table(plan, PLAN_ANCHOR, live)
+    assert [e["reason"] for e in table["live_only"]] == ["mehrdeutig"]
 
 
 def test_plan_trip_inside_the_window_without_live_entry_is_not_seen():
@@ -107,11 +128,11 @@ def test_vehicles_model_and_changed_destination_are_carried_over():
     assert trip["destination_changed"] is True
 
 
-def test_non_ubahn_lines_are_ignored():
-    plan = {"1": _plan_entry("S1", 6, [("A", 302)])}
-    plan["1"]["line"]["type"] = {"shortInfo": "S"}
-    dep = _live("S1", "A", 2, 6)
-    dep["line"]["type"] = {"shortInfo": "S"}
+def test_bus_lines_are_ignored():
+    plan = {"1": _plan_entry("X1", 6, [("A", 302)])}
+    plan["1"]["line"]["type"] = {"shortInfo": "Bus"}
+    dep = _live("X1", "A", 2, 6)
+    dep["line"]["type"] = {"shortInfo": "Bus"}
     table = build_trip_table(
         plan, PLAN_ANCHOR, {"anchor": LIVE_ANCHOR, "departures": [dep]}
     )
@@ -242,3 +263,149 @@ def test_failed_course_entry_falls_back_to_interpolation():
     table = build_trip_table(plan, PLAN_ANCHOR, live, {key: {"stops": None}})
 
     assert table["trips"][0]["stops"][2]["source"] == "interpolated"
+
+
+def test_s_bahn_trips_are_matched_too():
+    plan = {"1": _plan_entry("S1", 6, [("A", 302)])}
+    plan["1"]["line"]["type"] = {"shortInfo": "S"}
+    dep = _live("S1", "A", 2, 6)
+    dep["line"]["type"] = {"shortInfo": "S"}
+    table = build_trip_table(
+        plan, PLAN_ANCHOR, {"anchor": LIVE_ANCHOR, "departures": [dep]}
+    )
+    assert table["trips"][0]["status"] == "bestätigt"
+
+
+def test_repeated_live_entry_of_a_split_train_counts_as_duplicate_not_unmatched():
+    first = _live("U1", "A", 2, 6, service_id=7, platform="Gleis 1")
+    twin = _live("U1", "A", 2, 6, service_id=999, platform="Gleis 1")
+    plan = {"1": _plan_entry("U1", 6, [("A", 302)])}
+    table = build_trip_table(
+        plan, PLAN_ANCHOR, {"anchor": LIVE_ANCHOR, "departures": [first, twin]}
+    )
+    assert table["live_only"] == []
+    assert table["summary"]["quality"]["Duplikat"] == 1
+    assert table["trips"][0]["live_ids"] == ["7", "999"]
+
+
+def _course(*stops):
+    """stops: (id, name, arr, dep) with HH:MM strings."""
+    return {
+        "stops": [
+            {
+                "id": sid,
+                "name": name,
+                "arr": f"2026-10-17T{arr}" if arr else None,
+                "dep": f"2026-10-17T{dep}" if dep else None,
+                "dep_delay": None,
+                "arr_delay": None,
+                "platform": None,
+            }
+            for sid, name, arr, dep in stops
+        ]
+    }
+
+
+def test_split_train_alias_course_reports_where_it_diverges():
+    from hvv_map.trips import _plan_trips, alias_course_key, course_key
+
+    first = _live("U1", "A", 2, 6, service_id=7, platform="Gleis 1")
+    twin = _live("U1", "A", 2, 6, service_id=999, platform="Gleis 1")
+    plan = {"1": _plan_entry("U1", 6, [("A", 302)])}
+    key = course_key(_plan_trips(plan, PLAN_ANCHOR)[0])
+    courses = {
+        key: _course(
+            ("A", "a", None, "09:02"),
+            ("B", "b", "09:05", "09:06"),
+            ("C", "c", "09:09", None),
+        ),
+        alias_course_key("999"): _course(
+            ("A", "a", None, "09:02"),
+            ("B", "b", "09:05", "09:07"),
+            ("D", "d", "09:10", None),
+        ),
+    }
+
+    row = build_trip_table(
+        plan, PLAN_ANCHOR, {"anchor": LIVE_ANCHOR, "departures": [first, twin]}, courses
+    )["trips"][0]
+
+    assert [a["service_id"] for a in row["aliases"]] == ["999"]
+    alias = row["alias_courses"][0]
+    assert alias["shared_until"] == "b"
+    assert [s["name"] for s in alias["stops"]] == ["a", "b", "d"]
+
+
+def test_coupled_train_parts_share_the_course_from_the_join_station_on():
+    from hvv_map.trips import _shared_from, _shared_until
+
+    main = _course(
+        ("X", "x", None, "09:00"),
+        ("J", "j", "09:05", "09:09"),
+        ("E", "e", "09:12", None),
+    )["stops"]
+    other = _course(
+        ("Y", "y", None, "09:01"),
+        ("J", "j", "09:08", "09:09"),
+        ("E", "e", "09:12", None),
+    )["stops"]
+
+    assert _shared_until(main, other) is None
+    assert _shared_from(main, other) == "j"
+
+
+def _typed(entry, short_info):
+    entry["line"]["type"] = {"shortInfo": short_info}
+    return entry
+
+
+def test_all_modes_and_replacement_buses_are_matched():
+    cases = [("A1", "A", "AKN"), ("RE8", "RE", "R"), ("64", "Schiff", "FERRY")]
+    cases += [("RB61-SEV", "Bus", "SEV"), ("S1-SEV", "Bus", "SEV")]
+    plan = {
+        str(i): _typed(_plan_entry(name, 1, [("A", 302)]), info)
+        for i, (name, info, _) in enumerate(cases, start=1)
+    }
+    departures = [
+        {
+            **_live(name, "A", 2, 1, service_id=i),
+            "line": {**_typed(_live(name, "A", 2, 1), info)["line"]},
+        }
+        for i, (name, info, _) in enumerate(cases, start=1)
+    ]
+
+    table = build_trip_table(
+        plan, PLAN_ANCHOR, {"anchor": LIVE_ANCHOR, "departures": departures}
+    )
+
+    modes = {t["line"]: t["mode"] for t in table["trips"]}
+    assert modes == {name: mode for name, _, mode in cases}
+    assert table["summary"]["live_matched"] == len(cases)
+
+
+def test_lines_without_a_known_mode_are_ignored():
+    plan = {"1": _typed(_plan_entry("X9", 1, [("A", 302)]), "Bus")}
+    live = {"anchor": LIVE_ANCHOR, "departures": []}
+    assert build_trip_table(plan, PLAN_ANCHOR, live)["trips"] == []
+
+
+def test_running_trip_without_anchor_in_the_window_is_listed_as_between_anchors():
+    plan = {"1": _plan_entry("U1", 6, [("A", 290), ("B", 320)])}  # 08:50 - 09:20
+    live = {"anchor": LIVE_ANCHOR, "departures": []}
+
+    table = build_trip_table(plan, PLAN_ANCHOR, live)
+
+    assert [t["status"] for t in table["trips"]] == ["zwischen Ankern"]
+    assert table["summary"]["between"] == 1
+    assert table["trips"][0]["window_station"] == "B"  # next anchor ahead
+
+
+def test_finished_or_future_trips_without_window_stop_are_not_listed():
+    plan = {
+        "1": _plan_entry("U1", 6, [("A", 200), ("B", 230)]),
+        "2": _plan_entry("U1", 6, [("A", 400), ("B", 430)]),
+    }
+    table = build_trip_table(
+        plan, PLAN_ANCHOR, {"anchor": LIVE_ANCHOR, "departures": []}
+    )
+    assert table["trips"] == []

@@ -1,4 +1,4 @@
-"""Compare the planned U-Bahn trips (hvv:departures:by_service) with the
+"""Compare the planned trips (hvv:departures:by_service) with the
 realtime departures (hvv:departures:live): which live entry belongs to which
 planned trip, and which planned trips the live window does not show.
 
@@ -8,6 +8,7 @@ Pure functions over the cached payloads, so the api image needs no GTI client.
 from collections import defaultdict
 from datetime import datetime, timedelta
 
+from hvv_map.gtilive_geojson import mode_for_line
 from hvv_map.departures_tree import (
     _is_ubahn,
     _natural_key,
@@ -18,18 +19,33 @@ from hvv_map.departures_tree import (
 )
 
 LIVE_WINDOW_MINUTES = 5  # keep in sync with departures_live.LIVE_WINDOW_MINUTES
-MATCH_TOLERANCE_MINUTES = 1  # planned times may differ by a rounding minute
+MATCH_TOLERANCE_MINUTES = 0  # time-only matches: exact minute
+ID_MATCH_WINDOW_MINUTES = 5  # same serviceId at the station: accept this offset
 GAP_THRESHOLD_MINUTES = 120  # same as departures.GAP_THRESHOLD_MINUTES
 
 STATUS_CONFIRMED = "bestätigt"
 STATUS_NOT_SEEN = "nicht gesehen"
 STATUS_CANCELLED = "ausgefallen"
+STATUS_BETWEEN = "zwischen Ankern"  # running, no anchor stop in the live window
+
+
+def _is_trip_line(line: dict) -> bool:
+    """U, S, AKN, ferry, RB/RE and their replacement buses."""
+    return bool(mode_for_line(line))
+
+
+def _mode_label(line: dict) -> str:
+    """Map mode key of a line; replacement buses are listed as "SEV"."""
+    if (line.get("type") or {}).get("shortInfo") == "Bus":
+        return "SEV"
+    return mode_for_line(line)
 
 
 _COUNTER_KEY = {
     STATUS_CONFIRMED: "confirmed",
     STATUS_NOT_SEEN: "not_seen",
     STATUS_CANCELLED: "cancelled",
+    STATUS_BETWEEN: "between",
 }
 
 
@@ -47,13 +63,13 @@ def _split_occurrences(stops: list[dict]) -> list[list[dict]]:
 
 
 def _plan_trips(by_service: dict, plan_anchor: datetime) -> list[dict]:
-    """One entry per U-Bahn trip occurrence: its anchor stops with absolute
+    """One entry per trip occurrence: its anchor stops with absolute
     planned times."""
     trips = []
     for service_id, entry in by_service.items():
         line = entry.get("line") or {}
         stops = [s for s in entry.get("stops", []) if s.get("timeOffset") is not None]
-        if not _is_ubahn(line) or not stops:
+        if not _is_trip_line(line) or not stops:
             continue
         for number, run in enumerate(_split_occurrences(stops), start=1):
             trips.append(
@@ -86,6 +102,11 @@ def course_key(trip: dict) -> str:
     return f"{trip['service_id']}@{trip['stops'][0]['planned']:%Y-%m-%dT%H:%M}"
 
 
+def _hm(iso: str | None) -> str | None:
+    """HH:MM of an ISO timestamp."""
+    return iso[11:16] if iso else None
+
+
 def _base_stations(trip: dict, course: dict | None) -> list[dict]:
     """Station sequence with the times known for it: from the trip's
     departureCourse if cached, else from its subline (no times)."""
@@ -97,6 +118,9 @@ def _base_stations(trip: dict, course: dict | None) -> list[dict]:
                 {
                     "id": stop["id"],
                     "name": stop["name"],
+                    "arr": _hm(stop.get("arr")),
+                    "dep": _hm(stop.get("dep")),
+                    "platform": stop.get("platform"),
                     "time": datetime.fromisoformat(clock) if clock else None,
                     "delay": stop["dep_delay"]
                     if stop.get("dep") and stop["dep_delay"] is not None
@@ -105,7 +129,15 @@ def _base_stations(trip: dict, course: dict | None) -> list[dict]:
             )
         return stations
     return [
-        {"id": s["id"], "name": s["name"], "time": None, "delay": None}
+        {
+            "id": s["id"],
+            "name": s["name"],
+            "arr": None,
+            "dep": None,
+            "platform": None,
+            "time": None,
+            "delay": None,
+        }
         for s in trip.get("subline") or []
     ]
 
@@ -146,13 +178,20 @@ def _route_rows(
         stations = _base_stations(trip, None)
         positions = _anchor_positions(anchors, stations)
 
-    def anchor_row(stop: dict, delay=None) -> dict:
+    def anchor_row(stop: dict, station: dict | None = None) -> dict:
+        planned = stop["planned"].strftime("%H:%M")
+        match = stop["match"]
         return {
             "station": stop["station"],
-            "planned": stop["planned"].strftime("%H:%M"),
+            "planned": planned,
+            "arr": station["arr"] if station else None,
+            "dep": (station["dep"] if station and station["dep"] else planned),
+            "platform": (match or {}).get("platform")
+            or (station["platform"] if station else None)
+            or stop["platform"],
             "at": stop["planned"].isoformat(timespec="minutes"),
             "source": "plan",
-            "course_delay": delay,
+            "course_delay": station["delay"] if station else None,
             "interpolated": False,
             "anchor": True,
             "expected": live_anchor <= stop["planned"] <= window_end,
@@ -165,7 +204,7 @@ def _route_rows(
     rows = []
     for i, station in enumerate(stations):
         if i in positions:
-            rows.append(anchor_row(anchors[positions.index(i)], station["delay"]))
+            rows.append(anchor_row(anchors[positions.index(i)], station))
             continue
         at, source = None, None
         if station["time"] is not None:
@@ -183,6 +222,9 @@ def _route_rows(
             {
                 "station": station["name"],
                 "planned": at.strftime("%H:%M") if at else None,
+                "arr": station["arr"],
+                "dep": station["dep"] or (at.strftime("%H:%M") if at else None),
+                "platform": station["platform"],
                 "at": at.isoformat(timespec="minutes") if at else None,
                 "source": source,
                 "course_delay": station["delay"],
@@ -208,6 +250,108 @@ def _index_plan(trips: list[dict]) -> dict:
             )
             index[key].append((trip, stop))
     return index
+
+
+def _index_relaxed(trips: list[dict]) -> dict:
+    """(line, station id, planned minute, None) -> [(trip, stop)], for
+    matching without the direction id."""
+    index = defaultdict(list)
+    for trip in trips:
+        for stop in trip["stops"]:
+            index[(trip["line"], stop["station_id"], stop["planned"], None)].append(
+                (trip, stop)
+            )
+    return index
+
+
+def _index_by_service(trips: list[dict]) -> dict:
+    """(serviceId, station id) -> [(trip, stop)]: live departures usually carry
+    the plan's own serviceId."""
+    index: dict[tuple, list] = defaultdict(list)
+    for trip in trips:
+        for stop in trip["stops"]:
+            index[(trip["service_id"], stop["station_id"])].append((trip, stop))
+    return index
+
+
+def _match_by_service(
+    by_service_index: dict, entry: dict, station_id: str, planned: datetime
+) -> tuple[dict, str] | None:
+    """The free plan stop of the entry's own serviceId at this station that
+    lies closest in time, within ID_MATCH_WINDOW_MINUTES."""
+    window = timedelta(minutes=ID_MATCH_WINDOW_MINUTES)
+    free = [
+        (abs(stop["planned"] - planned), stop)
+        for _, stop in by_service_index.get((str(entry["service_id"]), station_id), [])
+        if stop["match"] is None and abs(stop["planned"] - planned) <= window
+    ]
+    if not free:
+        return None
+    gap, stop = min(free, key=lambda item: item[0])
+    minutes = round(gap.total_seconds() / 60)
+    return stop, "ID" if not minutes else f"ID, ±{minutes} min"
+
+
+def _prefer_platform(free: list, platform: str | None) -> list:
+    """Narrow several candidates down to the ones on the live platform."""
+    if len(free) > 1 and platform:
+        return [(t, s) for t, s in free if s["platform"] == platform] or free
+    return free
+
+
+def alias_course_key(service_id) -> str:
+    """Cache key of the departureCourse of a live-only serviceId."""
+    return f"live:{service_id}"
+
+
+def _shared_until(main: list[dict], other: list[dict]) -> str | None:
+    """Name of the last station up to which two courses run identically
+    (same station and arrival; the first station compares departures)."""
+    last = None
+    for index, (a, b) in enumerate(zip(main, other)):
+        same = a["id"] == b["id"] and (
+            a["dep"] == b["dep"] if index == 0 else a["arr"] == b["arr"]
+        )
+        if not same:
+            break
+        last = a["name"]
+    return last
+
+
+def _shared_from(main: list[dict], other: list[dict]) -> str | None:
+    """Name of the first station from which two courses run identically to
+    the end (same station and departure; the last compares arrivals) - where
+    two train parts have been coupled."""
+    first = None
+    for a, b in zip(reversed(main), reversed(other)):
+        key = "dep" if a["dep"] or b["dep"] else "arr"
+        if a["id"] != b["id"] or a[key] != b[key]:
+            break
+        first = a["name"]
+    return first
+
+
+def _alias_courses(aliases: list[dict], main: dict | None, courses: dict) -> list:
+    """Courses of the extra live entries of a trip (e.g. the second half of a
+    split train), with the station up to which they match the trip's own."""
+    result = []
+    for alias in aliases:
+        course = courses.get(alias_course_key(alias["service_id"]))
+        if not course or not course.get("stops"):
+            continue
+        shared = _shared_until(main["stops"], course["stops"]) if main else None
+        joined = _shared_from(main["stops"], course["stops"]) if main else None
+        result.append(
+            {
+                "service_id": alias["service_id"],
+                "destination": alias["destination"],
+                "shared_until": shared,
+                "shared_from": joined,
+                "fetched_at": course.get("fetched_at"),
+                "stops": course["stops"],
+            }
+        )
+    return result
 
 
 def _find_candidates(index: dict, key: tuple) -> tuple[list, str]:
@@ -243,7 +387,7 @@ def _live_entry(dep: dict, planned: datetime) -> dict:
         "delay": dep.get("delay"),
         "cancelled": bool(dep.get("cancelled")),
         "extra": bool(dep.get("extra")),
-        "vehicles": vehicles_text(vehicles, True),
+        "vehicles": vehicles_text(vehicles, _is_ubahn(line)),
         "model": refined_model(line, vehicles),
         "_vehicles": vehicles or [],
     }
@@ -259,7 +403,7 @@ def build_trip_table(
     live: dict,
     courses: dict | None = None,
 ) -> dict:
-    """Plan trips of the U-Bahn matched against the live departures:
+    """Plan trips matched against the live departures:
     {"summary", "trips", "live_only"}. A live departure matches the plan
     stop with the same line, station, direction id and planned minute; a
     plan trip is "nicht gesehen" if one of its stops lay inside the live
@@ -270,6 +414,7 @@ def build_trip_table(
 
     trips = _plan_trips(by_service, plan_anchor)
     index = _index_plan(trips)
+    by_service_index = _index_by_service(trips)
     window_end = live_anchor + timedelta(minutes=LIVE_WINDOW_MINUTES)
 
     live_only, quality_counts, live_total = [], defaultdict(int), 0
@@ -281,52 +426,91 @@ def build_trip_table(
             "confirmed": 0,
             "not_seen": 0,
             "cancelled": 0,
+            "between": 0,
         }
     )
-    for dep in live.get("departures", []):
-        line = dep.get("line") or {}
-        if not _is_ubahn(line) or dep.get("timeOffset") is None:
-            continue
-        live_total += 1
-        planned = live_anchor + timedelta(minutes=dep["timeOffset"])
-        entry = _live_entry(dep, planned)
-        per_line[entry["line"]]["live"] += 1
-        key = (
-            entry["line"],
-            (dep.get("station") or {}).get("id"),
-            planned,
-            dep.get("directionId"),
-        )
-        candidates, quality = _find_candidates(index, key)
-        free = [(t, s) for t, s in candidates if s["match"] is None]
-        if len(free) > 1 and entry["platform"]:
-            same_platform = [
-                (t, s) for t, s in free if s["platform"] == entry["platform"]
-            ]
-            free = same_platform or free
-        if not free:
-            live_only.append(
-                {
-                    **_public(entry),
-                    "reason": "Zusatzfahrt (extra)"
-                    if entry["extra"]
-                    else "ohne Plan-Treffer"
-                    if not candidates
-                    else "Plan-Halt schon vergeben",
-                }
-            )
-            continue
-        trip, stop = free[0]
-        if len(free) > 1:
-            quality = f"{quality}, mehrdeutig"
+
+    def assign(entry: dict, stop: dict, quality: str) -> None:
         quality_counts[quality] += 1
         per_line[entry["line"]]["matched"] += 1
         stop["match"] = {
             **_public(entry),
             "quality": quality,
             "destination_changed": entry["destination"] != stop["direction"],
+            "aliases": [],
             "_vehicles": entry["_vehicles"],
         }
+
+    leftovers = []
+    placed: dict[tuple, dict] = {}
+    for dep in live.get("departures", []):
+        line = dep.get("line") or {}
+        if not _is_trip_line(line) or dep.get("timeOffset") is None:
+            continue
+        live_total += 1
+        planned = live_anchor + timedelta(minutes=dep["timeOffset"])
+        entry = _live_entry(dep, planned)
+        per_line[entry["line"]]["live"] += 1
+        station_id = (dep.get("station") or {}).get("id")
+        by_id = _match_by_service(by_service_index, entry, station_id, planned)
+        if by_id:
+            stop, quality = by_id
+            assign(entry, stop, quality)
+            placed[(entry["line"], station_id, planned, entry["platform"])] = stop
+            continue
+        key = (entry["line"], station_id, planned, dep.get("directionId"))
+        candidates, quality = _find_candidates(index, key)
+        free = _prefer_platform(
+            [(t, s) for t, s in candidates if s["match"] is None], entry["platform"]
+        )
+        if not free:
+            leftovers.append((entry, station_id, planned, bool(candidates)))
+            continue
+        if len(free) > 1:
+            quality = f"{quality}, mehrdeutig"
+        assign(entry, free[0][1], quality)
+        placed[(entry["line"], station_id, planned, entry["platform"])] = free[0][1]
+
+    # Second pass: a live entry repeating an already matched one (combined
+    # destination of a split train), else a unique plan stop that differs
+    # only in the direction id.
+    relaxed = _index_relaxed(trips)
+    for entry, station_id, planned, had_candidates in leftovers:
+        twin = placed.get((entry["line"], station_id, planned, entry["platform"]))
+        if twin is not None and entry["platform"]:
+            twin["match"]["aliases"].append(
+                {
+                    "service_id": str(entry["service_id"]),
+                    "station_id": station_id,
+                    "destination": entry["destination"],
+                    "station": entry["station"],
+                    "planned": entry["planned"],
+                }
+            )
+            quality_counts["Duplikat"] += 1
+            per_line[entry["line"]]["matched"] += 1
+            continue
+        found, quality = _find_candidates(
+            relaxed, (entry["line"], station_id, planned, None)
+        )
+        free = _prefer_platform(
+            [(t, s) for t, s in found if s["match"] is None], entry["platform"]
+        )
+        if len(free) == 1 and not entry["extra"]:
+            assign(entry, free[0][1], f"{quality}, ohne Richtung")
+            continue
+        live_only.append(
+            {
+                **_public(entry),
+                "reason": "Zusatzfahrt (extra)"
+                if entry["extra"]
+                else "mehrdeutig"
+                if len(free) > 1
+                else "Plan-Halt schon vergeben"
+                if had_candidates
+                else "ohne Plan-Treffer",
+            }
+        )
 
     rows = []
     for trip in trips:
@@ -334,24 +518,44 @@ def build_trip_table(
         expected = [
             s for s in trip["stops"] if live_anchor <= s["planned"] <= window_end
         ]
-        if not matched and not expected:
+        running = (
+            trip["stops"][0]["planned"] <= live_anchor <= trip["stops"][-1]["planned"]
+        )
+        if not matched and not expected and not running:
             continue
+        aliases = list(
+            {
+                a["service_id"]: a for s in matched for a in s["match"]["aliases"]
+            }.values()
+        )
         cancelled = bool(matched) and all(s["match"]["cancelled"] for s in matched)
         if cancelled:
             status = STATUS_CANCELLED
         else:
-            status = STATUS_CONFIRMED if matched else STATUS_NOT_SEEN
+            status = (
+                STATUS_CONFIRMED
+                if matched
+                else STATUS_NOT_SEEN
+                if expected
+                else STATUS_BETWEEN
+            )
         vehicles = [v for s in matched for v in s["match"]["_vehicles"]]
         unique = list({(v.get("id"), v.get("number")): v for v in vehicles}.values())
         delays = [
             s["match"]["delay"] for s in matched if s["match"]["delay"] is not None
         ]
-        relevant = matched or expected
+        relevant = (
+            matched
+            or expected
+            or [s for s in trip["stops"] if s["planned"] >= live_anchor]
+            or trip["stops"]
+        )
         rows.append(
             {
                 "id": trip["id"],
                 "service_id": trip["service_id"],
                 "line": trip["line"],
+                "mode": _mode_label(trip["line_obj"]),
                 "direction_id": trip["direction_id"],
                 "destination": trip["destination"],
                 "status": status,
@@ -359,12 +563,22 @@ def build_trip_table(
                 "start_station": trip["stops"][0]["station"],
                 "window_time": relevant[0]["planned"].strftime("%H:%M"),
                 "window_station": relevant[0]["station"],
-                "live_ids": sorted({str(s["match"]["service_id"]) for s in matched}),
+                "live_ids": sorted(
+                    {str(s["match"]["service_id"]) for s in matched}
+                    | {a["service_id"] for s in matched for a in s["match"]["aliases"]}
+                ),
+                "aliases": aliases,
+                "course_fetched_at": ((courses or {}).get(course_key(trip)) or {}).get(
+                    "fetched_at"
+                ),
+                "alias_courses": _alias_courses(
+                    aliases, (courses or {}).get(course_key(trip)), courses or {}
+                ),
                 "destination_changed": any(
                     s["match"]["destination_changed"] for s in matched
                 ),
                 "max_delay": max(delays) if delays else None,
-                "vehicles": vehicles_text(unique, True),
+                "vehicles": vehicles_text(unique, _is_ubahn(trip["line_obj"])),
                 "model": refined_model(trip["line_obj"], unique),
                 "route_start": None,
                 "route_end": None,
@@ -396,6 +610,7 @@ def build_trip_table(
             "confirmed": sum(r["status"] == STATUS_CONFIRMED for r in rows),
             "not_seen": sum(r["status"] == STATUS_NOT_SEEN for r in rows),
             "cancelled": sum(r["status"] == STATUS_CANCELLED for r in rows),
+            "between": sum(r["status"] == STATUS_BETWEEN for r in rows),
             "extra": sum(e["extra"] for e in live_only),
             "by_line": {
                 name: per_line[name] for name in sorted(per_line, key=_natural_key)
