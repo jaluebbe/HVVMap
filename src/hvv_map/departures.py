@@ -238,6 +238,7 @@ def group_by_service(departures: list[dict]) -> dict[str, dict]:
                 "stopPoint": departure.get("stopPoint"),
                 "platform": departure.get("platform"),
                 "realtimePlatform": departure.get("realtimePlatform"),
+                "vehicles": departure.get("vehicles"),
             }
         )
     for entry in grouped.values():
@@ -389,11 +390,10 @@ def _run_snapshot(redis_client, key: str, start: datetime, fetch) -> bool:
     return True
 
 
-def main() -> None:
-    """CLI: run the three departureList snapshots once, store raw in Redis -
-    each skipped once its cache already reflects today's anchor time."""
-    client = GtiClient()
-    redis_client = get_redis_client()
+def run_daily_snapshots(client: GtiClient, redis_client) -> None:
+    """Run the three departureList snapshots, store raw in Redis - each
+    skipped once its cache already reflects today's anchor time - then
+    rebuild the merged and by-service views."""
     start = _query_start_time(datetime.now())
     _store(
         redis_client,
@@ -436,6 +436,11 @@ def main() -> None:
         f"{len(by_service)} service_ids, {resolved} matched to a subline "
         f"({REDIS_BY_SERVICE_KEY})"
     )
+
+
+def main() -> None:
+    """CLI: run the daily snapshots once."""
+    run_daily_snapshots(GtiClient(), get_redis_client())
 
 
 if __name__ == "__main__":

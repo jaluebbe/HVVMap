@@ -19,9 +19,15 @@ hvv:reference_stops/hvv:reference_lines are rebuilt periodically here
 segment_cache keeps growing between rebuilds. Sublines come from the
 hvv:sublines cache (not read by the running map itself, see hvv_map.lines)
 rather than a fresh listLines call, so the rebuild needs only one API call
-(listStations).
-hvv:sublines is kept fresh separately on its own SUBLINES_CACHE_INTERVAL,
-always via a full (non-incremental) listLines call, at an hourly cadence.
+(listStations). hvv:sublines is kept fresh separately on its own
+SUBLINES_CACHE_INTERVAL, always via a full (non-incremental) listLines call,
+at an hourly cadence.
+
+Departure snapshots also run here: the 5-minute realtime window
+(hvv:departures:live) every LIVE_DEPARTURES_INTERVAL, and the daily plan
+snapshots (hvv:departures:*) checked every DAILY_DEPARTURES_INTERVAL - they
+skip themselves once current. Both take a cycle and sleep 1 s between their
+own requests, so the vehicle map pauses briefly while they run.
 """
 
 import json
@@ -31,6 +37,8 @@ from hvv_map.disruptions import (
     build_disruptions_geojson,
     extract_announcement_station_names,
 )
+from hvv_map.departures import run_daily_snapshots
+from hvv_map.departures_live import run_live_snapshot
 from hvv_map.geojson import build_positions_geojson, mode_for_journey
 from hvv_map.gti_client import GtiClient
 from hvv_map.lines import (
@@ -56,6 +64,8 @@ ANNOUNCEMENTS_INTERVAL = 600.0  # seconds between getAnnouncements calls (10 min
 REFERENCE_REBUILD_INTERVAL = 1800.0  # seconds between reference layer rebuilds (30 min)
 SUBLINES_CACHE_INTERVAL = 3600.0  # seconds between hvv:sublines updates (1h) -
 # always a full (non-incremental) listLines call, see module docstring
+LIVE_DEPARTURES_INTERVAL = 240.0  # seconds between live departure snapshots (4 min)
+DAILY_DEPARTURES_INTERVAL = 3600.0  # seconds between daily snapshot checks (1h)
 VEHICLE_MAP_TTL = 10  # seconds - stale data expires fast if fetcher dies
 ANNOUNCEMENTS_TTL = 7200  # seconds - generous headroom above refresh interval
 
@@ -212,6 +222,20 @@ def fetch_announcements() -> None:
     _store("hvv:announcement_stations", station_names, ANNOUNCEMENTS_TTL)
 
 
+def fetch_live_departures_snapshot() -> None:
+    data = run_live_snapshot(gti, redis_client)
+    if data["failed_requests"]:
+        print(
+            "[hvvmap-fetcher] live departures: "
+            f"{data['failed_requests']} failed requests",
+            flush=True,
+        )
+
+
+def fetch_daily_departures() -> None:
+    run_daily_snapshots(gti, redis_client)
+
+
 def fetch_once_announcements() -> None:
     """CLI: fetch announcements once, store in Redis, then exit."""
     fetch_announcements()
@@ -242,6 +266,8 @@ def main() -> None:
     last_reference_rebuild = 0.0
     last_vehicle_map_fetch = 0.0
     last_sublines_cache_update = 0.0
+    last_live_departures = 0.0
+    last_daily_departures = 0.0
     realtime_toggle = True
     while True:
         cycle_start = time.time()
@@ -260,6 +286,12 @@ def main() -> None:
             elif cycle_start - last_sublines_cache_update >= SUBLINES_CACHE_INTERVAL:
                 update_sublines_cache(gti, redis_client)
                 last_sublines_cache_update = cycle_start
+            elif cycle_start - last_daily_departures >= DAILY_DEPARTURES_INTERVAL:
+                last_daily_departures = cycle_start
+                fetch_daily_departures()
+            elif cycle_start - last_live_departures >= LIVE_DEPARTURES_INTERVAL:
+                last_live_departures = cycle_start
+                fetch_live_departures_snapshot()
             elif cycle_start - last_vehicle_map_fetch >= VEHICLE_MAP_FETCH_INTERVAL:
                 fetch_vehicle_map(realtime=realtime_toggle)
                 realtime_toggle = not realtime_toggle

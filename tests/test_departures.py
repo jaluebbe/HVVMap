@@ -6,6 +6,7 @@ from hvv_map.departures import (
     _is_subsequence,
     _names_match,
     _subline_candidates,
+    group_by_service,
     match_subline,
 )
 
@@ -206,3 +207,18 @@ def test_match_subline_keeps_non_nested_variants_ambiguous():
         ["S"], line_id="9", line_name="9", origin="S", destination="E", short_info="Bus"
     )
     assert len(match_subline(entry, sublines_cache)) == 2
+
+
+def test_group_by_service_keeps_vehicles_per_stop():
+    vehicles = [{"id": "9001", "number": "4711"}]
+    departures = [
+        {
+            "serviceId": 1,
+            "line": {"id": "L", "name": "U1", "direction": "X"},
+            "timeOffset": 3,
+            "station": {"id": "A"},
+            "vehicles": vehicles,
+        }
+    ]
+    stops = group_by_service(departures)["1"]["stops"]
+    assert stops[0]["vehicles"] == vehicles
