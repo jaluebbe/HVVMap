@@ -1,8 +1,10 @@
-"""departureCourse per upcoming U-Bahn trip: the full stop sequence with
+"""departureCourse per upcoming trip: the full stop sequence with
 planned times and delays, stored under hvv:trips:courses for trips.py."""
 
 import json
 import time
+
+import requests
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
@@ -10,15 +12,18 @@ from hvv_map.departures import REDIS_ANCHOR_KEY, REDIS_BY_SERVICE_KEY, berlin_no
 from hvv_map.departures_tree import parse_anchor
 from hvv_map.gti_client import GtiClient
 from hvv_map.redis_client import get_redis_client
-from hvv_map.trips import _plan_trips, course_key
+from hvv_map.departures_live import REDIS_LIVE_KEY
+from hvv_map.trips import _plan_trips, alias_course_key, build_trip_table, course_key
 
 BERLIN_TZ = ZoneInfo("Europe/Berlin")
 REDIS_COURSES_KEY = "hvv:trips:courses"
 COURSES_TTL = 3 * 24 * 3600
 COURSE_LOOKAHEAD_MINUTES = 60  # fetch trips with a stop up to this far ahead
-COURSE_MAX_CALLS = 15  # per run, at 1 req/s
+COURSE_MAX_CALLS = 30  # per run, at 1 req/s
 COURSE_KEEP_SECONDS = 2 * 24 * 3600
 COURSE_RETRY_SECONDS = 600  # a failed fetch is not retried before this
+COURSE_REFRESH_SECONDS = 300  # running trips refetch their course after this
+COURSE_RUNNING_SLACK_MINUTES = 2
 
 
 def _parse_time(value: str | None) -> str | None:
@@ -68,6 +73,27 @@ def parse_course(response: dict) -> list[dict] | None:
     return stops
 
 
+def course_request(live: dict, service_id: int, station_id: str | None = None):
+    """departureCourse request for the live departure with this serviceId
+    (at station_id if it appears at several stations), or None if absent."""
+    anchor = live["anchor"]
+    start = datetime.strptime(f"{anchor['date']} {anchor['time']}", "%Y-%m-%d %H:%M:%S")
+    for dep in live["departures"]:
+        if dep["serviceId"] != service_id:
+            continue
+        if station_id and dep["station"]["id"] != station_id:
+            continue
+        when = start.replace(tzinfo=BERLIN_TZ) + timedelta(minutes=dep["timeOffset"])
+        return {
+            "station": {"type": "STATION", "name": dep["station"]["combinedName"]},
+            "time": when.strftime("%Y-%m-%dT%H:%M:%S.000%z"),
+            "lineId": dep["line"]["dlid"],
+            "serviceId": service_id,
+            "showPath": False,
+        }
+    return None
+
+
 def _query(trip: dict) -> dict | None:
     first = trip["stops"][0]
     line_id = (trip["line_obj"] or {}).get("dlid")
@@ -84,26 +110,39 @@ def _query(trip: dict) -> dict | None:
     }
 
 
-def _is_cached(entry: dict | None) -> bool:
-    """A course is cached; a failed fetch (stops None) counts until retry."""
+def _is_current(entry: dict | None, running: bool = False) -> bool:
+    """No fetch needed: a failed fetch counts until its retry time, a running
+    trip's course until it is older than COURSE_REFRESH_SECONDS."""
     if entry is None:
         return False
-    return entry["stops"] is not None or (
-        time.time() - entry["fetched_at"] < COURSE_RETRY_SECONDS
-    )
+    age = time.time() - entry["fetched_at"]
+    if entry["stops"] is None:
+        return age < COURSE_RETRY_SECONDS
+    return not running or age < COURSE_REFRESH_SECONDS
+
+
+def _is_running(trip: dict, now: datetime) -> bool:
+    first, last = trip["stops"][0]["planned"], trip["stops"][-1]["planned"]
+    slack = timedelta(minutes=COURSE_RUNNING_SLACK_MINUTES)
+    return first <= now <= last + slack
 
 
 def due_trips(trips: list[dict], cached: dict, now: datetime) -> list[dict]:
-    """Trips with a stop in [now, now + lookahead] and no usable cache entry,
-    soonest first."""
+    """Trips with a stop in [now, now + lookahead] whose course is missing or,
+    while the trip runs, outdated. Missing first, then oldest, then soonest."""
     end = now + timedelta(minutes=COURSE_LOOKAHEAD_MINUTES)
     due = [
         trip
         for trip in trips
-        if not _is_cached(cached.get(course_key(trip)))
+        if not _is_current(cached.get(course_key(trip)), _is_running(trip, now))
         and any(now <= stop["planned"] <= end for stop in trip["stops"])
     ]
-    due.sort(key=lambda trip: trip["stops"][0]["planned"])
+    due.sort(
+        key=lambda trip: (
+            (cached.get(course_key(trip)) or {"fetched_at": 0})["fetched_at"],
+            trip["stops"][0]["planned"],
+        )
+    )
     return due
 
 
@@ -122,15 +161,35 @@ def run_trip_courses(client: GtiClient, redis_client, now: datetime | None = Non
     keep_after = time.time() - COURSE_KEEP_SECONDS
     cached = {k: v for k, v in cached.items() if v["fetched_at"] >= keep_after}
 
-    fetched = failed = 0
-    for trip in due_trips(trips, cached, now)[:COURSE_MAX_CALLS]:
+    # (cache key, request) - live-only entries (alias ids) first
+    jobs = []
+    raw_live = redis_client.get(REDIS_LIVE_KEY)
+    if raw_live:
+        live = json.loads(raw_live)["data"]
+        table = build_trip_table(json.loads(raw_plan)["data"], plan_anchor, live)
+        for row in table["trips"]:
+            for alias in row["aliases"]:
+                key = alias_course_key(alias["service_id"])
+                request = course_request(
+                    live, int(alias["service_id"]), alias["station_id"]
+                )
+                if request and not _is_current(cached.get(key), running=True):
+                    jobs.append((key, request))
+    for trip in due_trips(trips, cached, now):
         request = _query(trip)
-        if request is None:
-            continue
-        response = client.send("departureCourse", request)
+        if request:
+            jobs.append((course_key(trip), request))
+
+    fetched = failed = 0
+    for key, request in jobs[:COURSE_MAX_CALLS]:
+        try:
+            response = client.send("departureCourse", request)
+        except requests.RequestException as error:
+            print(f"[trip_courses] {key}: {error}", flush=True)
+            response = {}
         time.sleep(1)  # 1 req/s rate limit across all GTI endpoints
         stops = parse_course(response)
-        cached[course_key(trip)] = {"fetched_at": int(time.time()), "stops": stops}
+        cached[key] = {"fetched_at": int(time.time()), "stops": stops}
         if stops is None:
             failed += 1
         else:

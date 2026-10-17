@@ -32,6 +32,7 @@ hvvmap-gtfs-fetch-once = "hvv_map.gtfs_fetcher:fetch_once"
 hvvmap-departures = "hvv_map.departures:main"
 hvvmap-departures-live = "hvv_map.departures_live:main"
 hvvmap-trip-courses = "hvv_map.trip_courses:main"
+hvvmap-course = "hvv_map.course_debug:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/hvv_map"]

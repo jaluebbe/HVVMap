@@ -124,3 +124,102 @@ def test_failed_fetch_is_not_retried_immediately_and_not_used(monkeypatch):
 
     assert due_trips([trip], fresh, now) == []
     assert due_trips([trip], stale, now) == [trip]
+
+
+def test_run_trip_courses_fetches_course_of_extra_live_entry_first(monkeypatch):
+    monkeypatch.setattr(trip_courses.time, "sleep", lambda _: None)
+    line = {"name": "U1", "dlid": "de:hvv:U1:", "type": {"shortInfo": "U"}}
+    plan = {
+        "7": {
+            "line": line,
+            "directionId": 6,
+            "destination": "Z",
+            "stops": [{"timeOffset": 302, "station": {"id": "A", "combinedName": "a"}}],
+        }
+    }
+
+    def departure(service_id):
+        return {
+            "line": {**line, "direction": "Z"},
+            "station": {"id": "A", "combinedName": "a", "name": "a"},
+            "timeOffset": 2,
+            "directionId": 6,
+            "serviceId": service_id,
+            "platform": "Gleis 1",
+        }
+
+    live = {
+        "anchor": {"date": "2026-10-17", "time": "09:00:00"},
+        "departures": [departure(7), departure(999)],
+    }
+    redis = _Redis(
+        {
+            "hvv:departures:by_service": json.dumps({"data": plan}),
+            "hvv:departures:anchor_start": json.dumps(
+                {"data": {"date": "2026-10-17", "time": "04:00:00"}}
+            ),
+            "hvv:departures:live": json.dumps({"data": live}),
+        }
+    )
+    client = _Client()
+
+    run_trip_courses(client, redis, datetime(2026, 10, 17, 9, 0))
+
+    assert [r["serviceId"] for _, r in client.requests] == [999, 7]
+    stored = json.loads(redis.values["hvv:trips:courses"])["data"]
+    assert set(stored) == {"live:999", "7@2026-10-17T09:02"}
+
+
+def test_http_error_for_one_trip_does_not_abort_the_run(monkeypatch):
+    import requests
+
+    monkeypatch.setattr(trip_courses.time, "sleep", lambda _: None)
+    line = {"name": "U1", "dlid": "de:hvv:U1:", "type": {"shortInfo": "U"}}
+    plan = {
+        sid: {
+            "line": line,
+            "directionId": 6,
+            "destination": "Z",
+            "stops": [
+                {"timeOffset": 302 + n, "station": {"id": "A", "combinedName": "a"}}
+            ],
+        }
+        for n, sid in enumerate(("1", "2"))
+    }
+    redis = _Redis(
+        {
+            "hvv:departures:by_service": json.dumps({"data": plan}),
+            "hvv:departures:anchor_start": json.dumps(
+                {"data": {"date": "2026-10-17", "time": "04:00:00"}}
+            ),
+        }
+    )
+
+    class _Failing(_Client):
+        def send(self, endpoint, request):
+            if request["serviceId"] == 1:
+                raise requests.HTTPError("500")
+            return super().send(endpoint, request)
+
+    fetched, failed = run_trip_courses(_Failing(), redis, datetime(2026, 10, 17, 9, 0))
+
+    assert (fetched, failed) == (1, 1)
+    stored = json.loads(redis.values["hvv:trips:courses"])["data"]
+    assert stored["1@2026-10-17T09:02"]["stops"] is None
+    assert stored["2@2026-10-17T09:03"]["stops"] is not None
+
+
+def test_running_trip_course_is_refetched_when_old_but_upcoming_one_is_not():
+    now = datetime(2026, 10, 17, 9, 20)
+    running = _trip("1", 10)
+    running["stops"].append({"station": "b", "planned": datetime(2026, 10, 17, 9, 40)})
+    upcoming = _trip("2", 30)
+    old = trip_courses.time.time() - 3600
+    cached = {
+        trip_courses.course_key(t): {"fetched_at": old, "stops": [{}]}
+        for t in (running, upcoming)
+    }
+
+    assert due_trips([running, upcoming], cached, now) == [running]
+    cached[trip_courses.course_key(running)]["fetched_at"] = trip_courses.time.time()
+    assert due_trips([running, upcoming], cached, now) == []
