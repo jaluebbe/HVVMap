@@ -382,3 +382,28 @@ def test_trips_endpoint_matches_plan_with_live(client, monkeypatch):
 def test_trips_endpoint_503_when_cache_missing(client, monkeypatch):
     monkeypatch.setattr(api_module, "_redis_client", _FakeRedis({}))
     assert client.get("/api/hvv/live/trips.json").status_code == 503
+
+
+@pytest.mark.parametrize(
+    "path,redis_key",
+    [
+        ("/api/hvv/gtfs/lines.geojson", "hvv:gtfs:reference_lines"),
+        ("/api/hvv/gtfs/stops.geojson", "hvv:gtfs:reference_stops"),
+    ],
+)
+def test_gtfs_reference_layers_are_served_from_cache(client, path, redis_key):
+    redis_client = get_redis_client()
+    geojson = {"type": "FeatureCollection", "features": [{"marker": path}]}
+    redis_client.set(redis_key, json.dumps({"fetched_at": 1, "data": geojson}))
+    api_module._gtfs_lines_cache._built_at = float("-inf")
+    api_module._gtfs_stops_cache._built_at = float("-inf")
+
+    response = client.get(path)
+    assert response.status_code == 200
+    assert response.json() == geojson
+    assert (
+        client.get(
+            path, headers={"If-None-Match": response.headers["etag"]}
+        ).status_code
+        == 304
+    )

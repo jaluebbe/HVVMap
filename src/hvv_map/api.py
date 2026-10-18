@@ -32,6 +32,7 @@ from hvv_map.gtilive_geojson import (
     build_stops_geojson as build_gtilive_stops_geojson,
 )
 from hvv_map.redis_client import get_redis_client
+from hvv_map.response_cache import CachedJsonResponse
 from hvv_map.stations import by_id, load_stations
 from hvv_map.trips import REDIS_VEHICLES_KEY, build_trip_table
 
@@ -331,10 +332,8 @@ def get_gtilive_positions():
 
 
 @app.get("/api/hvv/gtilive/stops.geojson", tags=["hvv_gtilive"])
-def get_gtilive_stops():
-    by_service = _by_service_with_derived()
-    stations = by_id(load_stations(_redis_client))
-    return build_gtilive_stops_geojson(by_service, stations)
+def get_gtilive_stops(request: Request):
+    return _gtilive_stops_cache.response(request)
 
 
 _gti_shapes_connection: sqlite3.Connection | None = None
@@ -359,13 +358,31 @@ def _by_service_with_derived() -> dict:
     )
 
 
-@app.get("/api/hvv/gtilive/lines.geojson", tags=["hvv_gtilive"])
-def get_gtilive_lines():
-    by_service = _by_service_with_derived()
+def _build_gtilive_stops() -> dict:
+    stations = by_id(load_stations(_redis_client))
+    return build_gtilive_stops_geojson(_by_service_with_derived(), stations)
+
+
+def _build_gtilive_lines() -> dict:
     stations = by_id(load_stations(_redis_client))
     return build_gtilive_lines_geojson(
-        by_service, stations, _get_gti_shapes_connection()
+        _by_service_with_derived(), stations, _get_gti_shapes_connection()
     )
+
+
+_gtilive_stops_cache = CachedJsonResponse(_build_gtilive_stops)
+_gtilive_lines_cache = CachedJsonResponse(_build_gtilive_lines)
+_gtfs_lines_cache = CachedJsonResponse(
+    lambda: _read_cached_json("hvv:gtfs:reference_lines")
+)
+_gtfs_stops_cache = CachedJsonResponse(
+    lambda: _read_cached_json("hvv:gtfs:reference_stops")
+)
+
+
+@app.get("/api/hvv/gtilive/lines.geojson", tags=["hvv_gtilive"])
+def get_gtilive_lines(request: Request):
+    return _gtilive_lines_cache.response(request)
 
 
 @app.get("/api/hvv/gtilive/debug.geojson", tags=["hvv_gtilive"])
@@ -391,13 +408,13 @@ def get_gtfs_positions():
 
 
 @app.get("/api/hvv/gtfs/lines.geojson", tags=["hvv_gtfs"])
-def get_gtfs_lines():
-    return _read_cached_json("hvv:gtfs:reference_lines")
+def get_gtfs_lines(request: Request):
+    return _gtfs_lines_cache.response(request)
 
 
 @app.get("/api/hvv/gtfs/stops.geojson", tags=["hvv_gtfs"])
-def get_gtfs_stops():
-    return _read_cached_json("hvv:gtfs:reference_stops")
+def get_gtfs_stops(request: Request):
+    return _gtfs_stops_cache.response(request)
 
 
 if __name__ == "__main__":
