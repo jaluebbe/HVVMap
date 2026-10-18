@@ -190,6 +190,7 @@ def _route_rows(
         match = stop["match"]
         return {
             "station": stop["station"],
+            "station_id": station["id"] if station else stop.get("station_id"),
             "planned": planned,
             "arr": station["arr"] if station else None,
             "dep": (station["dep"] if station and station["dep"] else planned),
@@ -229,6 +230,7 @@ def _route_rows(
         rows.append(
             {
                 "station": station["name"],
+                "station_id": station["id"],
                 "planned": at.strftime("%H:%M") if at else None,
                 "arr": station["arr"],
                 "dep": station["dep"] or (at.strftime("%H:%M") if at else None),
@@ -614,6 +616,7 @@ def build_trip_table(
                 "id": trip["id"],
                 "service_id": trip["service_id"],
                 "line": trip["line"],
+                "line_id": (trip["line_obj"] or {}).get("id", ""),
                 "mode": _mode_label(trip["line_obj"]),
                 "direction_id": trip["direction_id"],
                 "destination": trip["destination"],
