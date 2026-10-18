@@ -4,7 +4,7 @@ data (see departures.py) and the stored sublines.
 
 import sqlite3
 
-from hvv_map.gti_shapes import subline_hops
+from hvv_map.gti_shapes import is_real_track, subline_hops
 from hvv_map.lines import LINE_COLORS, replacement_bus_mode
 from hvv_map.stations import StationInfo
 
@@ -102,12 +102,12 @@ def _subline_coordinates(
 def _hop_runs(station_ids: tuple[str, ...], shapes_conn) -> list[tuple[bool, tuple]]:
     """Consecutive hops grouped by whether each has a real track:
     [(is_real, station ids of the run), ...]. A stored segment of just two
-    points is the straight-line fallback gti_shapes keeps when
-    departureCourse returned no track (typical for replacement buses), so it
-    counts as straight. A hop may span skipped stops (see subline_hops)."""
+    points, or one with a long gap, is a straight-line fallback (typical for
+    replacement buses or incomplete departureCourse tracks), so it counts as
+    straight. A hop may span skipped stops (see subline_hops)."""
     runs: list[tuple[bool, list[str]]] = []
     for a, b, segment in subline_hops(shapes_conn, station_ids):
-        real = segment is not None and len(segment) > 2
+        real = is_real_track(segment)
         if runs and runs[-1][0] == real:
             runs[-1][1].append(b)
         else:
