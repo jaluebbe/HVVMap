@@ -416,3 +416,15 @@ def test_gtfs_reference_layers_are_served_from_cache(client, path, redis_key):
         ).status_code
         == 304
     )
+
+
+def test_static_cache_headers(client, tmp_path):
+    (tmp_path / "static" / "maplibre-gl").mkdir()
+    (tmp_path / "static" / "maplibre-gl" / "lib.js").write_text("x")
+    (tmp_path / "fonts" / "f.pbf").write_bytes(b"x")
+    assert client.get("/static/index.html").headers["cache-control"] == "no-cache"
+    assert (
+        "max-age=604800"
+        in client.get("/static/maplibre-gl/lib.js").headers["cache-control"]
+    )
+    assert "max-age=604800" in client.get("/fonts/f.pbf").headers["cache-control"]
