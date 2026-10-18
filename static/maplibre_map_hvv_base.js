@@ -740,7 +740,7 @@ function initHvvVehicleLayers(initialSourceKey) {
             });
         });
 
-        // GL layers have no Leaflet-style bindTooltip(); this popup is the equivalent.
+        // Hover popup for the vehicle, stop and disruption layers.
         hoverLayers.forEach(function(layerId) {
             map.on('mouseenter', layerId, function(e) {
                 map.getCanvas().style.cursor = 'pointer';
@@ -905,7 +905,7 @@ function initHvvVehicleLayers(initialSourceKey) {
                         entry.marker.remove();
                     }
                     const element = buildMarkerElement(properties);
-                    // anchor:'top-left' matches Leaflet's iconAnchor:[0,0]; icon re-centers via CSS transform.
+                    // anchor 'top-left'; the icon re-centers via CSS transform.
                     const marker = new maplibregl.Marker({ element, anchor: 'top-left' })
                         .setLngLat(feature.geometry.coordinates)
                         .addTo(map);
