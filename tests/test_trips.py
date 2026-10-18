@@ -504,3 +504,53 @@ def test_unshared_alias_stops_keep_their_own_delay():
 
     assert [s["delay"] for s in alias["stops"]] == [60, 300]
     assert rows[1]["delay"] is None
+
+
+def _vehicle_table(vehicles, memory=None, live_departures=True):
+    deps = [_live("U1", "A", 2, 6, vehicles=vehicles)] if live_departures else []
+    return build_trip_table(
+        PLAN,
+        PLAN_ANCHOR,
+        {"anchor": LIVE_ANCHOR, "departures": deps},
+        None,
+        memory,
+    )
+
+
+def test_vehicles_are_remembered_while_the_trip_has_no_live_entry():
+    from hvv_map.trips import remember_vehicles
+
+    memory = {}
+    first = _vehicle_table([{"id": "x", "number": "417"}])
+    assert remember_vehicles(memory, first, 1000) is True
+
+    later = _vehicle_table([], memory, live_departures=False)["trips"][0]
+
+    assert later["vehicles"] == "DT5.1 (417)"
+    assert later["model"] == "DT5"
+    assert later["vehicles_remembered"] is True
+
+
+def test_live_vehicles_win_over_the_memory_and_are_not_flagged():
+    from hvv_map.trips import remember_vehicles
+
+    memory = {}
+    remember_vehicles(memory, _vehicle_table([{"id": "x", "number": "417"}]), 1000)
+
+    row = _vehicle_table([{"id": "y", "number": "355"}], memory)["trips"][0]
+
+    assert row["vehicles"] == "DT5.1 (355)"
+    assert row["vehicles_remembered"] is False
+
+
+def test_remembering_is_idempotent_and_forgets_old_trips():
+    from hvv_map.trips import VEHICLE_MEMORY_SECONDS, remember_vehicles
+
+    memory = {}
+    table = _vehicle_table([{"id": "x", "number": "417"}])
+    assert remember_vehicles(memory, table, 1000) is True
+    assert remember_vehicles(memory, table, 1060) is False
+    assert len(memory) == 1
+
+    assert remember_vehicles(memory, {"trips": []}, 1000 + VEHICLE_MEMORY_SECONDS + 1)
+    assert memory == {}

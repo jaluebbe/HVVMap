@@ -20,10 +20,16 @@ from hvv_map.redis_client import get_redis_client
 from hvv_map.stations import StationInfo, by_id, load_stations
 from hvv_map.trip_courses import REDIS_COURSES_KEY
 from hvv_map.trip_position import AT_STOP, BETWEEN, Position, locate, stops_from_row
-from hvv_map.trips import STATUS_CANCELLED, build_trip_table
+from hvv_map.trips import (
+    REDIS_VEHICLES_KEY,
+    STATUS_CANCELLED,
+    build_trip_table,
+    remember_vehicles,
+)
 
 REDIS_POSITIONS_KEY = "hvv:positions_gtilive"
 POSITIONS_TTL = 120
+VEHICLES_TTL = 24 * 3600
 POSITIONS_INTERVAL = 1.0  # seconds between recomputations
 RELOAD_INTERVAL = 10.0  # seconds between checks for new source data
 
@@ -198,6 +204,7 @@ class PositionsState:
         self.table: dict | None = None
         self.stations: dict[str, StationInfo] = {}
         self.tracks: dict = {}
+        self.memory: dict | None = None  # trip vehicles, see trips.remember_vehicles
 
 
 def _refresh(redis_client, state: PositionsState) -> bool:
@@ -211,12 +218,22 @@ def _refresh(redis_client, state: PositionsState) -> bool:
     if not (plan and anchor and live):
         return False
     if raw != state.raw:
+        if state.memory is None:
+            stored = redis_client.get(REDIS_VEHICLES_KEY)
+            state.memory = json.loads(stored)["data"] if stored else {}
         state.table = build_trip_table(
             json.loads(plan)["data"],
             parse_anchor(json.loads(anchor)["data"]),
             json.loads(live)["data"],
             json.loads(courses)["data"] if courses else {},
+            state.memory,
         )
+        if remember_vehicles(state.memory, state.table, time.time()):
+            redis_client.set(
+                REDIS_VEHICLES_KEY,
+                json.dumps({"fetched_at": int(time.time()), "data": state.memory}),
+                ex=VEHICLES_TTL,
+            )
         state.stations = by_id(load_stations(redis_client))
         state.tracks = {}
         state.raw = raw

@@ -32,6 +32,9 @@ def _row(**extra):
         "line_id": "HHA-U:U1_HHA-U",
         "mode": "U",
         "model": "DT5",
+        "vehicles": "",
+        "vehicles_remembered": False,
+        "course_key": "1@2026-10-17T09:00",
         "destination": "D",
         "status": "bestätigt",
         "stops": [
@@ -249,3 +252,20 @@ def test_other_modes_keep_the_model_in_the_popup():
     [feature] = _positions(_row(mode="S", vehicles="4711"))
 
     assert feature["properties"]["text"] == "D<br>DT5"
+
+
+def test_run_positions_persists_the_vehicle_memory(monkeypatch):
+    import json
+
+    from hvv_map import trip_positions as module
+
+    row = _row(vehicles="DT5.1 (417)")
+    redis_client = _redis_with_source_data(module)
+    monkeypatch.setattr(module, "parse_anchor", lambda data: None)
+    monkeypatch.setattr(module, "load_stations", lambda client: [])
+    monkeypatch.setattr(module, "build_trip_table", lambda *a: {"trips": [row]})
+
+    module.run_positions(redis_client, None, NOW, module.PositionsState())
+
+    stored = json.loads(redis_client.values[module.REDIS_VEHICLES_KEY])["data"]
+    assert stored[row["course_key"]]["vehicles"] == "DT5.1 (417)"

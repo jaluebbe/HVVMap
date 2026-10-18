@@ -33,7 +33,7 @@ from hvv_map.gtilive_geojson import (
 )
 from hvv_map.redis_client import get_redis_client
 from hvv_map.stations import by_id, load_stations
-from hvv_map.trips import build_trip_table
+from hvv_map.trips import REDIS_VEHICLES_KEY, build_trip_table
 
 mimetypes.add_type("text/javascript", ".cjs")
 
@@ -321,7 +321,11 @@ def get_trips():
     live_payload = _read_cached_payload(REDIS_LIVE_KEY)
     raw_courses = _redis_client.get(REDIS_TRIP_COURSES_KEY)
     courses = json.loads(raw_courses)["data"] if raw_courses else {}
-    table = build_trip_table(plan, _read_anchor(), live_payload["data"], courses)
+    raw_vehicles = _redis_client.get(REDIS_VEHICLES_KEY)
+    memory = json.loads(raw_vehicles)["data"] if raw_vehicles else {}
+    table = build_trip_table(
+        plan, _read_anchor(), live_payload["data"], courses, memory
+    )
     return {"fetched_at": live_payload.get("fetched_at"), **table}
 
 
