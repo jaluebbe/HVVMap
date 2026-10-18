@@ -27,6 +27,11 @@ STATUS_CONFIRMED = "bestätigt"
 STATUS_NOT_SEEN = "nicht gesehen"
 STATUS_CANCELLED = "ausgefallen"
 STATUS_BETWEEN = "zwischen Ankern"  # running, no anchor stop in the live window
+STATUS_MISSING = "vermutlich ausgefallen"  # expected in the live window, never seen
+# Only where live coverage is dense, a trip absent from the live window is
+# taken as not running (and only while its line shows up live at all).
+MISSING_MODES = {"U", "S"}
+MISSING_PREFIX = "missing:"  # memory key prefix, see remember_missing
 
 
 def _is_trip_line(line: dict) -> bool:
@@ -46,6 +51,7 @@ _COUNTER_KEY = {
     STATUS_NOT_SEEN: "not_seen",
     STATUS_CANCELLED: "cancelled",
     STATUS_BETWEEN: "between",
+    STATUS_MISSING: "missing",
 }
 
 
@@ -505,6 +511,29 @@ def remember_vehicles(memory: dict, table: dict, now_ts: float) -> bool:
     return changed
 
 
+def _is_missing(trip: dict, status: str, per_line: dict, memory: dict | None) -> bool:
+    """A trip never seen live although its anchor stop was due in the live
+    window, on a line whose other trips are seen live; or one already judged
+    so earlier."""
+    if _mode_label(trip["line_obj"]) not in MISSING_MODES:
+        return False
+    if MISSING_PREFIX + course_key(trip) in (memory or {}):
+        return True
+    return status == STATUS_NOT_SEEN and per_line[trip["line"]]["matched"] > 0
+
+
+def remember_missing(memory: dict, table: dict, now_ts: float) -> bool:
+    """Remember trips judged missing, so they stay so once their expected
+    stop has left the live window. True if `memory` changed."""
+    changed = False
+    for row in table["trips"]:
+        key = MISSING_PREFIX + row["course_key"]
+        if row["status"] == STATUS_MISSING and key not in memory:
+            memory[key] = {"seen_at": now_ts}
+            changed = True
+    return changed
+
+
 def build_trip_table(
     by_service: dict,
     plan_anchor: datetime | None,
@@ -536,6 +565,7 @@ def build_trip_table(
             "not_seen": 0,
             "cancelled": 0,
             "between": 0,
+            "missing": 0,
         }
     )
 
@@ -648,6 +678,8 @@ def build_trip_table(
                 if expected
                 else STATUS_BETWEEN
             )
+            if not matched and _is_missing(trip, status, per_line, vehicle_memory):
+                status = STATUS_MISSING
         vehicles = [v for s in matched for v in s["match"]["_vehicles"]]
         unique = list({(v.get("id"), v.get("number")): v for v in vehicles}.values())
         delays = [
@@ -724,6 +756,7 @@ def build_trip_table(
             "not_seen": sum(r["status"] == STATUS_NOT_SEEN for r in rows),
             "cancelled": sum(r["status"] == STATUS_CANCELLED for r in rows),
             "between": sum(r["status"] == STATUS_BETWEEN for r in rows),
+            "missing": sum(r["status"] == STATUS_MISSING for r in rows),
             "extra": sum(e["extra"] for e in live_only),
             "by_line": {
                 name: per_line[name] for name in sorted(per_line, key=_natural_key)

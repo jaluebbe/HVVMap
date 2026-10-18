@@ -554,3 +554,43 @@ def test_remembering_is_idempotent_and_forgets_old_trips():
 
     assert remember_vehicles(memory, {"trips": []}, 1000 + VEHICLE_MEMORY_SECONDS + 1)
     assert memory == {}
+
+
+def _missing_plan():
+    plan = dict(PLAN)
+    plan["2"] = _plan_entry("U1", 6, [("C", 303), ("D", 308)])
+    return plan
+
+
+def test_unseen_trip_is_missing_when_its_line_is_seen_live():
+    live = {"anchor": LIVE_ANCHOR, "departures": [_live("U1", "A", 2, 6)]}
+
+    table = build_trip_table(_missing_plan(), PLAN_ANCHOR, live)
+
+    status = {t["service_id"]: t["status"] for t in table["trips"]}
+    assert status == {"1": "bestätigt", "2": "vermutlich ausgefallen"}
+    assert table["summary"]["missing"] == 1
+
+
+def test_unseen_trip_stays_not_seen_without_any_live_match_on_its_line():
+    live = {"anchor": LIVE_ANCHOR, "departures": [_live("U2", "X", 2, 6)]}
+
+    table = build_trip_table(_missing_plan(), PLAN_ANCHOR, live)
+
+    assert {t["status"] for t in table["trips"]} == {"nicht gesehen"}
+
+
+def test_missing_trip_is_remembered_after_it_left_the_window():
+    from hvv_map.trips import remember_missing
+
+    live = {"anchor": LIVE_ANCHOR, "departures": [_live("U1", "A", 2, 6)]}
+    table = build_trip_table(_missing_plan(), PLAN_ANCHOR, live)
+    memory: dict = {}
+    assert remember_missing(memory, table, 1000.0)
+    assert not remember_missing(memory, table, 1001.0)
+
+    later = {"anchor": {"date": "2026-10-17", "time": "09:05:00"}, "departures": []}
+    table = build_trip_table(_missing_plan(), PLAN_ANCHOR, later, None, memory)
+
+    status = {t["service_id"]: t["status"] for t in table["trips"]}
+    assert status["2"] == "vermutlich ausgefallen"

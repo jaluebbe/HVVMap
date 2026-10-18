@@ -234,7 +234,9 @@ def test_vehicle_on_a_stored_track_is_not_flagged_straight():
     from hvv_map.gti_shapes import open_db, store_segment
 
     conn = open_db(":memory:")
-    store_segment(conn, "A", "B", [[0, 53.5], [0.03, 53.52], [0.06, 53.52], [0.1, 53.5]])
+    store_segment(
+        conn, "A", "B", [[0, 53.5], [0.03, 53.52], [0.06, 53.52], [0.1, 53.5]]
+    )
 
     [feature] = build_positions({"trips": [_row()]}, NOW, STATIONS, conn)["features"]
 
@@ -269,3 +271,9 @@ def test_run_positions_persists_the_vehicle_memory(monkeypatch):
 
     stored = json.loads(redis_client.values[module.REDIS_VEHICLES_KEY])["data"]
     assert stored[row["course_key"]]["vehicles"] == "DT5.1 (417)"
+
+
+def test_missing_trip_is_not_placed_on_the_map():
+    row = {**_row(), "status": "vermutlich ausgefallen"}
+
+    assert build_positions({"trips": [row]}, NOW, STATIONS)["features"] == []
