@@ -562,7 +562,7 @@ def _missing_plan():
     return plan
 
 
-def test_unseen_trip_is_missing_when_its_line_is_seen_live():
+def test_unseen_trip_is_missing_when_the_live_query_returns_departures():
     live = {"anchor": LIVE_ANCHOR, "departures": [_live("U1", "A", 2, 6)]}
 
     table = build_trip_table(_missing_plan(), PLAN_ANCHOR, live)
@@ -572,8 +572,16 @@ def test_unseen_trip_is_missing_when_its_line_is_seen_live():
     assert table["summary"]["missing"] == 1
 
 
-def test_unseen_trip_stays_not_seen_without_any_live_match_on_its_line():
+def test_unseen_trip_is_missing_even_if_its_own_line_is_absent_live():
     live = {"anchor": LIVE_ANCHOR, "departures": [_live("U2", "X", 2, 6)]}
+
+    table = build_trip_table(_missing_plan(), PLAN_ANCHOR, live)
+
+    assert {t["status"] for t in table["trips"]} == {"vermutlich ausgefallen"}
+
+
+def test_unseen_trip_stays_not_seen_when_the_live_query_is_empty():
+    live = {"anchor": LIVE_ANCHOR, "departures": []}
 
     table = build_trip_table(_missing_plan(), PLAN_ANCHOR, live)
 

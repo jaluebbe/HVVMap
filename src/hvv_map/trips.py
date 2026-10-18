@@ -29,8 +29,10 @@ STATUS_CANCELLED = "ausgefallen"
 STATUS_BETWEEN = "zwischen Ankern"  # running, no anchor stop in the live window
 STATUS_MISSING = "vermutlich ausgefallen"  # expected in the live window, never seen
 # Only where live coverage is dense, a trip absent from the live window is
-# taken as not running (and only while its line shows up live at all).
+# taken as not running - and only while the live query itself returns
+# departures (of any of the modes below), i.e. is evidently working.
 MISSING_MODES = {"U", "S"}
+LIVE_QUERY_MODES = {"U", "S", "AKN", "FERRY"}  # one departureList category
 MISSING_PREFIX = "missing:"  # memory key prefix, see remember_missing
 
 
@@ -511,10 +513,12 @@ def remember_vehicles(memory: dict, table: dict, now_ts: float) -> bool:
     return changed
 
 
-def _is_missing(trip: dict, status: str, per_line: dict, memory: dict | None) -> bool:
+def _is_missing(
+    trip: dict, status: str, live_working: bool, memory: dict | None
+) -> bool:
     """A trip never seen live although its anchor stop was due in the live
-    window, on a line whose other trips are seen live; or one already judged
-    so earlier. A trip with remembered vehicles was seen, so never."""
+    window while the live query works; or one already judged so earlier. A
+    trip with remembered vehicles was seen, so never."""
     if _mode_label(trip["line_obj"]) not in MISSING_MODES:
         return False
     remembered = memory or {}
@@ -522,7 +526,7 @@ def _is_missing(trip: dict, status: str, per_line: dict, memory: dict | None) ->
         return False  # its vehicles were seen live earlier in this run
     if MISSING_PREFIX + course_key(trip) in remembered:
         return True
-    return status == STATUS_NOT_SEEN and per_line[trip["line"]]["matched"] > 0
+    return status == STATUS_NOT_SEEN and live_working
 
 
 def remember_missing(memory: dict, table: dict, now_ts: float) -> bool:
@@ -559,6 +563,7 @@ def build_trip_table(
     window_end = live_anchor + timedelta(minutes=LIVE_WINDOW_MINUTES)
 
     live_only, quality_counts, live_total = [], defaultdict(int), 0
+    live_working = False
     per_line: dict[str, dict] = defaultdict(
         lambda: {
             "live": 0,
@@ -590,6 +595,7 @@ def build_trip_table(
         if not _is_trip_line(line) or dep.get("timeOffset") is None:
             continue
         live_total += 1
+        live_working = live_working or mode_for_line(line) in LIVE_QUERY_MODES
         planned = live_anchor + timedelta(minutes=dep["timeOffset"])
         entry = _live_entry(dep, planned)
         per_line[entry["line"]]["live"] += 1
@@ -681,7 +687,7 @@ def build_trip_table(
                 if expected
                 else STATUS_BETWEEN
             )
-            if not matched and _is_missing(trip, status, per_line, vehicle_memory):
+            if not matched and _is_missing(trip, status, live_working, vehicle_memory):
                 status = STATUS_MISSING
         vehicles = [v for s in matched for v in s["match"]["_vehicles"]]
         unique = list({(v.get("id"), v.get("number")): v for v in vehicles}.values())
