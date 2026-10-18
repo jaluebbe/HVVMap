@@ -554,3 +554,26 @@ def test_remembering_is_idempotent_and_forgets_old_trips():
 
     assert remember_vehicles(memory, {"trips": []}, 1000 + VEHICLE_MEMORY_SECONDS + 1)
     assert memory == {}
+
+
+def test_trip_stays_listed_after_its_last_anchor_while_the_course_continues():
+    from hvv_map.trips import course_key, _plan_trips
+
+    plan = {"1": _plan_entry("U1", 6, [("A", 290), ("B", 295)])}
+    course = {
+        "stops": [
+            {
+                "id": sid,
+                "name": sid,
+                "dep": f"2026-10-17T{t}",
+                "arr": None,
+                "dep_delay": None,
+            }
+            for sid, t in (("A", "08:50"), ("B", "08:55"), ("C", "09:30"))
+        ]
+    }
+    key = course_key(_plan_trips(plan, PLAN_ANCHOR)[0])
+    live = {"anchor": LIVE_ANCHOR, "departures": []}
+    assert build_trip_table(plan, PLAN_ANCHOR, live)["trips"] == []
+    trips = build_trip_table(plan, PLAN_ANCHOR, live, {key: course})["trips"]
+    assert [t["status"] for t in trips] == ["zwischen Ankern"]

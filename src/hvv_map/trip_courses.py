@@ -13,7 +13,13 @@ from hvv_map.departures_tree import parse_anchor
 from hvv_map.gti_client import GtiClient
 from hvv_map.redis_client import get_redis_client
 from hvv_map.departures_live import REDIS_LIVE_KEY
-from hvv_map.trips import _plan_trips, alias_course_key, build_trip_table, course_key
+from hvv_map.trips import (
+    _plan_trips,
+    alias_course_key,
+    build_trip_table,
+    course_key,
+    trip_end,
+)
 
 BERLIN_TZ = ZoneInfo("Europe/Berlin")
 REDIS_COURSES_KEY = "hvv:trips:courses"
@@ -121,8 +127,8 @@ def _is_current(entry: dict | None, running: bool = False) -> bool:
     return not running or age < COURSE_REFRESH_SECONDS
 
 
-def _is_running(trip: dict, now: datetime) -> bool:
-    first, last = trip["stops"][0]["planned"], trip["stops"][-1]["planned"]
+def _is_running(trip: dict, now: datetime, course: dict | None = None) -> bool:
+    first, last = trip["stops"][0]["planned"], trip_end(trip, course)
     slack = timedelta(minutes=COURSE_RUNNING_SLACK_MINUTES)
     return first <= now <= last + slack
 
@@ -134,7 +140,10 @@ def due_trips(trips: list[dict], cached: dict, now: datetime) -> list[dict]:
     due = [
         trip
         for trip in trips
-        if not _is_current(cached.get(course_key(trip)), _is_running(trip, now))
+        if not _is_current(
+            cached.get(course_key(trip)),
+            _is_running(trip, now, cached.get(course_key(trip))),
+        )
         and any(now <= stop["planned"] <= end for stop in trip["stops"])
     ]
     due.sort(

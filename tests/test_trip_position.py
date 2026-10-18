@@ -84,7 +84,13 @@ def test_terminus_stays_for_the_dwell_then_trip_is_over():
 
 def test_trip_without_times_has_no_position():
     assert locate([], at(0)) is None
-    assert locate([stop(dep=0), stop()], at(0)) is None
+    assert locate([stop(dep=0), stop(), stop(arr=9)], at(0)) is None
+
+
+def test_stops_without_times_after_the_last_known_one_are_ignored():
+    trip = [stop(dep=0), stop(arr=4, dep=5), stop(), stop()]
+    assert locate(trip, at(2)).state == BETWEEN
+    assert locate(trip, at(30)).state == AFTER
 
 
 def test_stops_from_row_resolves_times_across_midnight():

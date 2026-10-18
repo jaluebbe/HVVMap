@@ -77,6 +77,10 @@ def timeline(stops: list[dict], ferry: bool = False) -> list[tuple[datetime, dat
 
 def locate(stops: list[dict], now: datetime, ferry: bool = False) -> Position | None:
     """Position at `now`; None for a trip without stop times."""
+    # Stops past the last known time (course not fetched yet) are dropped;
+    # a gap before a timed stop leaves the trip unplaceable.
+    while stops and not (stops[-1].get("arr") or stops[-1].get("dep")):
+        stops = stops[:-1]
     if not stops or any(not (s.get("arr") or s.get("dep")) for s in stops):
         return None
     times = timeline(apply_delay(stops), ferry)
