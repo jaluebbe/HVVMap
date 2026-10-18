@@ -89,7 +89,9 @@ def test_ambiguous_plan_stops_without_direction_stay_unmatched():
 
 def test_plan_trip_inside_the_window_without_live_entry_is_not_seen():
     live = {"anchor": LIVE_ANCHOR, "departures": []}
-    table = build_trip_table(PLAN, PLAN_ANCHOR, live)
+    table = build_trip_table(
+        PLAN, PLAN_ANCHOR, live, None, None, datetime(2026, 10, 17, 9, 30)
+    )
     assert [t["status"] for t in table["trips"]] == ["nicht gesehen"]
     assert table["summary"]["not_seen"] == 1
 
@@ -562,7 +564,7 @@ def _missing_plan():
     return plan
 
 
-def test_unseen_trip_is_missing_when_the_live_query_returns_departures():
+def test_unseen_trip_is_missing_while_the_live_data_is_fresh():
     live = {"anchor": LIVE_ANCHOR, "departures": [_live("U1", "A", 2, 6)]}
 
     table = build_trip_table(_missing_plan(), PLAN_ANCHOR, live)
@@ -572,18 +574,19 @@ def test_unseen_trip_is_missing_when_the_live_query_returns_departures():
     assert table["summary"]["missing"] == 1
 
 
-def test_unseen_trip_is_missing_even_if_its_own_line_is_absent_live():
-    live = {"anchor": LIVE_ANCHOR, "departures": [_live("U2", "X", 2, 6)]}
+def test_unseen_trip_is_missing_even_if_nothing_at_all_is_live():
+    live = {"anchor": LIVE_ANCHOR, "departures": []}
 
     table = build_trip_table(_missing_plan(), PLAN_ANCHOR, live)
 
     assert {t["status"] for t in table["trips"]} == {"vermutlich ausgefallen"}
 
 
-def test_unseen_trip_stays_not_seen_when_the_live_query_is_empty():
+def test_unseen_trip_stays_not_seen_when_the_live_data_is_stale():
     live = {"anchor": LIVE_ANCHOR, "departures": []}
+    now = datetime(2026, 10, 17, 9, 10)
 
-    table = build_trip_table(_missing_plan(), PLAN_ANCHOR, live)
+    table = build_trip_table(_missing_plan(), PLAN_ANCHOR, live, None, None, now)
 
     assert {t["status"] for t in table["trips"]} == {"nicht gesehen"}
 
@@ -604,13 +607,20 @@ def test_missing_trip_is_remembered_after_it_left_the_window():
     assert status["2"] == "vermutlich ausgefallen"
 
 
-def test_trip_with_remembered_vehicles_is_not_missing():
+def test_missing_trip_seen_live_after_all_is_forgotten():
+    from hvv_map.trips import remember_missing
+
     live = {"anchor": LIVE_ANCHOR, "departures": [_live("U1", "A", 2, 6)]}
-    first = build_trip_table(_missing_plan(), PLAN_ANCHOR, live)
-    key = next(t["course_key"] for t in first["trips"] if t["service_id"] == "2")
-    memory = {key: {"vehicles": "DT5 (1)", "model": "DT5", "seen_at": 1.0}}
+    memory: dict = {}
+    remember_missing(memory, build_trip_table(_missing_plan(), PLAN_ANCHOR, live), 1.0)
+    assert memory
 
-    table = build_trip_table(_missing_plan(), PLAN_ANCHOR, live, None, memory)
+    late = {
+        "anchor": LIVE_ANCHOR,
+        "departures": [_live("U1", "C", 3, 6, service_id=2)],
+    }
+    table = build_trip_table(_missing_plan(), PLAN_ANCHOR, late, None, memory)
 
-    status = {t["service_id"]: t["status"] for t in table["trips"]}
-    assert status["2"] == "nicht gesehen"
+    assert {t["service_id"]: t["status"] for t in table["trips"]}["2"] == "bestätigt"
+    assert remember_missing(memory, table, 2.0)
+    assert list(memory) == ["missing:1@2026-10-17T09:02"]

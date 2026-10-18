@@ -29,10 +29,9 @@ STATUS_CANCELLED = "ausgefallen"
 STATUS_BETWEEN = "zwischen Ankern"  # running, no anchor stop in the live window
 STATUS_MISSING = "vermutlich ausgefallen"  # expected in the live window, never seen
 # Only where live coverage is dense, a trip absent from the live window is
-# taken as not running - and only while the live query itself returns
-# departures (of any of the modes below), i.e. is evidently working.
+# taken as not running - and only while the live data is fresh.
 MISSING_MODES = {"U", "S"}
-LIVE_QUERY_MODES = {"U", "S", "AKN", "FERRY"}  # one departureList category
+LIVE_FRESH_MINUTES = 3
 MISSING_PREFIX = "missing:"  # memory key prefix, see remember_missing
 
 
@@ -513,30 +512,29 @@ def remember_vehicles(memory: dict, table: dict, now_ts: float) -> bool:
     return changed
 
 
-def _is_missing(
-    trip: dict, status: str, live_working: bool, memory: dict | None
-) -> bool:
-    """A trip never seen live although its anchor stop was due in the live
-    window while the live query works; or one already judged so earlier. A
-    trip with remembered vehicles was seen, so never."""
+def _is_missing(trip: dict, status: str, live_fresh: bool, memory: dict | None) -> bool:
+    """A trip whose anchor stop was due in the live window but never showed
+    up there while the live data is fresh; or one already judged so earlier
+    (until it shows up live again)."""
     if _mode_label(trip["line_obj"]) not in MISSING_MODES:
         return False
-    remembered = memory or {}
-    if course_key(trip) in remembered:
-        return False  # its vehicles were seen live earlier in this run
-    if MISSING_PREFIX + course_key(trip) in remembered:
+    if MISSING_PREFIX + course_key(trip) in (memory or {}):
         return True
-    return status == STATUS_NOT_SEEN and live_working
+    return status == STATUS_NOT_SEEN and live_fresh
 
 
 def remember_missing(memory: dict, table: dict, now_ts: float) -> bool:
     """Remember trips judged missing, so they stay so once their expected
-    stop has left the live window. True if `memory` changed."""
+    stop has left the live window; forget those seen live after all (e.g.
+    late). True if `memory` changed."""
     changed = False
     for row in table["trips"]:
         key = MISSING_PREFIX + row["course_key"]
         if row["status"] == STATUS_MISSING and key not in memory:
             memory[key] = {"seen_at": now_ts}
+            changed = True
+        elif row["status"] == STATUS_CONFIRMED and key in memory:
+            del memory[key]
             changed = True
     return changed
 
@@ -547,6 +545,7 @@ def build_trip_table(
     live: dict,
     courses: dict | None = None,
     vehicle_memory: dict | None = None,
+    now: datetime | None = None,
 ) -> dict:
     """Plan trips matched against the live departures:
     {"summary", "trips", "live_only"}. A live departure matches the plan
@@ -563,7 +562,9 @@ def build_trip_table(
     window_end = live_anchor + timedelta(minutes=LIVE_WINDOW_MINUTES)
 
     live_only, quality_counts, live_total = [], defaultdict(int), 0
-    live_working = False
+    live_fresh = now is None or now - live_anchor <= timedelta(
+        minutes=LIVE_FRESH_MINUTES
+    )
     per_line: dict[str, dict] = defaultdict(
         lambda: {
             "live": 0,
@@ -595,7 +596,6 @@ def build_trip_table(
         if not _is_trip_line(line) or dep.get("timeOffset") is None:
             continue
         live_total += 1
-        live_working = live_working or mode_for_line(line) in LIVE_QUERY_MODES
         planned = live_anchor + timedelta(minutes=dep["timeOffset"])
         entry = _live_entry(dep, planned)
         per_line[entry["line"]]["live"] += 1
@@ -687,7 +687,7 @@ def build_trip_table(
                 if expected
                 else STATUS_BETWEEN
             )
-            if not matched and _is_missing(trip, status, live_working, vehicle_memory):
+            if not matched and _is_missing(trip, status, live_fresh, vehicle_memory):
                 status = STATUS_MISSING
         vehicles = [v for s in matched for v in s["match"]["_vehicles"]]
         unique = list({(v.get("id"), v.get("number")): v for v in vehicles}.values())
