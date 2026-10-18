@@ -31,6 +31,8 @@ from datetime import datetime, timedelta
 from typing import TYPE_CHECKING
 from zoneinfo import ZoneInfo
 
+from hvv_map.geometry import haversine
+
 if TYPE_CHECKING:
     # Type-only: keeps gti_client's requests dependency out of this module's
     # import graph, since gtilive_geojson.py (imported by api.py) reads
@@ -138,11 +140,24 @@ def subline_hops(
     return hops
 
 
+REAL_TRACK_MAX_HOP_M = 6000.0  # longer point gaps are straight links, not track
+
+
+def is_real_track(segment: Coordinates | None) -> bool:
+    """True for a stored track: more than two points, no long straight gap."""
+    if not segment or len(segment) <= 2:
+        return False
+    return all(
+        haversine(a[0], a[1], b[0], b[1]) <= REAL_TRACK_MAX_HOP_M
+        for a, b in zip(segment, segment[1:])
+    )
+
+
 def store_segment(
     conn: sqlite3.Connection, from_id: str, to_id: str, coordinates: Coordinates
 ) -> None:
     existing = get_segment(conn, from_id, to_id)
-    if existing and len(existing) > 2 and len(coordinates) <= 2:
+    if is_real_track(existing) and not is_real_track(coordinates):
         return  # keep a real track over a straight-line fallback
     conn.execute(
         "INSERT OR REPLACE INTO segments (from_id, to_id, coordinates_json, last_seen) "

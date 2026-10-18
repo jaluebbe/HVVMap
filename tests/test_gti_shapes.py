@@ -13,6 +13,7 @@ from hvv_map.gti_shapes import (
     open_db,
     read_course_log,
     store_schedule,
+    is_real_track,
     store_segment,
     subline_key,
     subline_hops,
@@ -464,9 +465,9 @@ def test_update_gti_shapes_counts_an_http_error_and_continues(tmp_path, monkeypa
 
 def test_store_segment_keeps_a_real_track_over_a_straight_fallback():
     conn = open_db(":memory:")
-    store_segment(conn, "A", "B", [[0, 0], [1, 1], [2, 2]])
+    store_segment(conn, "A", "B", [[0, 0], [0.01, 0.01], [0.02, 0.02]])
 
-    store_segment(conn, "A", "B", [[0, 0], [2, 2]])
+    store_segment(conn, "A", "B", [[0, 0], [0.02, 0.02]])
 
     assert len(get_segment(conn, "A", "B")) == 3
 
@@ -536,3 +537,18 @@ def test_run_update_skips_derivation_without_anchor(tmp_path):
     summary, derived = run_update(_FakeClient({}), _FakeRedis({}), conn)
 
     assert summary["resolved"] == 0 and derived is None
+
+
+def test_is_real_track_rejects_two_points_and_long_gaps():
+    assert not is_real_track(None)
+    assert not is_real_track([[9.0, 53.0], [9.1, 53.0]])
+    assert is_real_track([[9.0, 53.0], [9.01, 53.0], [9.02, 53.0]])
+    assert not is_real_track([[9.0, 53.0], [9.01, 53.0], [9.2, 53.1]])
+
+
+def test_store_segment_keeps_gapless_track_over_gappy_one():
+    conn = open_db(":memory:")
+    good = [[9.0, 53.0], [9.01, 53.0], [9.02, 53.0]]
+    store_segment(conn, "A", "B", good)
+    store_segment(conn, "A", "B", [[9.0, 53.0], [9.01, 53.0], [9.3, 53.2]])
+    assert get_segment(conn, "A", "B") == good

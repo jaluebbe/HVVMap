@@ -234,7 +234,7 @@ def test_vehicle_on_a_stored_track_is_not_flagged_straight():
     from hvv_map.gti_shapes import open_db, store_segment
 
     conn = open_db(":memory:")
-    store_segment(conn, "A", "B", [[0, 53.5], [0.3, 53.6], [0.6, 53.6], [1, 53.5]])
+    store_segment(conn, "A", "B", [[0, 53.5], [0.03, 53.52], [0.06, 53.52], [0.1, 53.5]])
 
     [feature] = build_positions({"trips": [_row()]}, NOW, STATIONS, conn)["features"]
 
