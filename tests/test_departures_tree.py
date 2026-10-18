@@ -202,14 +202,9 @@ def test_refined_model_prefers_vehicle_numbers_on_ubahn():
     assert refined_model(bus, [{"number": "417"}]) == "Solobus"
 
 
-def test_vehicles_text_orders_units_by_number():
+def test_vehicles_text_keeps_the_reported_unit_order():
     vehicles = [{"number": "362", "id": "b"}, {"number": "329", "id": "a"}]
 
-    assert vehicles_text(vehicles, ubahn=True) == "DT5.1 (329), DT5.1 (362)"
+    assert vehicles_text(vehicles, ubahn=True) == "DT5.1 (362), DT5.1 (329)"
     assert vehicles_text(vehicles[::-1], ubahn=True) == "DT5.1 (329), DT5.1 (362)"
-
-
-def test_vehicles_text_puts_units_without_number_last():
-    vehicles = [{"id": "x9"}, {"number": "4711", "id": "a"}]
-
-    assert vehicles_text(vehicles) == "4711, (id x9)"
+    assert vehicles_text([{"id": "x9"}, {"number": "4711"}]) == "(id x9), 4711"
