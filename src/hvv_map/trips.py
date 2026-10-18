@@ -7,6 +7,7 @@ Pure functions over the cached payloads, so the api image needs no GTI client.
 
 from collections import defaultdict
 from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
 
 from hvv_map.gtilive_geojson import mode_for_line
 from hvv_map.departures_tree import (
@@ -33,6 +34,11 @@ STATUS_MISSING = "vermutlich ausgefallen"  # expected in the live window, never 
 MISSING_MODES = {"U", "S"}
 LIVE_FRESH_MINUTES = 3
 MISSING_PREFIX = "missing:"  # memory key prefix, see remember_missing
+
+
+def berlin_now() -> datetime:
+    """Current Berlin wall-clock time, naive like the plan and live anchors."""
+    return datetime.now(ZoneInfo("Europe/Berlin")).replace(tzinfo=None)
 
 
 def _is_trip_line(line: dict) -> bool:

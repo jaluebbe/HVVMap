@@ -21,7 +21,6 @@ from fastapi.responses import FileResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 
 from hvv_map.announcement_categories import classify_category
-from hvv_map.departures import berlin_now
 from hvv_map.departures_tree import build_station_tree, build_trip_tree, parse_anchor
 from hvv_map.gti_shapes import DEFAULT_DB_PATH as GTI_SHAPES_DB_PATH
 from hvv_map.gti_shapes import apply_derived_sublines, read_course_log
@@ -35,7 +34,7 @@ from hvv_map.gtilive_geojson import (
 from hvv_map.redis_client import get_redis_client
 from hvv_map.response_cache import CachedJsonResponse
 from hvv_map.stations import by_id, load_stations
-from hvv_map.trips import REDIS_VEHICLES_KEY, build_trip_table
+from hvv_map.trips import REDIS_VEHICLES_KEY, berlin_now, build_trip_table
 
 mimetypes.add_type("text/javascript", ".cjs")
 

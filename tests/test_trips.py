@@ -624,3 +624,15 @@ def test_missing_trip_seen_live_after_all_is_forgotten():
     assert {t["service_id"]: t["status"] for t in table["trips"]}["2"] == "bestätigt"
     assert remember_missing(memory, table, 2.0)
     assert list(memory) == ["missing:1@2026-10-17T09:02"]
+
+
+def test_api_module_imports_without_the_gti_client_dependency():
+    import subprocess
+    import sys
+
+    code = "import sys; sys.modules['requests'] = None; import hvv_map.api"
+    result = subprocess.run(
+        [sys.executable, "-c", code], capture_output=True, text=True
+    )
+
+    assert result.returncode == 0, result.stderr[-400:]
