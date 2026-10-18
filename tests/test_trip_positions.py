@@ -213,3 +213,39 @@ def test_table_is_rebuilt_only_when_the_source_data_changed(monkeypatch):
     state.checked = float("-inf")
     module.run_positions(redis_client, None, NOW, state)
     assert len(builds) == 2
+
+
+def test_vehicle_on_a_segment_without_stored_track_is_flagged_straight():
+    [feature] = _positions(_row())
+
+    assert feature["properties"]["straight"] is True
+
+
+def test_vehicle_at_a_stop_is_never_flagged_straight():
+    [feature] = _positions(_row(), datetime(2026, 10, 17, 9, 4, 40))
+
+    assert feature["properties"]["straight"] is False
+
+
+def test_vehicle_on_a_stored_track_is_not_flagged_straight():
+    from hvv_map.gti_shapes import open_db, store_segment
+
+    conn = open_db(":memory:")
+    store_segment(conn, "A", "B", [[0, 53.5], [0.3, 53.6], [0.6, 53.6], [1, 53.5]])
+
+    [feature] = build_positions({"trips": [_row()]}, NOW, STATIONS, conn)["features"]
+
+    assert feature["properties"]["straight"] is False
+    assert feature["geometry"]["coordinates"][1] > 53.5  # follows the bend
+
+
+def test_ubahn_popup_shows_the_vehicles_instead_of_the_model():
+    [feature] = _positions(_row(vehicles="DT5.1 (417)"))
+
+    assert feature["properties"]["text"] == "D<br>DT5.1 (417)"
+
+
+def test_other_modes_keep_the_model_in_the_popup():
+    [feature] = _positions(_row(mode="S", vehicles="4711"))
+
+    assert feature["properties"]["text"] == "D<br>DT5"

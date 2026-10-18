@@ -409,9 +409,10 @@ class ModeToggleControl {
     }
 }
 
-// Vehicle model isn't its own property - parsed from properties.text (DT5/Batteriegelenkbus only).
+// Vehicle class from the first three characters of the popup's second line
+// (model or vehicles): "DT5" (DT5 units), "Bat" (Batteriegelenkbus).
 const VEHICLE_MODEL_CLASSES = {
-    'Batteriegelenkbus': 'hvv-vehicle-batteriegelenkbus',
+    'Bat': 'hvv-vehicle-batteriegelenkbus',
     'DT5': 'hvv-vehicle-dt5',
 };
 
@@ -420,8 +421,8 @@ function vehicleModelFromText(text, delay) {
         return '';
     }
     const parts = text.split('<br>');
-    const modelParts = delay > 0 ? parts.slice(1, -1) : parts.slice(1);
-    return modelParts.join('');
+    const lines = delay > 0 ? parts.slice(1, -1) : parts.slice(1);
+    return (lines[0] || '').slice(0, 3);
 }
 
 function buildMarkerElement(properties) {
@@ -532,6 +533,9 @@ function initHvvVehicleLayers(initialSourceKey) {
     const activeCategories = new Set(DISRUPTION_CATEGORIES.filter((c) => c.visible).map((c) => c.key));
     const positionMarkersByMode = {};
     MODES.forEach((m) => { positionMarkersByMode[m.key] = []; });
+    // Markers by journeyID, kept across polls and moved in place.
+    const positionEntries = new Map();
+    let hoveredPositionKey = null;
     let currentSource = SOURCES.find((s) => s.key === initialSourceKey) || SOURCES[0];
     let modeToggleControl = null;
     let showStraight = false;
@@ -548,8 +552,19 @@ function initHvvVehicleLayers(initialSourceKey) {
         return lineNames.some((name) => activeLines.has(baseLineName(name)));
     }
 
+    // Vehicles on a straight station-to-station segment follow the straight-line toggle.
     function markerVisible(modeKey, marker) {
-        return activeModes.has(modeKey) && linesVisible(modeKey, [marker.hvvLine]);
+        return activeModes.has(modeKey)
+            && linesVisible(modeKey, [marker.hvvLine])
+            && (showStraight || !marker.hvvStraight);
+    }
+
+    function updateMarkerVisibility() {
+        MODES.forEach((m) => {
+            positionMarkersByMode[m.key].forEach((marker) => {
+                marker.getElement().style.display = markerVisible(m.key, marker) ? '' : 'none';
+            });
+        });
     }
 
     // Restricted pages hide disruptions without a mode.
@@ -585,11 +600,7 @@ function initHvvVehicleLayers(initialSourceKey) {
         } else {
             activeLines.delete(lineKey);
         }
-        MODES.forEach((m) => {
-            positionMarkersByMode[m.key].forEach((marker) => {
-                marker.getElement().style.display = markerVisible(m.key, marker) ? '' : 'none';
-            });
-        });
+        updateMarkerVisibility();
         renderReferenceLayer('hvv-lines');
         renderReferenceLayer('hvv-stops');
         renderDisruptionLayers();
@@ -597,6 +608,7 @@ function initHvvVehicleLayers(initialSourceKey) {
 
     function setStraightVisibility(_key, visible) {
         showStraight = visible;
+        updateMarkerVisibility();
         renderReferenceLayer('hvv-lines');
     }
 
@@ -857,43 +869,74 @@ function initHvvVehicleLayers(initialSourceKey) {
                 return;
             }
             const data = await response.json();
-            // Recreated every poll (not diffed); marker removal fires mouseleave, closing any open popup.
-            MODES.forEach((m) => {
-                positionMarkersByMode[m.key].forEach((marker) => marker.remove());
-                positionMarkersByMode[m.key] = [];
-            });
-            data.features.forEach(function(feature) {
+            const seen = new Set();
+            data.features.forEach(function(feature, index) {
                 const properties = feature.properties || {};
                 const modeKey = properties.mode;
                 if (!positionMarkersByMode[modeKey]) {
                     return; // unknown mode - shouldn't happen, but don't crash the poll
                 }
-                const element = buildMarkerElement(properties);
-                // anchor:'top-left' matches Leaflet's iconAnchor:[0,0]; icon re-centers via CSS transform.
-                const marker = new maplibregl.Marker({ element, anchor: 'top-left' })
-                    .setLngLat(feature.geometry.coordinates)
-                    .addTo(map);
-                marker.hvvLine = properties.line;
-                if (!markerVisible(modeKey, marker)) {
-                    element.style.display = 'none';
+                let key = properties.journeyID || `#${index}`;
+                if (seen.has(key)) {
+                    key = `${key}|${index}`; // duplicate id within one poll
                 }
-                if (properties.text) {
-                    // Real DOM element, so hover wires up directly (no map layer events needed).
-                    element.addEventListener('mouseenter', function() {
-                        // Extra gap above the icon so the popup doesn't sit flush against it.
-                        const halfIconHeight = (properties.iconHeight || 20) / 2;
-                        hoverPopup
-                            .setOffset(halfIconHeight)
-                            .setLngLat(feature.geometry.coordinates)
-                            .setHTML(properties.text)
-                            .addTo(map);
-                    });
-                    element.addEventListener('mouseleave', function() {
-                        hoverPopup.remove();
-                    });
+                seen.add(key);
+                // Everything buildMarkerElement renders; a change rebuilds the marker.
+                const look = JSON.stringify([modeKey, properties.icon, properties.iconHeight,
+                    properties.line, properties.label, properties.delay, properties.text]);
+                let entry = positionEntries.get(key);
+                if (entry && entry.look === look) {
+                    entry.marker.setLngLat(feature.geometry.coordinates);
+                    if (hoveredPositionKey === key) {
+                        hoverPopup.setLngLat(feature.geometry.coordinates);
+                    }
+                } else {
+                    if (entry) {
+                        entry.marker.remove();
+                    }
+                    const element = buildMarkerElement(properties);
+                    // anchor:'top-left' matches Leaflet's iconAnchor:[0,0]; icon re-centers via CSS transform.
+                    const marker = new maplibregl.Marker({ element, anchor: 'top-left' })
+                        .setLngLat(feature.geometry.coordinates)
+                        .addTo(map);
+                    marker.hvvLine = properties.line;
+                    entry = { marker, look, modeKey };
+                    positionEntries.set(key, entry);
+                    if (properties.text) {
+                        // Real DOM element, so hover wires up directly (no map layer events needed).
+                        element.addEventListener('mouseenter', function() {
+                            hoveredPositionKey = key;
+                            // Extra gap above the icon so the popup doesn't sit flush against it.
+                            const halfIconHeight = (properties.iconHeight || 20) / 2;
+                            hoverPopup
+                                .setOffset(halfIconHeight)
+                                .setLngLat(entry.marker.getLngLat())
+                                .setHTML(properties.text)
+                                .addTo(map);
+                        });
+                        element.addEventListener('mouseleave', function() {
+                            hoveredPositionKey = null;
+                            hoverPopup.remove();
+                        });
+                    }
                 }
-                positionMarkersByMode[modeKey].push(marker);
+                entry.marker.hvvStraight = Boolean(properties.straight);
             });
+            positionEntries.forEach((entry, key) => {
+                if (!seen.has(key)) {
+                    if (hoveredPositionKey === key) {
+                        hoveredPositionKey = null;
+                        hoverPopup.remove();
+                    }
+                    entry.marker.remove();
+                    positionEntries.delete(key);
+                }
+            });
+            MODES.forEach((m) => { positionMarkersByMode[m.key] = []; });
+            positionEntries.forEach((entry) => {
+                positionMarkersByMode[entry.modeKey].push(entry.marker);
+            });
+            updateMarkerVisibility();
         } catch (error) {
             console.warn('Failed to load HVV positions:', error);
         }
@@ -1008,6 +1051,8 @@ function initHvvVehicleLayers(initialSourceKey) {
             positionMarkersByMode[m.key].forEach((marker) => marker.remove());
             positionMarkersByMode[m.key] = [];
         });
+        positionEntries.clear();
+        hoveredPositionKey = null;
         disruptionRawData = null;
         DISRUPTION_CATEGORIES.forEach((c) => {
             map.getSource(`hvv-disruptions-${c.key}`).setData(EMPTY_FEATURE_COLLECTION);

@@ -12,6 +12,7 @@ from hvv_map.departures_live import REDIS_LIVE_KEY
 from hvv_map.departures_tree import parse_anchor
 from hvv_map.geojson import ICON_HEIGHT
 from hvv_map.gti_shapes import open_db as open_shapes_db
+from hvv_map.gti_shapes import subline_hops
 from hvv_map.gtilive_geojson import _subline_coordinates
 from hvv_map.lines import replacement_bus_mode
 from hvv_map.positions import _cumulative_distances, _point_at_distance
@@ -28,14 +29,18 @@ RELOAD_INTERVAL = 10.0  # seconds between checks for new source data
 
 
 def _track(start, end, stations, shapes_conn, cache):
-    """(points, cumulative distances) of a segment, memoized in `cache`."""
+    """(points, cumulative distances, straight) of a segment, memoized in
+    `cache`; straight = no stored track, just the line between stations."""
     key = (start, end)
     if key not in cache:
         coordinates = _subline_coordinates((start, end), stations, shapes_conn)
         points = [tuple(c) for c in coordinates]
-        cache[key] = (
-            (points, _cumulative_distances(points)) if len(points) > 1 else None
-        )
+        if len(points) < 2:
+            cache[key] = None
+        else:
+            hops = subline_hops(shapes_conn, (start, end))
+            real = any(segment and len(segment) > 2 for _a, _b, segment in hops)
+            cache[key] = (points, _cumulative_distances(points), not real)
     return cache[key]
 
 
@@ -45,29 +50,38 @@ def _coordinates(
     stations: dict[str, StationInfo],
     shapes_conn: sqlite3.Connection | None,
     cache: dict,
-) -> tuple[float, float] | None:
-    """Station coordinate at a stop, point on the segment's track between."""
+) -> tuple[tuple[float, float], bool] | None:
+    """(point, straight): the station at a stop, a point on the segment's
+    track between stops."""
     if position.state == AT_STOP:
         station = stations.get(ids[position.index] or "")
-        return (station.lon, station.lat) if station else None
+        return ((station.lon, station.lat), False) if station else None
     start, end = ids[position.index], ids[position.end_index]
     if not start or not end:
         return None
     track = _track(start, end, stations, shapes_conn, cache)
     if track is None:
         return None
-    points, distances = track
-    return _point_at_distance(points, distances, position.progress * distances[-1])
+    points, distances, straight = track
+    point = _point_at_distance(points, distances, position.progress * distances[-1])
+    return point, straight
 
 
 def _feature(
-    row: dict, destination: str, position: Position, point, delay: int | None
+    row: dict,
+    destination: str,
+    position: Position,
+    point,
+    delay: int | None,
+    straight: bool,
 ) -> dict:
     mode = row["mode"]
     if mode == "SEV":
         mode = replacement_bus_mode(row["line"])
     minutes = round((delay or 0) / 60)
-    text = f"{destination}<br>{row['model']}" if row.get("model") else destination
+    # second line: the U-Bahn units if known, else the vehicle model
+    detail = (row.get("vehicles") if row["mode"] == "U" else None) or row.get("model")
+    text = f"{destination}<br>{detail}" if detail else destination
     if minutes > 0:
         text = f"{text}<br>+{minutes} Minuten"
     icon = (
@@ -89,6 +103,7 @@ def _feature(
             "progress": round(position.progress or 0, 3),
             "mode": mode,
             "delay": minutes,
+            "straight": straight,
         },
     }
 
@@ -140,11 +155,12 @@ def build_positions(
         position = locate(stops, now, ferry)
         if position and position.state in (AT_STOP, BETWEEN):
             ids = [s["station_id"] for s in row["stops"]]
-            point = _coordinates(position, ids, stations, shapes_conn, cache)
-            if point:
+            placed = _coordinates(position, ids, stations, shapes_conn, cache)
+            if placed:
+                point, straight = placed
                 delay = row["stops"][position.index]["delay"]
                 features.append(
-                    _feature(row, row["destination"], position, point, delay)
+                    _feature(row, row["destination"], position, point, delay, straight)
                 )
         for alias in row["alias_courses"]:
             position = locate(_alias_stops(alias), now, ferry)
@@ -155,8 +171,9 @@ def build_positions(
             ):
                 continue
             ids = [s["id"] for s in alias["stops"]]
-            point = _coordinates(position, ids, stations, shapes_conn, cache)
-            if point:
+            placed = _coordinates(position, ids, stations, shapes_conn, cache)
+            if placed:
+                point, straight = placed
                 delay = alias["stops"][position.index]["delay"]
                 features.append(
                     _feature(
@@ -165,6 +182,7 @@ def build_positions(
                         position,
                         point,
                         delay,
+                        straight,
                     )
                 )
     return {"type": "FeatureCollection", "features": features}
