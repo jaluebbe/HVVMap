@@ -121,6 +121,9 @@ they're built directly from the static feed on first run.
   `redis-cli`
 - `hvvmap-gtfs-fetch-once` - one-shot GTFS layer build, same idea for the
   `hvv:gtfs:*` keys
+- `hvvmap-r-lines` - survey of the regional (RBAHN) lines GTI reports per
+  station and day, to decide which lines and anchor stations to add; needs
+  GTI credentials and `hvv:stations`, stores nothing (`--stations`, `--json`)
 
 ## Frontend
 
