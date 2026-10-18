@@ -127,20 +127,21 @@ vehicle-type checks) - not part of the installed package.
 
 ## Frontend
 
-`static/` ships five map pages, all served by the same `api.py`:
+`static/` ships map pages built on MapLibre GL JS, all served by the same
+`api.py`:
 
-- `leaflet_map_hvv_live.html` / `_realtime.html` / `_gtfs.html` - three
-  near-identical Leaflet pages, one per data source, sharing
-  `leaflet_map_hvv_base.js`/`leaflet_map_hvv.css`; only their positions
-  endpoint and PWA manifest differ
-- `maplibre_map_hvv_live.html` - a separate, native MapLibre GL JS
-  implementation (no Leaflet), switching between all three sources
-  (`live`/`realtime`/`gtfs`) at runtime via a dropdown, no page reload
-  needed; see `maplibre_map_hvv_base.js`'s `SOURCES`. Defaults to
-  `realtime` - see "Notable data quirks" below for why.
-- `maplibre_map_hvv_ubahn.html` - the MapLibre page restricted to the U-Bahn,
+- `maplibre_map_hvv_live.html` - all modes; the data source (`live`,
+  `realtime`, `gtfs`, `gtilive`) is switched at runtime via a dropdown, no
+  page reload needed; see `maplibre_map_hvv_base.js`'s `SOURCES`. Defaults to
+  `gtilive`.
+- `maplibre_map_hvv_ubahn.html` - the same page restricted to the U-Bahn,
   centered on Betriebshof Barmbek, with U1-U4 toggleable individually. Page
   options are set via `window.HVV_PAGE_CONFIG` (see `maplibre_map_hvv_base.js`).
+- `maplibre_map_hvv_gtilive.html` - only the `gtilive` source.
+
+The Leaflet pages were removed; the last state with them is commit
+`7eb1671` (`git checkout 7eb1671`, or
+`git show 7eb1671:static/leaflet_map_hvv_live.html`).
 
 `index.html` is the landing page linking to all of them.
 
