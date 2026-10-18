@@ -235,7 +235,7 @@ map.on('movestart', hideInfoPanel);
 map.on('zoomstart', hideInfoPanel);
 
 const HVV_POLL_INTERVAL_MS = 1_000;
-const REFERENCE_POLL_INTERVAL_MS = 60_000;
+const REFERENCE_POLL_INTERVAL_MS = 600_000;
 const DISRUPTIONS_POLL_INTERVAL_MS = 60_000;
 
 const EMPTY_FEATURE_COLLECTION = { type: 'FeatureCollection', features: [] };

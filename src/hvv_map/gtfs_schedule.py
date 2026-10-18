@@ -15,11 +15,11 @@ explicitly ignored them.
 """
 
 import csv
-import math
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
 from pathlib import Path
 
+from hvv_map.geometry import cumulative_distances, point_at_distance
 from hvv_map.gtfs_lines import FERRY_AGENCY
 from hvv_map.lines import R_BAHN_LINES
 
@@ -287,42 +287,6 @@ def find_current_segment(rows: list, target_seconds: int):
     return None
 
 
-def _haversine(lon1: float, lat1: float, lon2: float, lat2: float) -> float:
-    earth_radius = 6371000.0
-    phi1, phi2 = math.radians(lat1), math.radians(lat2)
-    dphi = math.radians(lat2 - lat1)
-    dlambda = math.radians(lon2 - lon1)
-    a = (
-        math.sin(dphi / 2) ** 2
-        + math.cos(phi1) * math.cos(phi2) * math.sin(dlambda / 2) ** 2
-    )
-    return 2 * earth_radius * math.asin(math.sqrt(a))
-
-
-def _cumulative_distances(coords: list) -> list:
-    dists = [0.0]
-    for (lon1, lat1), (lon2, lat2) in zip(coords, coords[1:]):
-        dists.append(dists[-1] + _haversine(lon1, lat1, lon2, lat2))
-    return dists
-
-
-def _point_at_distance(coords: list, dists: list, target_dist: float):
-    if target_dist <= 0:
-        return coords[0]
-    if target_dist >= dists[-1]:
-        return coords[-1]
-    for i in range(1, len(dists)):
-        if dists[i] >= target_dist:
-            seg_len = dists[i] - dists[i - 1]
-            if seg_len == 0:
-                return coords[i]
-            frac = (target_dist - dists[i - 1]) / seg_len
-            lon1, lat1 = coords[i - 1]
-            lon2, lat2 = coords[i]
-            return (lon1 + frac * (lon2 - lon1), lat1 + frac * (lat2 - lat1))
-    return coords[-1]
-
-
 def head_position(coords: list, actual_start: int, actual_end: int, now_ts: int):
     """Progress (0..1) and interpolated (lon, lat) along coords at now_ts,
     clamped to the segment's own time span. coords takes 2+ points so this
@@ -337,7 +301,7 @@ def head_position(coords: list, actual_start: int, actual_end: int, now_ts: int)
         progress = (now_ts - actual_start) / (actual_end - actual_start)
         progress = max(0.0, min(1.0, progress))
 
-    dists = _cumulative_distances(coords)
+    dists = cumulative_distances(coords)
     target_dist = progress * dists[-1]
-    head = _point_at_distance(coords, dists, target_dist)
+    head = point_at_distance(coords, dists, target_dist)
     return progress, head

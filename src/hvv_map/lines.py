@@ -133,11 +133,6 @@ def by_name(lines: list[LineInfo]) -> dict[str, LineInfo]:
     return {line.name: line for line in lines}
 
 
-def simple_types_used(lines: list[LineInfo]) -> set[str]:
-    """Distinct simpleType values present - handy for picking vehicleTypes."""
-    return {line.simple_type for line in lines if line.simple_type}
-
-
 def is_line_of_interest(line: LineInfo) -> bool:
     """U/S/AKN (incl. replacement buses) by name, ferries by carrier."""
     return (
@@ -222,23 +217,6 @@ def update_sublines_cache(client: GtiClient, redis_client: redis.Redis) -> dict:
     merged = _sublines_by_line_id(response.get("lines", []))
     store_sublines_cache(redis_client, response.get("dataReleaseID", ""), merged)
     return merged
-
-
-def index_by_start_end(lines: dict) -> dict:
-    """Nested line_name -> start_id -> end_id -> [variant] index, built from
-    the merged sublines cache. Rebuilt from scratch on read, not persisted."""
-    index: dict = {}
-    for entry in lines.values():
-        line_name = entry["line_name"]
-        for sub in entry["sublines"]:
-            stops = sub["stations"]
-            if len(stops) < 2:
-                continue
-            by_start = index.setdefault(line_name, {})
-            by_end = by_start.setdefault(stops[0]["id"], {})
-            variants = by_end.setdefault(stops[-1]["id"], [])
-            variants.append({"vehicle_type": sub["vehicle_type"], "stations": stops})
-    return index
 
 
 def main() -> None:
