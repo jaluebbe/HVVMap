@@ -331,3 +331,48 @@ def test_icon_key_is_derived_for_regional_lines_and_their_sev():
     assert icon_key_for("RE6x-SEV") == "DB-EFZ:RE6x-SEV_DB-EFZ_Z"
     assert icon_key_for("S5-SEV") == "SBH:S5-SEV_SBH_SBAHNS"
     assert icon_key_for("RE74") is None
+
+
+def test_long_hops_are_straight_links_except_on_regional_shapes():
+    from hvv_map.gtfs_geojson import _long_hop_km, _straight_hops
+
+    # dense track with one 5 km hop (0.045 deg lat ~ 5 km)
+    coords = [[10.0, 53.0 + i * 0.0003] for i in range(100)]
+    coords.append([10.0, 53.03 + 0.045])
+    coords.append([10.0, 53.03 + 0.0453])
+    assert any(_straight_hops(coords, _long_hop_km({"U"})))
+    assert not any(_straight_hops(coords, _long_hop_km({"R"})))
+    # a hop far beyond any real track section is still straight
+    coords[-1] = [10.0, 53.03 + 0.5]
+    assert any(_straight_hops(coords, _long_hop_km({"R"})))
+
+
+def test_regional_segment_with_two_distant_shape_points_is_not_straight():
+    from hvv_map.gtfs_geojson import _segment_is_straight
+
+    shape = [[10.0, 53.0 + i * 0.0003] for i in range(200)]
+    segment = [[10.0, 53.0], [10.0, 53.045]]
+    assert not _segment_is_straight(shape, segment, "R")
+    assert _segment_is_straight(shape, segment, "U")
+    assert _segment_is_straight([], segment, "R")
+    sparse = [[10.0, 53.0 + i * 0.045] for i in range(5)]
+    assert _segment_is_straight(sparse, sparse[:2], "R")
+    assert _segment_is_straight(shape, [[10.0, 53.0], [10.0, 53.5]], "R")
+
+
+def test_replacement_bus_chord_of_over_a_kilometre_is_straight():
+    from hvv_map.gtfs_geojson import _long_hop_km, _straight_hops
+
+    dense = [[10.0, 53.0 + i * 0.0003] for i in range(100)]
+    coords = dense + [[10.0, 53.03 + 0.011]]  # 1.2 km chord after dense points
+    assert any(_straight_hops(coords, _long_hop_km({"AKN"}, ["A2-SEV"])))
+    assert not any(_straight_hops(coords, _long_hop_km({"AKN"}, ["A2"])))
+
+
+def test_ubahn_chord_of_over_a_kilometre_is_straight_but_not_on_other_modes():
+    from hvv_map.gtfs_geojson import _long_hop_km, _straight_hops
+
+    dense = [[10.0, 53.0 + i * 0.0003] for i in range(100)]
+    coords = dense + [[10.0, 53.03 + 0.014]]  # 1.5 km chord
+    assert any(_straight_hops(coords, _long_hop_km({"U"})))
+    assert not any(_straight_hops(coords, _long_hop_km({"AKN"})))
