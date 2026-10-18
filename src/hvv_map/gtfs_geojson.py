@@ -150,7 +150,7 @@ def _build_point_feature(
         if mode == "R":
             # R_BAHN's default icon renders plain black - poor contrast
             # against a same-colored line. outlined=true adds a light
-            # border around it (matches geojson.py's live-source icons).
+            # border around it.
             icon_url += "&outlined=true"
         properties = {
             "journeyID": journey_id,

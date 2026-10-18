@@ -237,10 +237,8 @@ def active_service_ids(schedule: Schedule, target_date: date) -> set:
     return active
 
 
-# Mirrors the live API path's STALE_THRESHOLD_SECONDS (segment_cache.py),
-# but computed directly from the known static schedule instead of an
-# organically-grown observation cache - the full recent calendar is already
-# known in advance, so nothing needs to be "learned" from live sightings.
+# How many days back a service still counts as recently active; computed
+# from the known static calendar.
 STALE_THRESHOLD_DAYS = 6
 
 

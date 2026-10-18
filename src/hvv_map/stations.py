@@ -28,8 +28,7 @@ class StationInfo:
     lon: float
     lat: float
     # listStations' own combined display name (e.g. "Lübeck-Dänischburg IKEA"
-    # for name="IKEA", city="Lübeck") - matches the naming getVehicleMap uses
-    # in startStationName/endStationName, unlike name/city split above.
+    # for name="IKEA", city="Lübeck"), unlike name/city split above.
     # Falls back to name if listStations doesn't provide one.
     combined_name: str = ""
 

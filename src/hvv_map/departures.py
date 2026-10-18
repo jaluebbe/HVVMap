@@ -135,7 +135,7 @@ def fetch_main_departures(client: GtiClient, start: datetime) -> dict:
 def fetch_r_departures(client: GtiClient, start: datetime) -> dict:
     """24h departureList across the regional-train anchor stations, filtered
     down to WANTED_R_BAHN_LINES - RBAHN alone also returns other DB regional trains
-    passing through, same as getVehicleMap."""
+    passing through."""
     request = _build_request(ANCHOR_STATIONS_R, R_SERVICE_TYPES, start)
     response = client.send("departureList", request)
     response["departures"] = [

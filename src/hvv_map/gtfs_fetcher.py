@@ -81,8 +81,7 @@ def main() -> None:
 
 def fetch_once() -> None:
     """CLI: build all three layers once, store in Redis, then exit - for
-    manual inspection via redis-cli, mirroring fetcher.py's
-    fetch_once_vehicle_map()."""
+    manual inspection via redis-cli."""
     redis_client = get_redis_client()
     schedule = load_schedule(GTFS_DIR)
     _rebuild_reference(redis_client, schedule)
