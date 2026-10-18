@@ -276,21 +276,6 @@ def read_course_log(conn: sqlite3.Connection | None, limit: int = 500) -> dict:
     }
 
 
-def _representative_entries(by_service: dict) -> dict[str, tuple[str, dict]]:
-    """One (service_id, entry) pair per distinct resolved subline - any trip
-    on a given subline schedules the same, so the first one seen is as good
-    as any other for a single departureCourse query."""
-    chosen: dict[str, tuple[str, dict]] = {}
-    for service_id, entry in by_service.items():
-        subline = entry.get("subline")
-        if not subline:
-            continue
-        line = entry["line"]
-        key = subline_key(line.get("id", ""), tuple(s["id"] for s in subline))
-        chosen.setdefault(key, (service_id, entry))
-    return chosen
-
-
 def _entries_by_key(by_service: dict) -> dict[str, list[tuple[str, dict]]]:
     """Every (service_id, entry) per distinct resolved subline key."""
     grouped: dict[str, list[tuple[str, dict]]] = {}

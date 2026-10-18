@@ -8,7 +8,6 @@ from hvv_map.lines import (
     lines_of_interest,
     load_sublines_cache,
     replacement_bus_mode,
-    simple_types_used,
     store_sublines_cache,
     update_sublines_cache,
 )
@@ -66,11 +65,6 @@ def test_by_name():
     index = by_name(lines)
     assert index["U1"].id == "HHA-U:U1_HHA-U"
     assert "U1-ERSATZ" in index
-
-
-def test_simple_types_used_excludes_blank():
-    lines = fetch_lines(_client_with(FAKE_RESPONSE))
-    assert simple_types_used(lines) == {"U_BAHN", "BUS"}
 
 
 def test_is_line_of_interest_matches_u_s_akn_and_their_replacement_buses():

@@ -7,7 +7,6 @@ from hvv_map.gti_shapes import (
     _declared_segment_bridges,
     _departure_query,
     _extract_course,
-    _representative_entries,
     get_segment,
     is_resolved,
     load_schedule,
@@ -60,17 +59,6 @@ def test_schedule_round_trip(tmp_path):
     store_schedule(conn, "L1|A|B", 123, [{"id": "A", "name": "A", "offset": 0}])
     assert is_resolved(conn, "L1|A|B")
     assert load_schedule(conn, "L1|A|B") == [{"id": "A", "name": "A", "offset": 0}]
-
-
-def test_representative_entries_skips_unresolved_and_dedupes():
-    by_service = {
-        "1": _entry("L1", ("A", "B")),
-        "2": _entry("L1", ("A", "B")),  # same subline, second trip
-        "3": {**_entry("L1", ("A", "C")), "subline": None},  # unresolved
-    }
-    result = _representative_entries(by_service)
-    assert list(result.keys()) == ["L1|A|B"]
-    assert result["L1|A|B"][0] == "1"
 
 
 def test_departure_query_builds_iso_time_from_offset():
