@@ -17,7 +17,7 @@ from hvv_map.gtfs_schedule import (
     recently_active_service_ids,
     recently_active_shape_ids,
 )
-from hvv_map.lines import LINE_COLORS
+from hvv_map.lines import LINE_COLORS, is_regional_name
 
 BERLIN_TZ = ZoneInfo("Europe/Berlin")
 
@@ -64,24 +64,6 @@ LINE_ID_MAP = {
     "A2-SEV": "DB-EFZ:A2-SEV_DB-EFZ_Z",
     "A3-Bus": "VHH:A3-Bus_VHH",
     "S5-SEV": "SBH:S5-SEV_SBH_SBAHNS",
-    "RB81": "DB-EFZ:RB81_DB-EFZ_Z",
-    "RB71": "DB-EFZ:RB71_DB-EFZ_Z",
-    "RB61": "DB-EFZ:RB61_DB-EFZ_Z",
-    "RB60": "DB-EFZ:RB60_DB-EFZ_Z",
-    "RB31": "DB-EFZ:RB31_DB-EFZ_Z",
-    "RB38": "DB-EFZ:RB38_DB-EFZ_Z",
-    "RB41": "DB-EFZ:RB41_DB-EFZ_Z",
-    "RE1": "DB-EFZ:RE1_DB-EFZ_Z",
-    "RE3": "DB-EFZ:RE3_DB-EFZ_Z",
-    "RE4": "DB-EFZ:RE4_DB-EFZ_Z",
-    "RE5": "DB-EFZ:RE5_DB-EFZ_Z",
-    "RE6": "DB-EFZ:RE6_DB-EFZ_Z",
-    "RE6x": "DB-EFZ:RE6x_DB-EFZ_Z",
-    "RE7": "DB-EFZ:RE7_DB-EFZ_Z",
-    "RE70": "DB-EFZ:RE70_DB-EFZ_Z",
-    "RE8": "DB-EFZ:RE8_DB-EFZ_Z",
-    "RE80": "DB-EFZ:RE80_DB-EFZ_Z",
-    "RE80-SEV": "DB-EFZ:RE80-SEV_DB-EFZ_Z",
 }
 
 
@@ -143,6 +125,17 @@ def _straight_runs(coords: list) -> list[tuple[list, bool]]:
     return runs
 
 
+def icon_key_for(line_name: str) -> str | None:
+    """Icon service key of a line: the fixed map for U/S/AKN/ferry and
+    special lines, derived from the name for regional lines and their
+    replacement buses (including ones that appear spontaneously)."""
+    if line_name in LINE_ID_MAP:
+        return LINE_ID_MAP[line_name]
+    if is_regional_name(line_name):
+        return f"DB-EFZ:{line_name}_DB-EFZ_Z"
+    return None
+
+
 def _build_point_feature(
     journey_id,
     line_short_name,
@@ -154,7 +147,7 @@ def _build_point_feature(
     mode,
     straight=False,
 ):
-    icon_key = LINE_ID_MAP.get(line_short_name)
+    icon_key = icon_key_for(line_short_name)
     label = direction.split("(")[0].strip()
     if icon_key:
         icon_url = f"https://cloud.geofox.de/icon/line?height={ICON_HEIGHT}&lineKey={icon_key}&fileFormat=SVG"

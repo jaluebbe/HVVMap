@@ -59,6 +59,12 @@ ANNOUNCEMENT_FILTER_NAMES = BASE_LINE_NAMES + [FERRY_CARRIER]
 # ours - filtered client-side by name wherever it's requested.
 WANTED_R_BAHN_LINES = set(R_BAHN_LINES)
 
+
+def is_regional_name(name: str) -> bool:
+    """A wanted RB/RE line name, optionally with a replacement-bus suffix."""
+    return bool(_R_BAHN_NAME_PATTERN.match(name))
+
+
 # Which original mode a REGIONALBUS-type line stands in for, derived from
 # its name's U/S/A prefix - same convention as LINE_NAME_PATTERN.
 _REPLACEMENT_BUS_MODE_BY_PREFIX = {"U": "U", "S": "S", "A": "AKN"}

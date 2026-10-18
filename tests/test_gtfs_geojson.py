@@ -322,3 +322,12 @@ def test_long_hop_inside_a_dense_track_is_split_off_as_straight_line():
         lines[0]["geometry"]["coordinates"][-1]
         == lines[1]["geometry"]["coordinates"][0]
     )
+
+
+def test_icon_key_is_derived_for_regional_lines_and_their_sev():
+    from hvv_map.gtfs_geojson import icon_key_for
+
+    assert icon_key_for("RE1") == "DB-EFZ:RE1_DB-EFZ_Z"
+    assert icon_key_for("RE6x-SEV") == "DB-EFZ:RE6x-SEV_DB-EFZ_Z"
+    assert icon_key_for("S5-SEV") == "SBH:S5-SEV_SBH_SBAHNS"
+    assert icon_key_for("RE74") is None
