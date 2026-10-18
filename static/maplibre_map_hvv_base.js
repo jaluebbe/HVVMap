@@ -14,7 +14,7 @@ const map = new maplibregl.Map({
     style: '/api/vector/style/positron.json',
     center: PAGE_CONFIG.center || HAMBURG_CENTER,
     zoom: PAGE_CONFIG.zoom ?? HAMBURG_DEFAULT_ZOOM,
-    minZoom: 7,
+    minZoom: 6,
     maxZoom: 18,
     attributionControl: false, // added manually below, with our own extra links
 });

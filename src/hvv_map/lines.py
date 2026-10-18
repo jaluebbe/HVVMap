@@ -28,19 +28,24 @@ URBAN_LINE_NAMES = (
     "S1", "S2", "S3", "S5", "S7",
     "A1", "A2", "A3",
 )  # fmt: skip
-R_BAHN_LINES = ("RB60", "RB61", "RB71", "RB81", "RE8", "RE80")
+R_BAHN_LINES = (
+    "RB31", "RB38", "RB41", "RB60", "RB61", "RB71", "RB81",
+    "RE1", "RE3", "RE4", "RE5", "RE6", "RE6x", "RE7", "RE70", "RE8", "RE80",
+)  # fmt: skip
 
 # U/S/AKN by name prefix (matches replacement buses too, e.g. "U1-ERSATZ",
 # "S3-SEV", via the trailing "(?:-.*)?"). Ferries are identified by carrier
 # instead (see FERRY_CARRIER), since ferry line numbers aren't distinctive.
 # The name must end right after the fixed number, or continue with "-" (a
 # replacement-bus/SEV suffix) - otherwise "RE8" would also match "RE83", an
-# unrelated line one digit longer.
+# unrelated line one digit longer. "-MV" is no SEV suffix: RE4-MV is its own
+# line (Lübeck-Schönberg).
 _R_BAHN_ALTERNATIVES = "|".join(map(re.escape, R_BAHN_LINES))
+_SUFFIX = r"(?:-(?!MV$).*)?$"
 LINE_NAME_PATTERN = re.compile(
-    r"^(?:[USA][0-9]{1,2}|" + _R_BAHN_ALTERNATIVES + r")(?:-.*)?$"
+    r"^(?:[USA][0-9]{1,2}|" + _R_BAHN_ALTERNATIVES + r")" + _SUFFIX
 )
-_R_BAHN_NAME_PATTERN = re.compile(r"^(?:" + _R_BAHN_ALTERNATIVES + r")(?:-.*)?$")
+_R_BAHN_NAME_PATTERN = re.compile(r"^(?:" + _R_BAHN_ALTERNATIVES + r")" + _SUFFIX)
 FERRY_CARRIER = "HADAG"  # the actual Hamburg harbour ferry operator
 
 # For getAnnouncements' "names" filter (accepts line names OR carrier names).
