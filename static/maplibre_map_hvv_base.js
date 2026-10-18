@@ -517,6 +517,8 @@ const ALL_SOURCES = [
         linesEndpoint: '/api/hvv/gtfs/lines.geojson',
         stopsEndpoint: '/api/hvv/gtfs/stops.geojson',
         disruptionsEndpoint: null,
+        // Shapes and segments without a track (properties.straight) get a "Luftlinien" toggle.
+        straightToggle: true,
     },
     {
         // departureList/sublines based, vehicles computed from the trip table.

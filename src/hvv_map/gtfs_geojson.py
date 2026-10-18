@@ -2,6 +2,8 @@
 loaded GTFS Schedule - purely fahrplan-based, no GTI credentials.
 """
 
+import math
+import statistics
 from datetime import date, datetime, timedelta
 from zoneinfo import ZoneInfo
 
@@ -27,6 +29,11 @@ MARKER_RADIUS = 2.5
 # earlier hvv_gtfs.py experiment, where this value was tuned against real
 # HVV data (see occupied-stops dedup below).
 ORIGIN_LEAD_SECONDS = 60
+
+# A shape is a straight-line fallback (replacement buses: one point per stop)
+# when its points are sparse; real tracks have a median spacing of ~50 m.
+SPARSE_MEDIAN_KM = 0.4
+LONG_HOP_KM = 2.0  # a single hop this long is a straight link within a track
 
 # geofox icon service lineKey format. GTFS route_short_name has no
 # equivalent field, so this mapping has to be maintained by hand - ported
@@ -102,8 +109,39 @@ def _shape_segment_coords(
     return shape_coords[start_index : end_index + 1]
 
 
+def _hop_km(a, b) -> float:
+    return math.hypot((a[0] - b[0]) * 66, (a[1] - b[1]) * 111)
+
+
+def _straight_hops(coords: list) -> list[bool]:
+    """Per hop of a polyline: True if it is a straight link, not a track."""
+    hops = [_hop_km(a, b) for a, b in zip(coords, coords[1:])]
+    if hops and statistics.median(hops) > SPARSE_MEDIAN_KM:
+        return [True] * len(hops)
+    return [hop > LONG_HOP_KM for hop in hops]
+
+
+def _straight_runs(coords: list) -> list[tuple[list, bool]]:
+    """Coordinates split into runs of consecutive hops with the same flag."""
+    flags = _straight_hops(coords)
+    runs, start = [], 0
+    for index in range(1, len(flags) + 1):
+        if index == len(flags) or flags[index] != flags[start]:
+            runs.append((coords[start : index + 1], flags[start]))
+            start = index
+    return runs
+
+
 def _build_point_feature(
-    journey_id, line_short_name, color, head, text, progress, direction, mode
+    journey_id,
+    line_short_name,
+    color,
+    head,
+    text,
+    progress,
+    direction,
+    mode,
+    straight=False,
 ):
     icon_key = LINE_ID_MAP.get(line_short_name)
     label = direction.split("(")[0].strip()
@@ -123,6 +161,7 @@ def _build_point_feature(
             "text": text,
             "progress": round(progress, 3),
             "mode": mode,
+            "straight": straight,
             "_route": line_short_name,
         }
     else:
@@ -136,6 +175,7 @@ def _build_point_feature(
             "text": text,
             "progress": round(progress, 3),
             "mode": mode,
+            "straight": straight,
             "_route": line_short_name,
         }
     return {
@@ -189,6 +229,9 @@ def _merge_colocated_features(features: list) -> list:
         merged_properties["label"] = " / ".join(labels)
         merged_properties["text"] = (
             f"{combined_direction}<br>{model}" if model else combined_direction
+        )
+        merged_properties["straight"] = all(
+            f["properties"].get("straight") for f in group
         )
         merged_properties["journeyID"] = "+".join(
             f["properties"]["journeyID"] for f in group
@@ -269,6 +312,7 @@ def build_positions_geojson(schedule: Schedule, now_ts: int) -> dict:
         if result is None:
             continue
         progress, head = result
+        straight = any(_straight_hops(coords))
 
         model = MODEL_BY_ROUTE_TYPE.get(route["route_type"], "")
         text = "<br>".join([trip["trip_headsign"], model])
@@ -283,6 +327,7 @@ def build_positions_geojson(schedule: Schedule, now_ts: int) -> dict:
                 progress,
                 trip["trip_headsign"],
                 mode,
+                straight,
             )
         )
 
@@ -377,8 +422,9 @@ def build_lines_geojson(schedule: Schedule, reference_date: date | None = None) 
     union across all trips sharing it in case that assumption doesn't hold.
 
     Replacement-bus shapes (SPECIAL_BUS_ROUTES) are often just a straight
-    start/end line in the feed, unlike the rail shapes - shown as-is for now
-    (a point-to-point line), not worth the complexity of a fallback.
+    start/end line in the feed. Straight links (see _straight_hops) are split
+    off as separate features with properties.straight, so the map can hide
+    them unless asked.
     """
     reference_date = reference_date or datetime.now(tz=BERLIN_TZ).date()
     shape_ids = recently_active_shape_ids(schedule, reference_date)
@@ -408,18 +454,20 @@ def build_lines_geojson(schedule: Schedule, reference_date: date | None = None) 
         coords = schedule.shapes.get(shape_id)
         if not coords or len(coords) < 2:
             continue
-        features.append(
-            {
-                "type": "Feature",
-                "geometry": {
-                    "type": "LineString",
-                    "coordinates": [list(c) for c in coords],
-                },
-                "properties": {
-                    "color": info["color"],
-                    "modes": sorted(info["modes"]),
-                    "lines": sorted(info["lines"]),
-                },
-            }
-        )
+        for run, straight in _straight_runs(coords):
+            features.append(
+                {
+                    "type": "Feature",
+                    "geometry": {
+                        "type": "LineString",
+                        "coordinates": [list(c) for c in run],
+                    },
+                    "properties": {
+                        "color": info["color"],
+                        "modes": sorted(info["modes"]),
+                        "lines": sorted(info["lines"]),
+                        "straight": straight,
+                    },
+                }
+            )
     return {"type": "FeatureCollection", "features": features}
