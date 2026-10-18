@@ -17,7 +17,7 @@ from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.middleware.gzip import GZipMiddleware
-from fastapi.responses import RedirectResponse
+from fastapi.responses import FileResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 
 from hvv_map.announcement_categories import classify_category
@@ -68,7 +68,12 @@ app.mount("/fonts", CachedStaticFiles(directory="fonts", long_cache=True), name=
 
 @app.get("/", include_in_schema=False)
 async def root():
-    return RedirectResponse("/static/maplibre_map_hvv_live.html")
+    return FileResponse("static/maplibre_map_hvv_gtilive.html")
+
+
+@app.get("/robots.txt", include_in_schema=False)
+async def robots():
+    return PlainTextResponse("User-agent: *\nDisallow: /api/\n")
 
 
 # --- Background vector basemap ---------------------------------------------

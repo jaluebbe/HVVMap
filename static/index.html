@@ -9,7 +9,8 @@
     <meta name="theme-color" content="#1e64a0">
     <link rel="icon" href="/static/hvv/favicon.svg" type="image/svg+xml">
     <link rel="alternate icon" href="/static/hvv/favicon.ico">
-    <title>HVVMap</title>
+    <title>HVVMap – Übersicht</title>
+    <meta name="robots" content="noindex">
     <meta http-equiv="X-UA-Compatible" content="IE=edge" />
     <meta charset="utf-8" />
     <meta name="format-detection" content="telephone=no">
@@ -31,6 +32,12 @@
         h1 {
             margin: 40px 0 24px;
             font-size: 1.5rem;
+        }
+
+        h2 {
+            margin: 24px 0 12px;
+            font-size: 1rem;
+            opacity: 0.85;
         }
 
         .options {
@@ -88,15 +95,47 @@
 </head>
 
 <body>
-    <h1>HVVMap</h1>
+    <h1>HVVMap – Übersicht</h1>
+    <h2>Karten</h2>
     <div class="options">
+        <a href="/">
+            <span class="label">Hauptkarte</span>
+            <span class="description">Startseite für Besucher, nur GTI-Live</span>
+        </a>
         <a href="/static/maplibre_map_hvv_live.html">
-            <span class="label">HVV Karte</span>
-            <span class="description">Alle Linien, Datenquelle umschaltbar</span>
+            <span class="label">Alle Datenquellen</span>
+            <span class="description">GTI-Live und GTFS, per Dropdown umschaltbar</span>
         </a>
         <a href="/static/maplibre_map_hvv_ubahn.html">
             <span class="label">U-Bahn Hamburg</span>
             <span class="description">Nur U-Bahn, Linien einzeln auswählbar</span>
+        </a>
+    </div>
+    <h2>Entwickleransichten</h2>
+    <div class="options">
+        <a href="/static/dev_gtilive_map.html">
+            <span class="label">GTI-Live-Karte</span>
+            <span class="description">Linien und Haltestellen mit Debug-Eigenschaften</span>
+        </a>
+        <a href="/static/dev_trips.html">
+            <span class="label">Fahrten</span>
+            <span class="description">Plan gegen Echtzeit</span>
+        </a>
+        <a href="/static/dev_departures.html">
+            <span class="label">Abfahrten</span>
+            <span class="description">Departures nach Haltestelle und Fahrt</span>
+        </a>
+        <a href="/static/dev_courses.html">
+            <span class="label">departureCourse-Abrufe</span>
+            <span class="description">Protokoll der Streckenabfragen</span>
+        </a>
+        <a href="/static/dev_announcements.html">
+            <span class="label">Meldungen</span>
+            <span class="description">Announcements mit Kategorien</span>
+        </a>
+        <a href="/docs">
+            <span class="label">API-Dokumentation</span>
+            <span class="description">Alle Endpunkte (OpenAPI)</span>
         </a>
     </div>
     <footer>

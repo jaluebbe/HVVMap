@@ -1,8 +1,8 @@
 {
-  "name": "HVV Map Live",
+  "name": "Hamburg Transit",
   "short_name": "HVVMap",
-  "start_url": "/static/maplibre_map_hvv_live.html",
-  "scope": "/static/maplibre_map_hvv_live.html",
+  "start_url": "/",
+  "scope": "/",
   "display": "standalone",
   "orientation": "any",
   "lang": "de",

@@ -17,6 +17,9 @@ def client(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     (tmp_path / "static").mkdir()
     (tmp_path / "static" / "index.html").write_text("<html>index</html>")
+    (tmp_path / "static" / "maplibre_map_hvv_gtilive.html").write_text(
+        "<html>map</html>"
+    )
     (tmp_path / "fonts").mkdir()
 
     conn = sqlite3.connect(osm_dir / "test.mbtiles")
@@ -51,10 +54,16 @@ def client(tmp_path, monkeypatch):
     return TestClient(api_module.app)
 
 
-def test_root_redirects_to_index(client):
+def test_root_serves_the_gtilive_map(client):
     response = client.get("/", follow_redirects=False)
-    assert response.status_code == 307
-    assert response.headers["location"] == "/static/maplibre_map_hvv_live.html"
+    assert response.status_code == 200
+    assert "<html>map</html>" in response.text
+
+
+def test_robots_txt_excludes_api(client):
+    response = client.get("/robots.txt")
+    assert response.status_code == 200
+    assert "Disallow: /api/" in response.text
 
 
 def test_vector_metadata_includes_dynamic_tiles_url(client):
