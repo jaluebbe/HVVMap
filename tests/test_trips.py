@@ -123,7 +123,7 @@ def test_vehicles_model_and_changed_destination_are_carried_over():
         PLAN, PLAN_ANCHOR, {"anchor": LIVE_ANCHOR, "departures": [dep]}
     )
     trip = table["trips"][0]
-    assert trip["vehicles"] == "DT5.1 (355), DT5.1 (417)"
+    assert trip["vehicles"] == "DT5.1 (417), DT5.1 (355)"
     assert trip["model"] == "DT5"
     assert trip["destination_changed"] is True
 
