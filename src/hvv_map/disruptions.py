@@ -6,6 +6,7 @@ explicitly named begin/end stations are marked, no intermediate-stop
 expansion (could be added later via listLines(withSublines=True).stationSequence).
 """
 
+import re
 from datetime import datetime, timezone
 
 from hvv_map.announcement_categories import (
@@ -36,12 +37,21 @@ BASE_LINE_MODE = {
 }
 
 
+_GLOBAL_ID = re.compile(r"^de:\d+:(\d+)$")
+
+
+def _canonical_station_id(station_id: str) -> str:
+    """Map global ids ("de:02000:10952") to the catalog's "Master:10952"."""
+    match = _GLOBAL_ID.match(station_id)
+    return f"Master:{match.group(1)}" if match else station_id
+
+
 def _location_station_ids(location: dict) -> list[str]:
     ids = []
     for key in ("begin", "end"):
         sd_name = location.get(key)
         if sd_name and sd_name.get("id"):
-            ids.append(sd_name["id"])
+            ids.append(_canonical_station_id(sd_name["id"]))
     return ids
 
 
