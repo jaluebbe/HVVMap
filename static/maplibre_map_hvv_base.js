@@ -275,6 +275,7 @@ function buildIconNode(icon) {
     if (/^(\/|https?:)/.test(icon)) {
         const img = document.createElement('img');
         img.src = icon;
+        img.alt = '';
         img.height = 16;
         return img;
     }
@@ -454,7 +455,7 @@ function buildMarkerElement(properties) {
         const delayStandalone = delayText
             ? `<span class="hvv-marker-delay-standalone" style="left:${labelOffset}px;">${delayText}</span>`
             : '';
-        wrapper.innerHTML = `<img src="${properties.icon}" style="height:${height}px" />${label}${delayStandalone}`;
+        wrapper.innerHTML = `<img src="${properties.icon}" alt="" style="height:${height}px" />${label}${delayStandalone}`;
 
         // Hit area spans icon + estimated label width - doesn't need to be pixel-exact.
         const halfHeight = height / 2;

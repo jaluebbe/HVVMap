@@ -40,8 +40,30 @@ mimetypes.add_type("text/javascript", ".cjs")
 
 app = FastAPI()
 app.add_middleware(GZipMiddleware, minimum_size=1024)
-app.mount("/static", StaticFiles(directory="static", html=True), name="static")
-app.mount("/fonts", StaticFiles(directory="fonts"), name="fonts")
+
+
+class CachedStaticFiles(StaticFiles):
+    """Long cache for bundled third-party assets; everything else is
+    revalidated on each load so a deployment shows up immediately."""
+
+    LONG_CACHE_PREFIXES = ("maplibre-gl/", "hvv/", "sprites/")
+
+    def __init__(self, *args, long_cache: bool = False, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.long_cache = long_cache
+
+    async def get_response(self, path, scope):
+        response = await super().get_response(path, scope)
+        if response.status_code == 200:
+            long_lived = self.long_cache or path.startswith(self.LONG_CACHE_PREFIXES)
+            response.headers["Cache-Control"] = (
+                "public, max-age=604800" if long_lived else "no-cache"
+            )
+        return response
+
+
+app.mount("/static", CachedStaticFiles(directory="static", html=True), name="static")
+app.mount("/fonts", CachedStaticFiles(directory="fonts", long_cache=True), name="fonts")
 
 
 @app.get("/", include_in_schema=False)
