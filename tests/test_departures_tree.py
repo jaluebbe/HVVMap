@@ -188,7 +188,7 @@ def test_ubahn_series_by_unit_number():
 
 def test_vehicles_text_adds_series_for_ubahn_only():
     vehicles = [{"id": "9", "number": "355"}]
-    assert vehicles_text(vehicles, ubahn=True) == "355 [DT5.1]"
+    assert vehicles_text(vehicles, ubahn=True) == "DT5.1 (355)"
     assert vehicles_text(vehicles) == "355"
 
 
@@ -200,3 +200,16 @@ def test_refined_model_prefers_vehicle_numbers_on_ubahn():
     assert refined_model(line, []) == "DT4"
     bus = {"type": {"shortInfo": "Bus", "model": "Solobus"}}
     assert refined_model(bus, [{"number": "417"}]) == "Solobus"
+
+
+def test_vehicles_text_orders_units_by_number():
+    vehicles = [{"number": "362", "id": "b"}, {"number": "329", "id": "a"}]
+
+    assert vehicles_text(vehicles, ubahn=True) == "DT5.1 (329), DT5.1 (362)"
+    assert vehicles_text(vehicles[::-1], ubahn=True) == "DT5.1 (329), DT5.1 (362)"
+
+
+def test_vehicles_text_puts_units_without_number_last():
+    vehicles = [{"id": "x9"}, {"number": "4711", "id": "a"}]
+
+    assert vehicles_text(vehicles) == "4711, (id x9)"

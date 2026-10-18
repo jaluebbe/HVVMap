@@ -110,9 +110,10 @@ const MODES = [
     { key: 'FERRY', name: 'Fähre', icon: '/static/hvv/icons/ferry.svg' },
 ];
 
-// Vehicle model isn't its own property - parsed from properties.text (DT5/Batteriegelenkbus only).
+// Vehicle class from the first three characters of the popup's second line
+// (model or vehicles): "DT5" (DT5 units), "Bat" (Batteriegelenkbus).
 const VEHICLE_MODEL_CLASSES = {
-    'Batteriegelenkbus': 'hvv-vehicle-batteriegelenkbus',
+    'Bat': 'hvv-vehicle-batteriegelenkbus',
     'DT5': 'hvv-vehicle-dt5',
 };
 
@@ -121,8 +122,8 @@ function vehicleModelFromText(text, delay) {
         return '';
     }
     const parts = text.split('<br>');
-    const modelParts = delay > 0 ? parts.slice(1, -1) : parts.slice(1);
-    return modelParts.join('');
+    const lines = delay > 0 ? parts.slice(1, -1) : parts.slice(1);
+    return (lines[0] || '').slice(0, 3);
 }
 
 function hvvPointToLayer(feature, latlng) {

@@ -263,11 +263,11 @@
 
         const isUbahn = call => /^U\d+$/.test(call.line || "");
 
-        // vehicle numbers with the U-Bahn series, e.g. "355 [DT5.1]"
+        // vehicle numbers with the U-Bahn series, e.g. "DT5.1 (355)"
         function vehicleNumbers(call) {
             return ((call.meta && call.meta.vehicles) || []).map(v => {
                 const series = isUbahn(call) ? ubahnSeries(v.number) : null;
-                return [v.number, series && `[${series}]`].filter(Boolean).join(" ") || v.id;
+                return (series ? `${series} (${v.number})` : v.number) || v.id;
             }).filter(Boolean);
         }
 

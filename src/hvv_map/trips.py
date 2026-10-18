@@ -190,6 +190,7 @@ def _route_rows(
         match = stop["match"]
         return {
             "station": stop["station"],
+            "station_id": station["id"] if station else stop.get("station_id"),
             "planned": planned,
             "arr": station["arr"] if station else None,
             "dep": (station["dep"] if station and station["dep"] else planned),
@@ -229,6 +230,7 @@ def _route_rows(
         rows.append(
             {
                 "station": station["name"],
+                "station_id": station["id"],
                 "planned": at.strftime("%H:%M") if at else None,
                 "arr": station["arr"],
                 "dep": station["dep"] or (at.strftime("%H:%M") if at else None),
@@ -390,6 +392,21 @@ def unify_shared_delays(rows: list[dict], main_at: float, aliases: list[dict]):
             row["delay"] = stop["delay"] = delay
 
 
+def _vehicle_fields(trip: dict, unique: list, memory: dict | None) -> dict:
+    """Vehicles text and model of a trip from its live entries; falls back to
+    what was remembered while the trip has none (e.g. between anchors)."""
+    text = vehicles_text(unique, _is_ubahn(trip["line_obj"]))
+    model = refined_model(trip["line_obj"], unique)
+    remembered = (memory or {}).get(course_key(trip))
+    if not text and remembered:
+        return {
+            "vehicles": remembered["vehicles"],
+            "model": remembered["model"],
+            "vehicles_remembered": True,
+        }
+    return {"vehicles": text, "model": model, "vehicles_remembered": False}
+
+
 def _alias_courses(aliases: list[dict], main: dict | None, courses: dict) -> list:
     """Courses of the extra live entries of a trip (e.g. the second half of a
     split train), with the station up to which they match the trip's own."""
@@ -456,11 +473,44 @@ def _public(entry: dict) -> dict:
     return {k: v for k, v in entry.items() if not k.startswith("_")}
 
 
+REDIS_VEHICLES_KEY = "hvv:trips:vehicles"  # written by trip_positions.py
+VEHICLE_MEMORY_SECONDS = 6 * 3600  # a trip's vehicles are forgotten after this
+
+
+def remember_vehicles(memory: dict, table: dict, now_ts: float) -> bool:
+    """Store the vehicles of the table's trips that have some, keyed by
+    course_key, and drop old entries. True if `memory` changed."""
+    changed = False
+    for row in table["trips"]:
+        if not row["vehicles"] or row["vehicles_remembered"]:
+            continue
+        entry = memory.get(row["course_key"])
+        if not entry or (entry["vehicles"], entry["model"]) != (
+            row["vehicles"],
+            row["model"],
+        ):
+            memory[row["course_key"]] = {
+                "vehicles": row["vehicles"],
+                "model": row["model"],
+                "seen_at": now_ts,
+            }
+            changed = True
+    for key in [
+        key
+        for key, entry in memory.items()
+        if now_ts - entry["seen_at"] > VEHICLE_MEMORY_SECONDS
+    ]:
+        del memory[key]
+        changed = True
+    return changed
+
+
 def build_trip_table(
     by_service: dict,
     plan_anchor: datetime | None,
     live: dict,
     courses: dict | None = None,
+    vehicle_memory: dict | None = None,
 ) -> dict:
     """Plan trips matched against the live departures:
     {"summary", "trips", "live_only"}. A live departure matches the plan
@@ -614,6 +664,7 @@ def build_trip_table(
                 "id": trip["id"],
                 "service_id": trip["service_id"],
                 "line": trip["line"],
+                "line_id": (trip["line_obj"] or {}).get("id", ""),
                 "mode": _mode_label(trip["line_obj"]),
                 "direction_id": trip["direction_id"],
                 "destination": trip["destination"],
@@ -637,8 +688,8 @@ def build_trip_table(
                     s["match"]["destination_changed"] for s in matched
                 ),
                 "max_delay": max(delays) if delays else None,
-                "vehicles": vehicles_text(unique, _is_ubahn(trip["line_obj"])),
-                "model": refined_model(trip["line_obj"], unique),
+                "course_key": course_key(trip),
+                **_vehicle_fields(trip, unique, vehicle_memory),
                 "route_start": None,
                 "route_end": None,
                 "stops": _route_rows(

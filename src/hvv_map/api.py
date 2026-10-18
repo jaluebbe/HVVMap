@@ -33,7 +33,7 @@ from hvv_map.gtilive_geojson import (
 )
 from hvv_map.redis_client import get_redis_client
 from hvv_map.stations import by_id, load_stations
-from hvv_map.trips import build_trip_table
+from hvv_map.trips import REDIS_VEHICLES_KEY, build_trip_table
 
 mimetypes.add_type("text/javascript", ".cjs")
 
@@ -171,6 +171,7 @@ REDIS_MERGED_KEY = "hvv:departures:merged"
 REDIS_ANCHOR_KEY = "hvv:departures:anchor_start"
 REDIS_LIVE_KEY = "hvv:departures:live"
 REDIS_TRIP_COURSES_KEY = "hvv:trips:courses"  # written by trip_courses.py
+REDIS_POSITIONS_KEY = "hvv:positions_gtilive"  # written by trip_positions.py
 
 
 def _read_cached_payload(key: str) -> dict:
@@ -320,7 +321,11 @@ def get_trips():
     live_payload = _read_cached_payload(REDIS_LIVE_KEY)
     raw_courses = _redis_client.get(REDIS_TRIP_COURSES_KEY)
     courses = json.loads(raw_courses)["data"] if raw_courses else {}
-    table = build_trip_table(plan, _read_anchor(), live_payload["data"], courses)
+    raw_vehicles = _redis_client.get(REDIS_VEHICLES_KEY)
+    memory = json.loads(raw_vehicles)["data"] if raw_vehicles else {}
+    table = build_trip_table(
+        plan, _read_anchor(), live_payload["data"], courses, memory
+    )
     return {"fetched_at": live_payload.get("fetched_at"), **table}
 
 
@@ -336,6 +341,12 @@ def get_departures_by_trip():
 # --- gti-live layers: departureList/sublines based, no getVehicleMap -------
 # Built on the fly from departures.py's cached grouping (hvv:departures:by_service)
 # and hvv:stations - cheap enough, and by_service itself only changes once a day.
+
+
+@app.get("/api/hvv/gtilive/positions.geojson", tags=["hvv_gtilive"])
+def get_gtilive_positions():
+    """Vehicle positions computed from the trip table (trip_positions.py)."""
+    return _read_cached_json(REDIS_POSITIONS_KEY)
 
 
 @app.get("/api/hvv/gtilive/stops.geojson", tags=["hvv_gtilive"])

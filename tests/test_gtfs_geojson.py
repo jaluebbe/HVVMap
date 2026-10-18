@@ -1,3 +1,4 @@
+import math
 from datetime import date, datetime
 
 from hvv_map.gtfs_geojson import (
@@ -274,3 +275,50 @@ def test_build_lines_geojson_excludes_shape_without_recent_trip():
     result = build_lines_geojson(schedule, reference_date=date(2025, 6, 2))
 
     assert result["features"] == []
+
+
+def _dense_track(points=40, bulge=0.02):
+    """A curved track between Alpha and Beta with ~50 m point spacing."""
+    return [
+        (
+            10.00 + bulge * math.sin(math.pi * i / (points - 1)),
+            53.50 + 0.02 * i / (points - 1),
+        )
+        for i in range(points)
+    ]
+
+
+def test_sparse_shape_is_flagged_straight_for_positions_and_lines():
+    schedule = _make_schedule()  # default shape: just the two stops, 2 km apart
+    now_ts = _epoch(2025, 6, 2, 8, 1, 0)
+
+    position = build_positions_geojson(schedule, now_ts)["features"][0]
+    line = build_lines_geojson(schedule, reference_date=date(2025, 6, 2))["features"][0]
+
+    assert position["properties"]["straight"] is True
+    assert line["properties"]["straight"] is True
+
+
+def test_dense_track_is_not_straight():
+    schedule = _make_schedule(shapes={"SHAPE1": _dense_track()})
+    now_ts = _epoch(2025, 6, 2, 8, 1, 0)
+
+    position = build_positions_geojson(schedule, now_ts)["features"][0]
+    lines = build_lines_geojson(schedule, reference_date=date(2025, 6, 2))["features"]
+
+    assert position["properties"]["straight"] is False
+    assert [f["properties"]["straight"] for f in lines] == [False]
+
+
+def test_long_hop_inside_a_dense_track_is_split_off_as_straight_line():
+    track = _dense_track()
+    gap = [(track[-1][0], track[-1][1]), (10.00, 53.60)]  # ~11 km without a track
+    schedule = _make_schedule(shapes={"SHAPE1": track + gap[1:]})
+
+    lines = build_lines_geojson(schedule, reference_date=date(2025, 6, 2))["features"]
+
+    assert [f["properties"]["straight"] for f in lines] == [False, True]
+    assert (
+        lines[0]["geometry"]["coordinates"][-1]
+        == lines[1]["geometry"]["coordinates"][0]
+    )
