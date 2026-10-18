@@ -127,7 +127,7 @@ they're built directly from the static feed on first run.
 `static/` ships map pages built on MapLibre GL JS, all served by the same
 `api.py`:
 
-- `maplibre_map_hvv_live.html` - all modes; the data source (`gtilive`,
+- `maplibre_map_hvv_live.html` - the public map, also served at `/`; all modes; the data source (`gtilive`,
   `gtfs`) is switched at runtime via a dropdown, no page reload needed; see
   `maplibre_map_hvv_base.js`'s `SOURCES`. Defaults to `gtilive`.
 - `maplibre_map_hvv_ubahn.html` - the same page restricted to the U-Bahn,
@@ -139,9 +139,10 @@ The Leaflet pages were removed; the last state with them is tagged
 `legacy-leaflet-vehiclemap` (`git checkout legacy-leaflet-vehiclemap`, or
 `git show legacy-leaflet-vehiclemap:static/leaflet_map_hvv_live.html`).
 
-`index.html` is the landing page linking to all of them.
+`index.html` (under `/static/`) is an overview for developers linking to the
+maps, the debug pages below and the API docs; it is not the start page.
 
-`dev_announcements.html` is a developer-only page, not linked from
+`dev_announcements.html` is a developer-only page, only linked from
 `index.html`: it fetches `/api/hvv/live/announcements.json` and lists every
 raw announcement with its full fields (locations, validities, links, etc.),
 collapsible per entry (state kept in `localStorage`) with text search and
