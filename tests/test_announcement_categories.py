@@ -111,3 +111,11 @@ def test_classify_category_sperrung_when_trains_are_named_before_entfallen():
 def test_classify_category_sonstige_when_a_single_stop_is_skipped():
     announcement = {"summary": "", "description": "Der Halt in Altona entfällt."}
     assert classify_category(announcement) == CATEGORY_SONSTIGE
+
+
+def test_singular_no_service_wording_is_closure():
+    announcement = {
+        "summary": "",
+        "description": "Am Montag fährt keine S7 zwischen A und B",
+    }
+    assert classify_category(announcement) == CATEGORY_SPERRUNG
