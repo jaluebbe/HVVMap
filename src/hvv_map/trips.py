@@ -514,10 +514,13 @@ def remember_vehicles(memory: dict, table: dict, now_ts: float) -> bool:
 def _is_missing(trip: dict, status: str, per_line: dict, memory: dict | None) -> bool:
     """A trip never seen live although its anchor stop was due in the live
     window, on a line whose other trips are seen live; or one already judged
-    so earlier."""
+    so earlier. A trip with remembered vehicles was seen, so never."""
     if _mode_label(trip["line_obj"]) not in MISSING_MODES:
         return False
-    if MISSING_PREFIX + course_key(trip) in (memory or {}):
+    remembered = memory or {}
+    if course_key(trip) in remembered:
+        return False  # its vehicles were seen live earlier in this run
+    if MISSING_PREFIX + course_key(trip) in remembered:
         return True
     return status == STATUS_NOT_SEEN and per_line[trip["line"]]["matched"] > 0
 

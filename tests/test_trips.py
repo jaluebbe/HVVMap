@@ -594,3 +594,15 @@ def test_missing_trip_is_remembered_after_it_left_the_window():
 
     status = {t["service_id"]: t["status"] for t in table["trips"]}
     assert status["2"] == "vermutlich ausgefallen"
+
+
+def test_trip_with_remembered_vehicles_is_not_missing():
+    live = {"anchor": LIVE_ANCHOR, "departures": [_live("U1", "A", 2, 6)]}
+    first = build_trip_table(_missing_plan(), PLAN_ANCHOR, live)
+    key = next(t["course_key"] for t in first["trips"] if t["service_id"] == "2")
+    memory = {key: {"vehicles": "DT5 (1)", "model": "DT5", "seen_at": 1.0}}
+
+    table = build_trip_table(_missing_plan(), PLAN_ANCHOR, live, None, memory)
+
+    status = {t["service_id"]: t["status"] for t in table["trips"]}
+    assert status["2"] == "nicht gesehen"
