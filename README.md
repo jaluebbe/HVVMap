@@ -122,9 +122,6 @@ they're built directly from the static feed on first run.
 - `hvvmap-gtfs-fetch-once` - one-shot GTFS layer build, same idea for the
   `hvv:gtfs:*` keys
 
-`scripts/` holds standalone diagnostics (line stability, gap analysis, bus
-vehicle-type checks) - not part of the installed package.
-
 ## Frontend
 
 `static/` ships map pages built on MapLibre GL JS, all served by the same

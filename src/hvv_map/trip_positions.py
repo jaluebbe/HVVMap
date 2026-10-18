@@ -31,6 +31,7 @@ REDIS_POSITIONS_KEY = "hvv:positions_gtilive"
 POSITIONS_TTL = 120
 VEHICLES_TTL = 24 * 3600
 POSITIONS_INTERVAL = 1.0  # seconds between recomputations
+ERROR_LOG_INTERVAL = 60.0  # seconds before an identical error is logged again
 RELOAD_INTERVAL = 10.0  # seconds between checks for new source data
 
 
@@ -267,12 +268,19 @@ def run_loop(interval: float = POSITIONS_INTERVAL) -> None:
     redis_client = get_redis_client()
     shapes_conn = open_shapes_db()
     state = PositionsState()
+    last_error = ("", 0.0)
     while True:
         started = time.time()
         try:
             run_positions(redis_client, shapes_conn, state=state)
         except Exception as error:  # keep the loop alive across bad data
-            print(f"[hvvmap-trip-positions] {error!r}", flush=True)
+            message = repr(error)
+            if (
+                message != last_error[0]
+                or started - last_error[1] >= ERROR_LOG_INTERVAL
+            ):
+                print(f"[hvvmap-trip-positions] {message}", flush=True)
+                last_error = (message, started)
         time.sleep(max(0.0, interval - (time.time() - started)))
 
 

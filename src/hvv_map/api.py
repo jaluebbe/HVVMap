@@ -16,6 +16,7 @@ import threading
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Request, Response
+from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
@@ -38,6 +39,7 @@ from hvv_map.trips import REDIS_VEHICLES_KEY, build_trip_table
 mimetypes.add_type("text/javascript", ".cjs")
 
 app = FastAPI()
+app.add_middleware(GZipMiddleware, minimum_size=1024)
 app.mount("/static", StaticFiles(directory="static", html=True), name="static")
 app.mount("/fonts", StaticFiles(directory="fonts"), name="fonts")
 
