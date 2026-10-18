@@ -31,6 +31,7 @@ own requests, so the vehicle map pauses briefly while they run.
 """
 
 import json
+import threading
 import time
 
 from hvv_map.disruptions import (
@@ -40,6 +41,7 @@ from hvv_map.disruptions import (
 from hvv_map.departures import run_daily_snapshots
 from hvv_map.departures_live import run_live_snapshot
 from hvv_map.trip_courses import run_trip_courses
+from hvv_map.trip_positions import run_loop as run_trip_positions_loop
 from hvv_map.geojson import build_positions_geojson, mode_for_journey
 from hvv_map.gti_client import GtiClient
 from hvv_map.gti_shapes import open_db as open_shapes_db
@@ -287,6 +289,8 @@ def fetch_once_vehicle_map() -> None:
 
 
 def main() -> None:
+    # own thread: GTI jobs below can block the loop for tens of seconds
+    threading.Thread(target=run_trip_positions_loop, daemon=True).start()
     last_announcements_fetch = 0.0
     last_reference_rebuild = 0.0
     last_vehicle_map_fetch = 0.0

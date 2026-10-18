@@ -510,11 +510,11 @@ const ALL_SOURCES = [
         disruptionsEndpoint: null,
     },
     {
-        // departureList/sublines based, no vehicles.
+        // departureList/sublines based, vehicles computed from the trip table.
         key: 'gtilive',
         name: 'GTI-Live',
         pageOnly: true, // only offered where a page lists it in sourceKeys
-        positionsEndpoint: null,
+        positionsEndpoint: '/api/hvv/gtilive/positions.geojson',
         linesEndpoint: '/api/hvv/gtilive/lines.geojson',
         stopsEndpoint: '/api/hvv/gtilive/stops.geojson',
         disruptionsEndpoint: '/api/hvv/live/disruptions.geojson',

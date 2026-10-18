@@ -120,6 +120,7 @@ def test_live_endpoint_503_when_redis_key_missing(client):
     [
         ("/api/hvv/live/positions.geojson", "hvv:positions"),
         ("/api/hvv/realtime/positions.geojson", "hvv:positions_realtime"),
+        ("/api/hvv/gtilive/positions.geojson", "hvv:positions_gtilive"),
         ("/api/hvv/live/disruptions.geojson", "hvv:disruptions"),
         ("/api/hvv/live/announcements.json", "hvv:announcements"),
         ("/api/hvv/live/stops.geojson", "hvv:reference_stops"),

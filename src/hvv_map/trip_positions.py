@@ -23,13 +23,20 @@ from hvv_map.trips import STATUS_CANCELLED, build_trip_table
 
 REDIS_POSITIONS_KEY = "hvv:positions_gtilive"
 POSITIONS_TTL = 120
-POSITIONS_INTERVAL = 10.0  # seconds between recomputations
+POSITIONS_INTERVAL = 1.0  # seconds between recomputations
+RELOAD_INTERVAL = 10.0  # seconds between checks for new source data
 
 
-def _along(coordinates: list, progress: float) -> tuple[float, float]:
-    points = [tuple(c) for c in coordinates]
-    distances = _cumulative_distances(points)
-    return _point_at_distance(points, distances, progress * distances[-1])
+def _track(start, end, stations, shapes_conn, cache):
+    """(points, cumulative distances) of a segment, memoized in `cache`."""
+    key = (start, end)
+    if key not in cache:
+        coordinates = _subline_coordinates((start, end), stations, shapes_conn)
+        points = [tuple(c) for c in coordinates]
+        cache[key] = (
+            (points, _cumulative_distances(points)) if len(points) > 1 else None
+        )
+    return cache[key]
 
 
 def _coordinates(
@@ -37,6 +44,7 @@ def _coordinates(
     ids: list[str | None],
     stations: dict[str, StationInfo],
     shapes_conn: sqlite3.Connection | None,
+    cache: dict,
 ) -> tuple[float, float] | None:
     """Station coordinate at a stop, point on the segment's track between."""
     if position.state == AT_STOP:
@@ -45,8 +53,11 @@ def _coordinates(
     start, end = ids[position.index], ids[position.end_index]
     if not start or not end:
         return None
-    track = _subline_coordinates((start, end), stations, shapes_conn)
-    return _along(track, position.progress) if len(track) >= 2 else None
+    track = _track(start, end, stations, shapes_conn, cache)
+    if track is None:
+        return None
+    points, distances = track
+    return _point_at_distance(points, distances, position.progress * distances[-1])
 
 
 def _feature(
@@ -114,9 +125,12 @@ def build_positions(
     now: datetime,
     stations: dict[str, StationInfo],
     shapes_conn: sqlite3.Connection | None = None,
+    cache: dict | None = None,
 ) -> dict:
     """GeoJSON FeatureCollection of the trips running at `now`. A split train
-    yields one feature for the shared part and one for the other branch."""
+    yields one feature for the shared part and one for the other branch.
+    `cache` keeps segment tracks between calls on the same data."""
+    cache = {} if cache is None else cache
     features = []
     for row in table["trips"]:
         if row["status"] == STATUS_CANCELLED:
@@ -126,7 +140,7 @@ def build_positions(
         position = locate(stops, now, ferry)
         if position and position.state in (AT_STOP, BETWEEN):
             ids = [s["station_id"] for s in row["stops"]]
-            point = _coordinates(position, ids, stations, shapes_conn)
+            point = _coordinates(position, ids, stations, shapes_conn, cache)
             if point:
                 delay = row["stops"][position.index]["delay"]
                 features.append(
@@ -141,7 +155,7 @@ def build_positions(
             ):
                 continue
             ids = [s["id"] for s in alias["stops"]]
-            point = _coordinates(position, ids, stations, shapes_conn)
+            point = _coordinates(position, ids, stations, shapes_conn, cache)
             if point:
                 delay = alias["stops"][position.index]["delay"]
                 features.append(
@@ -156,27 +170,55 @@ def build_positions(
     return {"type": "FeatureCollection", "features": features}
 
 
+class PositionsState:
+    """Trip table and segment tracks, rebuilt only when the source data in
+    Redis has changed (checked every RELOAD_INTERVAL)."""
+
+    def __init__(self):
+        self.raw: tuple | None = None
+        self.checked = float("-inf")
+        self.table: dict | None = None
+        self.stations: dict[str, StationInfo] = {}
+        self.tracks: dict = {}
+
+
+def _refresh(redis_client, state: PositionsState) -> bool:
+    """Bring `state` up to date; False without source data."""
+    if time.time() - state.checked < RELOAD_INTERVAL and state.table is not None:
+        return True
+    state.checked = time.time()
+    keys = (REDIS_BY_SERVICE_KEY, REDIS_ANCHOR_KEY, REDIS_LIVE_KEY, REDIS_COURSES_KEY)
+    raw = tuple(redis_client.get(key) for key in keys)
+    plan, anchor, live, courses = raw
+    if not (plan and anchor and live):
+        return False
+    if raw != state.raw:
+        state.table = build_trip_table(
+            json.loads(plan)["data"],
+            parse_anchor(json.loads(anchor)["data"]),
+            json.loads(live)["data"],
+            json.loads(courses)["data"] if courses else {},
+        )
+        state.stations = by_id(load_stations(redis_client))
+        state.tracks = {}
+        state.raw = raw
+    return True
+
+
 def run_positions(
-    redis_client, shapes_conn: sqlite3.Connection | None, now: datetime | None = None
+    redis_client,
+    shapes_conn: sqlite3.Connection | None,
+    now: datetime | None = None,
+    state: PositionsState | None = None,
 ) -> int:
     """Compute from the data in Redis and store under REDIS_POSITIONS_KEY;
-    returns the number of vehicles."""
-    now = now or berlin_now()
-    raw_plan = redis_client.get(REDIS_BY_SERVICE_KEY)
-    raw_anchor = redis_client.get(REDIS_ANCHOR_KEY)
-    raw_live = redis_client.get(REDIS_LIVE_KEY)
-    if not (raw_plan and raw_anchor and raw_live):
+    returns the number of vehicles. Pass the same `state` on repeated calls."""
+    state = state or PositionsState()
+    if not _refresh(redis_client, state):
         return 0
-    raw_courses = redis_client.get(REDIS_COURSES_KEY)
-    courses = json.loads(raw_courses)["data"] if raw_courses else {}
-    table = build_trip_table(
-        json.loads(raw_plan)["data"],
-        parse_anchor(json.loads(raw_anchor)["data"]),
-        json.loads(raw_live)["data"],
-        courses,
+    collection = build_positions(
+        state.table, now or berlin_now(), state.stations, shapes_conn, state.tracks
     )
-    stations = by_id(load_stations(redis_client))
-    collection = build_positions(table, now, stations, shapes_conn)
     redis_client.set(
         REDIS_POSITIONS_KEY,
         json.dumps({"fetched_at": int(time.time()), "data": collection}),
@@ -189,10 +231,11 @@ def run_loop(interval: float = POSITIONS_INTERVAL) -> None:
     """Endless recomputation; opens its own connections (thread-safe use)."""
     redis_client = get_redis_client()
     shapes_conn = open_shapes_db()
+    state = PositionsState()
     while True:
         started = time.time()
         try:
-            run_positions(redis_client, shapes_conn)
+            run_positions(redis_client, shapes_conn, state=state)
         except Exception as error:  # keep the loop alive across bad data
             print(f"[hvvmap-trip-positions] {error!r}", flush=True)
         time.sleep(max(0.0, interval - (time.time() - started)))

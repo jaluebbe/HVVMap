@@ -176,3 +176,40 @@ def test_run_positions_without_source_data_stores_nothing():
 
     assert module.run_positions(redis_client, None, NOW) == 0
     assert module.REDIS_POSITIONS_KEY not in redis_client.values
+
+
+def _redis_with_source_data(module):
+    import json
+
+    blob = json.dumps({"data": {}})
+    return _FakeRedis(
+        {
+            module.REDIS_BY_SERVICE_KEY: blob,
+            module.REDIS_ANCHOR_KEY: blob,
+            module.REDIS_LIVE_KEY: blob,
+        }
+    )
+
+
+def test_table_is_rebuilt_only_when_the_source_data_changed(monkeypatch):
+    from hvv_map import trip_positions as module
+
+    builds = []
+    monkeypatch.setattr(module, "parse_anchor", lambda data: None)
+    monkeypatch.setattr(module, "load_stations", lambda client: [])
+    monkeypatch.setattr(
+        module, "build_trip_table", lambda *a: builds.append(1) or {"trips": []}
+    )
+    redis_client = _redis_with_source_data(module)
+    state = module.PositionsState()
+
+    module.run_positions(redis_client, None, NOW, state)
+    module.run_positions(redis_client, None, NOW, state)
+    state.checked = float("-inf")  # reload interval elapsed, data unchanged
+    module.run_positions(redis_client, None, NOW, state)
+    assert len(builds) == 1
+
+    redis_client.values[module.REDIS_LIVE_KEY] = '{"data": {"x": 1}}'
+    state.checked = float("-inf")
+    module.run_positions(redis_client, None, NOW, state)
+    assert len(builds) == 2
