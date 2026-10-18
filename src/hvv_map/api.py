@@ -46,7 +46,7 @@ app.mount("/fonts", StaticFiles(directory="fonts"), name="fonts")
 
 @app.get("/", include_in_schema=False)
 async def root():
-    return FileResponse("static/maplibre_map_hvv_live.html")
+    return FileResponse("static/maplibre_map_hvv_gtilive.html")
 
 
 @app.get("/robots.txt", include_in_schema=False)

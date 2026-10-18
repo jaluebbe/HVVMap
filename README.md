@@ -127,13 +127,14 @@ they're built directly from the static feed on first run.
 `static/` ships map pages built on MapLibre GL JS, all served by the same
 `api.py`:
 
-- `maplibre_map_hvv_live.html` - the public map, also served at `/`; all modes; the data source (`gtilive`,
+- `maplibre_map_hvv_live.html` - all modes; the data source (`gtilive`,
   `gtfs`) is switched at runtime via a dropdown, no page reload needed; see
   `maplibre_map_hvv_base.js`'s `SOURCES`. Defaults to `gtilive`.
 - `maplibre_map_hvv_ubahn.html` - the same page restricted to the U-Bahn,
   centered on Betriebshof Barmbek, with U1-U4 toggleable individually. Page
   options are set via `window.HVV_PAGE_CONFIG` (see `maplibre_map_hvv_base.js`).
-- `maplibre_map_hvv_gtilive.html` - only the `gtilive` source.
+- `maplibre_map_hvv_gtilive.html` - only the `gtilive` source, no dropdown;
+  this is the public map, also served at `/`.
 
 The Leaflet pages were removed; the last state with them is tagged
 `legacy-leaflet-vehiclemap` (`git checkout legacy-leaflet-vehiclemap`, or
