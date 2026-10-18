@@ -5,8 +5,7 @@ const HAMBURG_DEFAULT_ZOOM = 12;
 
 // Optional page overrides (window.HVV_PAGE_CONFIG): center [lon, lat], zoom, modes,
 // lineToggles {mode: [{key, color, icon}]} - per-line checkboxes replacing that mode's,
-// sourceKeys - restricts the data source choices, straightToggle - checkbox that shows
-// hops without a stored track (features with properties.straight) as dashed lines.
+// sourceKeys - restricts the data source choices.
 const PAGE_CONFIG = window.HVV_PAGE_CONFIG || {};
 const LINE_TOGGLES = PAGE_CONFIG.lineToggles || {};
 
@@ -363,12 +362,14 @@ class ModeToggleControl {
         }
         items.appendChild(this._categoriesSection);
 
+        this._extrasSection = document.createElement('div');
         if (this._extraToggles.length > 0) {
             const extraDivider = document.createElement('div');
             extraDivider.className = 'hvv-mode-control-divider';
-            items.appendChild(extraDivider);
-            this._extraToggles.forEach((t) => this._appendItem(items, t.key, t.name, t.icon || '', t.checked, t.onToggle));
+            this._extrasSection.appendChild(extraDivider);
+            this._extraToggles.forEach((t) => this._appendItem(this._extrasSection, t.key, t.name, t.icon || '', t.checked, t.onToggle));
         }
+        items.appendChild(this._extrasSection);
 
         if (this._sourceConfig && this._sourceConfig.sources.length > 1) {
             const sourceDivider = document.createElement('div');
@@ -398,6 +399,13 @@ class ModeToggleControl {
     setCategoriesVisible(visible) {
         if (this._categoriesSection) {
             this._categoriesSection.style.display = visible ? '' : 'none';
+        }
+    }
+
+    // Shows the extra toggles (e.g. straight lines) only for sources that use them.
+    setExtrasVisible(visible) {
+        if (this._extrasSection) {
+            this._extrasSection.style.display = visible ? '' : 'none';
         }
     }
 
@@ -514,7 +522,8 @@ const ALL_SOURCES = [
         // departureList/sublines based, vehicles computed from the trip table.
         key: 'gtilive',
         name: 'GTI-Live',
-        pageOnly: true, // only offered where a page lists it in sourceKeys
+        // Hops without a stored track (properties.straight) get a "Luftlinien" toggle.
+        straightToggle: true,
         positionsEndpoint: '/api/hvv/gtilive/positions.geojson',
         linesEndpoint: '/api/hvv/gtilive/lines.geojson',
         stopsEndpoint: '/api/hvv/gtilive/stops.geojson',
@@ -523,7 +532,7 @@ const ALL_SOURCES = [
 ];
 const SOURCES = PAGE_CONFIG.sourceKeys
     ? ALL_SOURCES.filter((s) => PAGE_CONFIG.sourceKeys.includes(s.key))
-    : ALL_SOURCES.filter((s) => !s.pageOnly);
+    : ALL_SOURCES;
 
 // initialSourceKey defaults to 'live' when omitted or unknown.
 function initHvvVehicleLayers(initialSourceKey) {
@@ -793,12 +802,11 @@ function initHvvVehicleLayers(initialSourceKey) {
             setCategoryVisibility,
             { sources: SOURCES, initialKey: currentSource.key, onSourceChange: switchSource },
             setLineVisibility,
-            PAGE_CONFIG.straightToggle
-                ? [{ key: 'straight', name: 'Luftlinien', icon: '⋯', checked: false, onToggle: setStraightVisibility }]
-                : [],
+            [{ key: 'straight', name: 'Luftlinien', icon: '⋯', checked: false, onToggle: setStraightVisibility }],
         );
         map.addControl(modeToggleControl, 'top-right');
         modeToggleControl.setCategoriesVisible(!!currentSource.disruptionsEndpoint);
+        modeToggleControl.setExtrasVisible(!!currentSource.straightToggle);
         map.addControl(new LabelToggleControl(), 'top-right');
         map.addControl(new WakeLockControl(), 'top-right');
     }
@@ -1087,6 +1095,7 @@ function initHvvVehicleLayers(initialSourceKey) {
         clearAllData();
         currentSource = next;
         modeToggleControl.setCategoriesVisible(!!currentSource.disruptionsEndpoint);
+        modeToggleControl.setExtrasVisible(!!currentSource.straightToggle);
         startPolling();
     }
 
