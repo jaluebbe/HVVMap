@@ -12,7 +12,7 @@ from hvv_map.departures_live import REDIS_LIVE_KEY
 from hvv_map.departures_tree import parse_anchor
 from hvv_map.geometry import cumulative_distances, point_at_distance
 from hvv_map.gti_shapes import open_db as open_shapes_db
-from hvv_map.gti_shapes import subline_hops
+from hvv_map.gti_shapes import is_real_track, subline_hops
 from hvv_map.gtilive_geojson import _subline_coordinates
 from hvv_map.lines import replacement_bus_mode
 from hvv_map.redis_client import get_redis_client
@@ -46,7 +46,7 @@ def _track(start, end, stations, shapes_conn, cache):
             cache[key] = None
         else:
             hops = subline_hops(shapes_conn, (start, end))
-            real = any(segment and len(segment) > 2 for _a, _b, segment in hops)
+            real = any(is_real_track(segment) for _a, _b, segment in hops)
             cache[key] = (points, cumulative_distances(points), not real)
     return cache[key]
 
