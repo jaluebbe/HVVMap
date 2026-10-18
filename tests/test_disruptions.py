@@ -192,3 +192,13 @@ def test_build_disruptions_geojson_messages_one_entry_per_distinct_announcement(
     messages = feature["properties"]["messages"]
     assert [m["summary"] for m in messages] == ["Meldung A", "Meldung B"]
     assert [m["description"] for m in messages] == ["Text A", "Text B"]
+
+
+def test_build_disruptions_geojson_resolves_global_station_ids():
+    data = {
+        "announcements": [
+            _announcement("U1-Sperrung", "", "de:02000:1", "de:02000:2"),
+        ]
+    }
+    result = build_disruptions_geojson(data, STATIONS, now=NOW)
+    assert len(result["features"]) == 2

@@ -30,7 +30,7 @@ ACCESSIBILITY_PATTERNS = [
 # description, since the actual "no trains" wording often only appears there.
 CLOSURE_PATTERNS = [
     re.compile(r"Sperrung", re.IGNORECASE),
-    re.compile(r"fahren (keine|nicht)", re.IGNORECASE),
+    re.compile(r"f[aä]hr(en|t) (keine|nicht)", re.IGNORECASE),
     re.compile(r"keine Züge", re.IGNORECASE),
     re.compile(r"unterbrochen", re.IGNORECASE),
     re.compile(r"kein Zugverkehr", re.IGNORECASE),
