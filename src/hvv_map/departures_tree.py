@@ -70,22 +70,12 @@ def ubahn_series(number) -> str | None:
     return None
 
 
-def _vehicle_order(vehicle: dict) -> tuple:
-    """Numbers first, ascending; the API's order of a unit list is not stable."""
-    number = str(vehicle.get("number") or "")
-    return (
-        not number,
-        int(number) if number.isdigit() else 0,
-        number,
-        str(vehicle.get("id")),
-    )
-
-
 def vehicles_text(vehicles, ubahn: bool = False) -> str:
-    """ "DT5.1 (417), ..." for a departure's vehicles list, "" if none; U-Bahn
-    units lead with their series, the id is used only when there is no number."""
+    """ "DT5.1 (417), ..." for a departure's vehicles list, "" if none, in the
+    order the API reports (the physical unit order); U-Bahn units lead with
+    their series, the id is used only when there is no number."""
     parts = []
-    for vehicle in sorted(vehicles or [], key=_vehicle_order):
+    for vehicle in vehicles or []:
         number, vehicle_id = vehicle.get("number"), vehicle.get("id")
         series = ubahn_series(number) if ubahn else None
         text = " ".join(
