@@ -9,17 +9,18 @@ Three independent deployables sharing one Python package (`hvv_map`) and
 one Redis instance:
 
 - **fetcher** (`hvv_map.fetcher`) - background loop polling the HVV GTI API
-  (`getVehicleMap`, `getAnnouncements`, `listLines`, `listStations`),
-  respecting its 1 req/s rate limit. Writes GeoJSON layers to Redis:
-  `hvv:positions`, `hvv:positions_realtime`, `hvv:disruptions`,
-  `hvv:reference_lines`, `hvv:reference_stops`. Needs GTI credentials, no
-  web-facing port.
+  (`getAnnouncements`, `listLines`, `listStations`, `departureList`,
+  `departureCourse`), respecting its 1 req/s rate limit. Writes to Redis:
+  `hvv:disruptions`, `hvv:departures:*`, `hvv:trips:courses`, `hvv:stations`,
+  `hvv:sublines`. A second thread (`hvv_map.trip_positions`) computes the
+  vehicle positions once per second from that data and writes
+  `hvv:positions_gtilive`. Needs GTI credentials, no web-facing port.
 - **gtfs-fetcher** (`hvv_map.gtfs_fetcher`) - background loop building the
   same kind of layers purely from a static GTFS feed on disk - no GTI
   credentials, no live API, no disruptions (a static feed has none). Writes
   `hvv:gtfs:positions`, `hvv:gtfs:reference_lines`, `hvv:gtfs:reference_stops`.
 - **api** (`hvv_map.api`) - FastAPI app serving all of the above under
-  `/api/hvv/live/*`, `/api/hvv/realtime/*` and `/api/hvv/gtfs/*`, plus a
+  `/api/hvv/live/*`, `/api/hvv/gtilive/*` and `/api/hvv/gtfs/*`, plus a
   background vector basemap (a single `.mbtiles` file) and the static
   frontend. Needs only Redis, no GTI credentials, no GTFS feed.
 
@@ -30,12 +31,15 @@ Supporting modules (all under `src/hvv_map/`):
 | `gti_client.py` | GTI API HTTP client (signing, credentials) |
 | `redis_client.py` | shared Redis connection helper |
 | `lines.py` / `stations.py` | GTI line/station reference data |
-| `segment_cache.py` | SQLite cache of observed segment geometry, growing organically as the fetcher runs |
-| `positions.py` | interpolation math (position along a segment at a given time) |
-| `geojson.py` | builds `hvv:positions`/`hvv:positions_realtime` from a `getVehicleMap` response |
+| `departures.py` / `departures_live.py` | planned (`hvv:departures:by_service`) and live (`hvv:departures:live`) departure snapshots |
+| `trip_courses.py` | `departureCourse` per running trip (`hvv:trips:courses`) |
+| `trips.py` | trip table: planned trips compared with live departures and courses |
+| `trip_position.py` | locates a trip at a stop or between two stops at a given time |
+| `trip_positions.py` | builds `hvv:positions_gtilive` from the trip table, once per second |
+| `gti_shapes.py` / `gtilive_geojson.py` | track geometry per subline (SQLite) and the `gtilive` lines/stops layers |
+| `geometry.py` | distance helpers for walking along a polyline |
 | `announcement_categories.py` | our own SPERRUNG/BARRIEREFREIHEIT/SONSTIGE classification per announcement - dependency-free (stdlib only), importable by both the fetcher and the API server |
 | `disruptions.py` | builds `hvv:disruptions` from a `getAnnouncements` response, using `announcement_categories.py` for classification |
-| `reference_geojson.py` | builds `hvv:reference_lines`/`hvv:reference_stops` from `segment_cache` + station data |
 | `gtfs_schedule.py` | parses a static GTFS feed into an in-memory schedule, locates a trip's position at a given time |
 | `gtfs_geojson.py` | builds the three `hvv:gtfs:*` layers from a loaded `Schedule` |
 
@@ -59,14 +63,14 @@ GTI_USER=... GTI_HMAC_SECRET=... hvvmap-fetcher
 ```
 (or via `credentials.json`, see `hvv_map.gti_client`)
 
-`SEGMENT_CACHE_PATH` defaults to a bare relative filename, resolved against
+`GTI_SHAPES_DB_PATH` defaults to a bare relative filename, resolved against
 whatever directory a command happens to run in - if you invoke `hvvmap-*`
 commands from outside a container (own venv, not `docker exec`), set it to
 an absolute path once in your shell profile, or every run from a different
 directory silently creates a fresh, empty database instead of using the
 real one:
 ```
-export SEGMENT_CACHE_PATH=/absolute/path/to/segment_cache.db
+export GTI_SHAPES_DB_PATH=/absolute/path/to/gti_shapes.db
 ```
 
 Run the GTFS fetcher (needs a static GTFS feed - `agency.txt`, `routes.txt`,
@@ -75,7 +79,7 @@ Run the GTFS fetcher (needs a static GTFS feed - `agency.txt`, `routes.txt`,
 ```
 GTFS_DIR=/path/to/gtfs hvvmap-gtfs-fetcher
 ```
-`GTFS_DIR` defaults to `data/gtfs`, relative like `SEGMENT_CACHE_PATH` above
+`GTFS_DIR` defaults to `data/gtfs`, relative like `GTI_SHAPES_DB_PATH` above
 - same caveat about the current working directory applies.
 
 Run the API:
@@ -101,24 +105,20 @@ already fetches. If you don't want to wait, run once manually:
 hvvmap-stations
 ```
 
-Everything else self-starts too: `hvv:positions`/`hvv:positions_realtime`,
-`hvv:announcements`/`hvv:disruptions`, and the reference layers
-(`hvv:reference_lines`/`hvv:reference_stops`) all begin populating within
-the fetcher's first few loop cycles - though the reference layers start out
-empty (or nearly so) and fill in gradually as the fetcher observes real
-vehicle movement, not instantly. The GTFS layers need no such warm-up -
+Everything else self-starts too: `hvv:announcements`/`hvv:disruptions`,
+the departure snapshots and `hvv:positions_gtilive` begin populating within
+the fetcher's first few loop cycles; the positions fill in as the trip
+courses and subline tracks arrive. The GTFS layers need no such warm-up -
 they're built directly from the static feed on first run.
 
 ### One-off CLI commands
 
 - `hvvmap-stations` - immediate `hvv:stations` refresh instead of waiting
-  for the next automatic reference rebuild; safe to re-run any time
+  for the fetcher's next automatic one (every 6 h); safe to re-run any time
 - `hvvmap-lines` - a lookup tool for line names/ids (`hvvmap-lines A1`
   filters by name); not read by the running system, purely diagnostic
-- `hvvmap-reference` - (re)build `hvv:reference_lines`/`hvv:reference_stops`
-  immediately, instead of waiting for the fetcher's own periodic rebuild
-- `hvvmap-fetch-vehiclemap` / `hvvmap-fetch-announcements` - one-shot fetches
-  for manual inspection via `redis-cli`
+- `hvvmap-fetch-announcements` - one-shot fetch for manual inspection via
+  `redis-cli`
 - `hvvmap-gtfs-fetch-once` - one-shot GTFS layer build, same idea for the
   `hvv:gtfs:*` keys
 
@@ -130,18 +130,17 @@ vehicle-type checks) - not part of the installed package.
 `static/` ships map pages built on MapLibre GL JS, all served by the same
 `api.py`:
 
-- `maplibre_map_hvv_live.html` - all modes; the data source (`live`,
-  `realtime`, `gtfs`, `gtilive`) is switched at runtime via a dropdown, no
-  page reload needed; see `maplibre_map_hvv_base.js`'s `SOURCES`. Defaults to
-  `gtilive`.
+- `maplibre_map_hvv_live.html` - all modes; the data source (`gtilive`,
+  `gtfs`) is switched at runtime via a dropdown, no page reload needed; see
+  `maplibre_map_hvv_base.js`'s `SOURCES`. Defaults to `gtilive`.
 - `maplibre_map_hvv_ubahn.html` - the same page restricted to the U-Bahn,
   centered on Betriebshof Barmbek, with U1-U4 toggleable individually. Page
   options are set via `window.HVV_PAGE_CONFIG` (see `maplibre_map_hvv_base.js`).
 - `maplibre_map_hvv_gtilive.html` - only the `gtilive` source.
 
-The Leaflet pages were removed; the last state with them is commit
-`7eb1671` (`git checkout 7eb1671`, or
-`git show 7eb1671:static/leaflet_map_hvv_live.html`).
+The Leaflet pages were removed; the last state with them is tagged
+`legacy-leaflet-vehiclemap` (`git checkout legacy-leaflet-vehiclemap`, or
+`git show legacy-leaflet-vehiclemap:static/leaflet_map_hvv_live.html`).
 
 `index.html` is the landing page linking to all of them.
 
@@ -183,27 +182,22 @@ The **gtfs-fetcher** image needs a static GTFS feed mounted at `GTFS_DIR`
 All images read `REDIS_HOST`/`REDIS_DB` (default `127.0.0.1`/`0`); only the
 GTI fetcher needs `GTI_USER`/`GTI_HMAC_SECRET`.
 
+## History
+
+The `getVehicleMap` implementation (fetcher job, `segment_cache`,
+`reference_geojson`, the `live`/`realtime` sources and their endpoints) was
+removed to save API requests. The last state with it is tagged
+`legacy-vehiclemap` (`git show legacy-vehiclemap:src/hvv_map/fetcher.py`).
+
 ## Notable data quirks
 
-- S1 has a data quirk where some journey representations carry a stale
-  `destination` - see `_s1_should_keep()` in `geojson.py`.
-- `hvv:positions` is built from the `realtime=False` API variant,
-  `hvv:positions_realtime` from `realtime=True` - both actively served
-  (`/api/hvv/live/positions.geojson` and `/api/hvv/realtime/...`), not just
-  kept for comparison. The `realtime=False` variant does not reflect
-  unplanned service detours (e.g. a closure) and keeps showing journeys
-  along the original route; `realtime=True` reflects at least some such
-  detours, though inconsistently across lines (some correctly truncated,
-  others still showing unaffected full-length trips) - neither is fully
-  reliable, but `realtime=True` is the closer approximation, hence the
-  MapLibre page's default.
-- The fetcher makes an actual `getVehicleMap` call only every
-  `VEHICLE_MAP_FETCH_INTERVAL` seconds; both `hvv:positions` and
-  `hvv:positions_realtime` are re-interpolated every loop cycle from the
-  last fetched data, keeping movement smooth without polling that often.
-- `segment_cache.db` (SQLite) grows organically from observed vehicle
-  movement; entries not re-observed within `STALE_THRESHOLD_SECONDS` age
-  out of the reference layers automatically.
+- GTI delivers vehicle numbers only for the U-Bahn and only with the matched
+  live departure; the trip table remembers them per trip (`hvv:trips:vehicles`)
+  while a running trip has no live match.
+- The GTI-Live positions are minute-accurate at best (planned and live times
+  have no seconds), so vehicles departing in the same minute move in sync.
+- Straight links (shapes with sparse points, e.g. replacement buses) are
+  flagged `straight` and only drawn with the "Luftlinien" checkbox.
 - GTFS-based positions interpolate linearly between two consecutive stops,
   not along the actual `shapes.txt` geometry - matching a trip's stops to
   its shape reliably would need `shape_dist_traveled`, which isn't

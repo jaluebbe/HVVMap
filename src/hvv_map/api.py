@@ -6,8 +6,7 @@ Serves two independent things, read-only:
 - the live HVV GeoJSON layers, built and cached in Redis by the separate
   hvvmap-fetcher process - pure passthrough, no computation here
 
-Needs only Redis and the mounted .mbtiles file - no GTI credentials, no
-segment_cache.
+Needs only Redis and the mounted .mbtiles file - no GTI credentials.
 """
 
 import json
@@ -203,16 +202,6 @@ def _read_sublines_cache() -> dict:
     return json.loads(raw)["lines"]
 
 
-@app.get("/api/hvv/live/positions.geojson", tags=["hvv_live"])
-def get_live_positions():
-    return _read_cached_json("hvv:positions")
-
-
-@app.get("/api/hvv/realtime/positions.geojson", tags=["hvv_realtime"])
-def get_realtime_positions():
-    return _read_cached_json("hvv:positions_realtime")
-
-
 @app.get("/api/hvv/live/disruptions.geojson", tags=["hvv_live"])
 def get_live_disruptions():
     return _read_cached_json("hvv:disruptions")
@@ -230,16 +219,6 @@ def get_announcement_categories():
     announcement id - not an HVV API field."""
     announcements = _read_cached_json("hvv:announcements").get("announcements", [])
     return {a["id"]: classify_category(a) for a in announcements if "id" in a}
-
-
-@app.get("/api/hvv/live/stops.geojson", tags=["hvv_live"])
-def get_live_stops():
-    return _read_cached_json("hvv:reference_stops")
-
-
-@app.get("/api/hvv/live/lines.geojson", tags=["hvv_live"])
-def get_live_lines():
-    return _read_cached_json("hvv:reference_lines")
 
 
 @app.get("/api/hvv/live/lines.json", tags=["hvv_live"])
@@ -338,7 +317,7 @@ def get_departures_by_trip():
     return {**_departures_meta(payload, anchor), **tree}
 
 
-# --- gti-live layers: departureList/sublines based, no getVehicleMap -------
+# --- gti-live layers: departureList/sublines based ---------------------------
 # Built on the fly from departures.py's cached grouping (hvv:departures:by_service)
 # and hvv:stations - cheap enough, and by_service itself only changes once a day.
 

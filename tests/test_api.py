@@ -110,21 +110,17 @@ def test_vector_style_404_for_unknown_style(client):
 
 def test_live_endpoint_503_when_redis_key_missing(client):
     redis_client = get_redis_client()
-    redis_client.delete("hvv:positions")
-    response = client.get("/api/hvv/live/positions.geojson")
+    redis_client.delete("hvv:positions_gtilive")
+    response = client.get("/api/hvv/gtilive/positions.geojson")
     assert response.status_code == 503
 
 
 @pytest.mark.parametrize(
     "path,redis_key",
     [
-        ("/api/hvv/live/positions.geojson", "hvv:positions"),
-        ("/api/hvv/realtime/positions.geojson", "hvv:positions_realtime"),
         ("/api/hvv/gtilive/positions.geojson", "hvv:positions_gtilive"),
         ("/api/hvv/live/disruptions.geojson", "hvv:disruptions"),
         ("/api/hvv/live/announcements.json", "hvv:announcements"),
-        ("/api/hvv/live/stops.geojson", "hvv:reference_stops"),
-        ("/api/hvv/live/lines.geojson", "hvv:reference_lines"),
     ],
 )
 def test_live_endpoint_returns_stored_geojson(client, path, redis_key):

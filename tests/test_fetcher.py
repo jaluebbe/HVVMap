@@ -1,184 +1,40 @@
-import json
-import time
 from unittest.mock import patch
 
 import hvv_map.fetcher as fetcher
-from hvv_map.fetcher import _is_wanted, _store
-from hvv_map.redis_client import get_redis_client
 
 
-def test_non_regionalbus_always_wanted():
-    for vehicle_type in ["U_BAHN", "S_BAHN", "A_BAHN", "SCHIFF"]:
-        journey = {"vehicleType": vehicle_type, "line": {"id": "anything"}}
-        assert _is_wanted(journey)
+class _FakeRedis:
+    def __init__(self):
+        self.values = {}
+
+    def set(self, key, value, ex=None):
+        self.values[key] = value
 
 
-def test_known_replacement_bus_wanted():
-    journey = {
-        "vehicleType": "REGIONALBUS",
-        "line": {"id": "HHA-B:U1-ERSATZ_HHA-B", "name": "U1-ERSATZ"},
-    }
-    assert _is_wanted(journey)
+def test_fetch_stations_catalog_stores_the_station_list():
+    stations = ["station"]
+    fake_redis = _FakeRedis()
+    with (
+        patch.object(fetcher, "redis_client", fake_redis),
+        patch.object(fetcher, "fetch_stations", return_value=stations) as fetch,
+        patch.object(fetcher, "store_stations") as store,
+    ):
+        fetcher.fetch_stations_catalog()
+
+    fetch.assert_called_once_with(fetcher.gti)
+    store.assert_called_once_with(fake_redis, stations)
 
 
-def test_unrelated_regionalbus_rejected():
-    journey = {
-        "vehicleType": "REGIONALBUS",
-        "line": {"id": "HHA-B:175_HHA-B", "name": "175"},
-    }
-    assert not _is_wanted(journey)
+def test_store_wraps_the_data_with_a_timestamp_and_ttl():
+    fake_redis = _FakeRedis()
+    with patch.object(fetcher, "redis_client", fake_redis):
+        fetcher._store("hvv:test", {"features": []}, ttl=10)
 
+    import json
 
-def test_all_usa_prefixed_replacement_bus_names_are_wanted():
-    # Any REGIONALBUS journey named like a U/S/A replacement service is
-    # wanted, whatever its line id.
-    for name in ["U1-ERSATZ", "U1-DIREKT", "A1-SEV", "A2-SEV", "A3-Bus",
-                 "S1-SEV", "S2-SEV", "S3-SEV", "S5-SEV", "S7-SEV"]:  # fmt: skip
-        journey = {"vehicleType": "REGIONALBUS", "line": {"id": "x", "name": name}}
-        assert _is_wanted(journey)
-
-
-def test_store_with_publish_sends_same_payload_to_matching_channel():
-    redis_client = get_redis_client()
-    pubsub = redis_client.pubsub()
-    pubsub.subscribe("hvv:test-channel")
-    pubsub.get_message(timeout=1)  # discard the subscribe-confirmation event
-
-    _store("hvv:test-channel", {"features": []}, ttl=10, publish=True)
-
-    message = pubsub.get_message(timeout=2)
-    assert message is not None
-    assert message["channel"] == "hvv:test-channel"
-    payload = json.loads(message["data"])
+    payload = json.loads(fake_redis.values["hvv:test"])
     assert payload["data"] == {"features": []}
     assert "fetched_at" in payload
-
-    # published payload must match what was actually stored under the key
-    stored = json.loads(redis_client.get("hvv:test-channel"))
-    assert stored == payload
-
-
-def test_store_without_publish_sends_no_message():
-    redis_client = get_redis_client()
-    pubsub = redis_client.pubsub()
-    pubsub.subscribe("hvv:test-channel-2")
-    pubsub.get_message(timeout=1)
-
-    _store("hvv:test-channel-2", {"features": []}, ttl=10, publish=False)
-
-    assert pubsub.get_message(timeout=1) is None
-
-
-def _fake_response(now, journey_id="test-journey"):
-    return {
-        "returnCode": "OK",
-        "journeys": [
-            {
-                "journeyID": journey_id,
-                "vehicleType": "U_BAHN",
-                "line": {"id": "HHA-U:U1_HHA-U", "name": "U1", "type": {}},
-                "segments": [
-                    {
-                        "startStopPointKey": "A",
-                        "endStopPointKey": "B",
-                        "startDateTime": now,
-                        "endDateTime": now + 20,
-                        "destination": "Ohlstedt",
-                        "track": {"track": [10.0, 53.5, 10.01, 53.51]},
-                    }
-                ],
-            }
-        ],
-    }
-
-
-def test_rebuild_positions_does_nothing_without_prior_fetch():
-    fetcher._last_no_realtime_response = None
-    redis_client = get_redis_client()
-    redis_client.delete("hvv:positions")
-
-    fetcher._rebuild_positions()
-
-    assert redis_client.get("hvv:positions") is None
-
-
-def test_fetch_vehicle_map_no_realtime_populates_positions():
-    now = int(time.time())
-    with patch.object(fetcher.gti, "send", return_value=_fake_response(now)):
-        fetcher.fetch_vehicle_map(realtime=False)
-
-    stored = json.loads(fetcher.redis_client.get("hvv:positions"))
-    assert len(stored["data"]["features"]) == 1
-
-
-def test_fetch_vehicle_map_realtime_does_not_touch_cached_response():
-    fetcher._last_no_realtime_response = None
-    now = int(time.time())
-    with patch.object(fetcher.gti, "send", return_value=_fake_response(now)):
-        fetcher.fetch_vehicle_map(realtime=True)
-
-    assert fetcher._last_no_realtime_response is None
-
-
-def test_rebuild_positions_reinterpolates_without_new_fetch():
-    now = int(time.time())
-    with patch.object(fetcher.gti, "send", return_value=_fake_response(now)):
-        fetcher.fetch_vehicle_map(realtime=False)
-
-    first = json.loads(fetcher.redis_client.get("hvv:positions"))
-    first_progress = first["data"]["features"][0]["properties"]["progress"]
-
-    # no new fetch - only a later time for re-interpolation
-    with patch.object(time, "time", return_value=now + 10):
-        fetcher._rebuild_positions()
-
-    second = json.loads(fetcher.redis_client.get("hvv:positions"))
-    second_progress = second["data"]["features"][0]["properties"]["progress"]
-    assert second_progress > first_progress
-
-
-def test_rebuild_positions_realtime_does_nothing_without_prior_fetch():
-    fetcher._last_realtime_response = None
-    redis_client = get_redis_client()
-    redis_client.delete("hvv:positions_realtime")
-
-    fetcher._rebuild_positions_realtime()
-
-    assert redis_client.get("hvv:positions_realtime") is None
-
-
-def test_fetch_vehicle_map_realtime_populates_positions_realtime():
-    now = int(time.time())
-    with patch.object(fetcher.gti, "send", return_value=_fake_response(now)):
-        fetcher.fetch_vehicle_map(realtime=True)
-
-    stored = json.loads(fetcher.redis_client.get("hvv:positions_realtime"))
-    assert len(stored["data"]["features"]) == 1
-
-
-def test_fetch_vehicle_map_no_realtime_does_not_touch_realtime_cache():
-    fetcher._last_realtime_response = None
-    now = int(time.time())
-    with patch.object(fetcher.gti, "send", return_value=_fake_response(now)):
-        fetcher.fetch_vehicle_map(realtime=False)
-
-    assert fetcher._last_realtime_response is None
-
-
-def test_rebuild_positions_realtime_reinterpolates_without_new_fetch():
-    now = int(time.time())
-    with patch.object(fetcher.gti, "send", return_value=_fake_response(now)):
-        fetcher.fetch_vehicle_map(realtime=True)
-
-    first = json.loads(fetcher.redis_client.get("hvv:positions_realtime"))
-    first_progress = first["data"]["features"][0]["properties"]["progress"]
-
-    with patch.object(time, "time", return_value=now + 10):
-        fetcher._rebuild_positions_realtime()
-
-    second = json.loads(fetcher.redis_client.get("hvv:positions_realtime"))
-    second_progress = second["data"]["features"][0]["properties"]["progress"]
-    assert second_progress > first_progress
 
 
 def test_fetch_gti_shapes_runs_the_update_and_closes_the_database():

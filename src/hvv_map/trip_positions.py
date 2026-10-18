@@ -1,6 +1,6 @@
 """Vehicle positions from the trip table: every running trip is located with
 trip_position.locate() and placed on its station or along the stored track
-of its current segment. Same GeoJSON properties as geojson.py."""
+of its current segment."""
 
 import json
 import sqlite3
@@ -10,12 +10,11 @@ from datetime import datetime
 from hvv_map.departures import REDIS_ANCHOR_KEY, REDIS_BY_SERVICE_KEY, berlin_now
 from hvv_map.departures_live import REDIS_LIVE_KEY
 from hvv_map.departures_tree import parse_anchor
-from hvv_map.geojson import ICON_HEIGHT
+from hvv_map.geometry import cumulative_distances, point_at_distance
 from hvv_map.gti_shapes import open_db as open_shapes_db
 from hvv_map.gti_shapes import subline_hops
 from hvv_map.gtilive_geojson import _subline_coordinates
 from hvv_map.lines import replacement_bus_mode
-from hvv_map.positions import _cumulative_distances, _point_at_distance
 from hvv_map.redis_client import get_redis_client
 from hvv_map.stations import StationInfo, by_id, load_stations
 from hvv_map.trip_courses import REDIS_COURSES_KEY
@@ -27,6 +26,7 @@ from hvv_map.trips import (
     remember_vehicles,
 )
 
+ICON_HEIGHT = 10
 REDIS_POSITIONS_KEY = "hvv:positions_gtilive"
 POSITIONS_TTL = 120
 VEHICLES_TTL = 24 * 3600
@@ -46,7 +46,7 @@ def _track(start, end, stations, shapes_conn, cache):
         else:
             hops = subline_hops(shapes_conn, (start, end))
             real = any(segment and len(segment) > 2 for _a, _b, segment in hops)
-            cache[key] = (points, _cumulative_distances(points), not real)
+            cache[key] = (points, cumulative_distances(points), not real)
     return cache[key]
 
 
@@ -69,7 +69,7 @@ def _coordinates(
     if track is None:
         return None
     points, distances, straight = track
-    point = _point_at_distance(points, distances, position.progress * distances[-1])
+    point = point_at_distance(points, distances, position.progress * distances[-1])
     return point, straight
 
 

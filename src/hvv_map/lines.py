@@ -1,7 +1,7 @@
 """Fetch and structure the HVV line catalog via listLines.
 
-Basis for deciding icon lineKeys and which vehicleTypes to request from
-getAnnouncements/getVehicleMap.
+Basis for deciding icon lineKeys and which lines to request from
+getAnnouncements.
 """
 
 from __future__ import annotations
@@ -149,51 +149,6 @@ def lines_of_interest(lines: list[LineInfo]) -> list[LineInfo]:
     return [line for line in lines if is_line_of_interest(line)]
 
 
-@dataclass(frozen=True)
-class SublineInfo:
-    line_name: str  # e.g. "U1"
-    line_id: str  # lineKey, e.g. "HHA-U:U1_HHA-U" - for REPLACEMENT_BUS_MODES lookup
-    subline_number: str  # unstable across data versions, don't persist as a key
-    vehicle_type: str  # e.g. "U_BAHN", "REGIONALBUS"
-    station_ids: tuple[str, ...]  # ordered, per SublineListEntry.stationSequence
-
-
-def fetch_sublines(client: GtiClient) -> list[SublineInfo]:
-    """Fetch all sublines (with their ordered station sequence) for lines of
-    interest - the basis for building a reference stops/lines layer without
-    GTFS. StationLight only has id+name, no coordinates - resolve via
-    stations.py separately."""
-    request = {
-        "dataReleaseID": "",
-        "modificationTypes": ["MAIN"],
-        "withSublines": True,
-    }
-    response = client.send("listLines", request)
-    sublines = []
-    for entry in response.get("lines", []):
-        service_type = entry.get("type") or {}
-        line = LineInfo(
-            id=entry.get("id", ""),
-            name=entry.get("name", ""),
-            carrier_short=entry.get("carrierNameShort", ""),
-            simple_type=service_type.get("simpleType", ""),
-        )
-        if not is_line_of_interest(line):
-            continue
-        for sub in entry.get("sublines", []):
-            station_ids = tuple(s.get("id", "") for s in sub.get("stationSequence", []))
-            sublines.append(
-                SublineInfo(
-                    line_name=line.name,
-                    line_id=line.id,
-                    subline_number=sub.get("sublineNumber", ""),
-                    vehicle_type=sub.get("vehicleType", ""),
-                    station_ids=station_ids,
-                )
-            )
-    return sublines
-
-
 # Persisted sublines cache, one Redis key, rebuilt from scratch on every
 # update (see update_sublines_cache). The (line_name, start, end) -> variants
 # index is derived from this on read, not stored separately.
@@ -267,31 +222,6 @@ def update_sublines_cache(client: GtiClient, redis_client: redis.Redis) -> dict:
     merged = _sublines_by_line_id(response.get("lines", []))
     store_sublines_cache(redis_client, response.get("dataReleaseID", ""), merged)
     return merged
-
-
-def sublines_from_cache(
-    client: GtiClient, redis_client: redis.Redis
-) -> list[SublineInfo]:
-    """Reconstruct list[SublineInfo] from the persisted hvv:sublines cache -
-    no API call needed once it's populated (falls back to populating it if
-    empty). subline_number is left blank - unstable, never needed here."""
-    _, lines = load_sublines_cache(redis_client)
-    if not lines:
-        lines = update_sublines_cache(client, redis_client)
-    sublines = []
-    for line_id, entry in lines.items():
-        line_name = entry["line_name"]
-        for sub in entry["sublines"]:
-            sublines.append(
-                SublineInfo(
-                    line_name=line_name,
-                    line_id=line_id,
-                    subline_number="",
-                    vehicle_type=sub["vehicle_type"],
-                    station_ids=tuple(s["id"] for s in sub["stations"]),
-                )
-            )
-    return sublines
 
 
 def index_by_start_end(lines: dict) -> dict:

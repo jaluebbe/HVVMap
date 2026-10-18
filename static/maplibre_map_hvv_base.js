@@ -495,19 +495,14 @@ function buildMarkerElement(properties) {
 // Built-in data sources - GTFS has no disruptions endpoint (null skips that layer).
 const ALL_SOURCES = [
     {
-        key: 'live',
-        name: 'Live',
-        positionsEndpoint: '/api/hvv/live/positions.geojson',
-        linesEndpoint: '/api/hvv/live/lines.geojson',
-        stopsEndpoint: '/api/hvv/live/stops.geojson',
-        disruptionsEndpoint: '/api/hvv/live/disruptions.geojson',
-    },
-    {
-        key: 'realtime',
-        name: 'Realtime',
-        positionsEndpoint: '/api/hvv/realtime/positions.geojson',
-        linesEndpoint: '/api/hvv/live/lines.geojson',
-        stopsEndpoint: '/api/hvv/live/stops.geojson',
+        // departureList/sublines based, vehicles computed from the trip table.
+        key: 'gtilive',
+        name: 'GTI-Live',
+        // Hops without a stored track (properties.straight) get a "Luftlinien" toggle.
+        straightToggle: true,
+        positionsEndpoint: '/api/hvv/gtilive/positions.geojson',
+        linesEndpoint: '/api/hvv/gtilive/lines.geojson',
+        stopsEndpoint: '/api/hvv/gtilive/stops.geojson',
         disruptionsEndpoint: '/api/hvv/live/disruptions.geojson',
     },
     {
@@ -520,23 +515,12 @@ const ALL_SOURCES = [
         // Shapes and segments without a track (properties.straight) get a "Luftlinien" toggle.
         straightToggle: true,
     },
-    {
-        // departureList/sublines based, vehicles computed from the trip table.
-        key: 'gtilive',
-        name: 'GTI-Live',
-        // Hops without a stored track (properties.straight) get a "Luftlinien" toggle.
-        straightToggle: true,
-        positionsEndpoint: '/api/hvv/gtilive/positions.geojson',
-        linesEndpoint: '/api/hvv/gtilive/lines.geojson',
-        stopsEndpoint: '/api/hvv/gtilive/stops.geojson',
-        disruptionsEndpoint: '/api/hvv/live/disruptions.geojson',
-    },
 ];
 const SOURCES = PAGE_CONFIG.sourceKeys
     ? ALL_SOURCES.filter((s) => PAGE_CONFIG.sourceKeys.includes(s.key))
     : ALL_SOURCES;
 
-// initialSourceKey defaults to 'live' when omitted or unknown.
+// initialSourceKey defaults to the first source when omitted or unknown.
 function initHvvVehicleLayers(initialSourceKey) {
     // Single shared popup (vehicles/stops/disruptions); anchor:'bottom' points its tip straight down.
     const hoverPopup = new maplibregl.Popup({ closeButton: false, closeOnClick: false, anchor: 'bottom' });

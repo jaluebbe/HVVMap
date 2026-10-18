@@ -7,7 +7,7 @@ are needed for it.
 
 departureCourse's own station ids match listLines/hvv:stations directly
 (e.g. "Master:81950"), so segment geometry is keyed on those - no
-stopPointKey crosswalk needed, unlike the getVehicleMap-era segment_cache.
+stopPointKey crosswalk needed.
 
 Two tables in one SQLite file (data/gti_shapes.db by default):
 - segments: per (from_station_id, to_station_id) LineString geometry, from

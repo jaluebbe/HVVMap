@@ -4,7 +4,6 @@ from hvv_map.lines import (
     LineInfo,
     by_name,
     fetch_lines,
-    fetch_sublines,
     is_line_of_interest,
     lines_of_interest,
     load_sublines_cache,
@@ -184,32 +183,6 @@ def _client_with_sublines(response):
     client = MagicMock()
     client.send.return_value = response
     return client
-
-
-def test_fetch_sublines_parses_station_sequence():
-    sublines = fetch_sublines(_client_with_sublines(FAKE_SUBLINE_RESPONSE))
-    assert sublines[0].line_name == "U1"
-    assert sublines[0].line_id == "HHA-U:U1_HHA-U"
-    assert sublines[0].vehicle_type == "U_BAHN"
-    assert sublines[0].station_ids == ("Master:1", "Master:2")
-
-
-def test_fetch_sublines_returns_all_sublines_of_a_line():
-    sublines = fetch_sublines(_client_with_sublines(FAKE_SUBLINE_RESPONSE))
-    u1_sublines = [s for s in sublines if s.line_name == "U1"]
-    assert len(u1_sublines) == 2
-
-
-def test_fetch_sublines_filters_out_uninteresting_lines():
-    sublines = fetch_sublines(_client_with_sublines(FAKE_SUBLINE_RESPONSE))
-    assert all(s.line_name != "Metrobus 5" for s in sublines)
-
-
-def test_fetch_sublines_sends_with_sublines_flag():
-    client = _client_with_sublines(FAKE_SUBLINE_RESPONSE)
-    fetch_sublines(client)
-    request = client.send.call_args[0][1]
-    assert request["withSublines"] is True
 
 
 S1_ENTRY = {

@@ -1,7 +1,5 @@
 """Build the gti-live stops/lines GeoJSON layers straight from departureList
-data (see departures.py) - a proof of concept for an anchor-departures +
-sublines based alternative to the segment_cache/getVehicleMap-driven
-reference layers, with no dependency on getVehicleMap at all.
+data (see departures.py) and the stored sublines.
 """
 
 import sqlite3
