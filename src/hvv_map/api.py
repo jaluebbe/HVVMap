@@ -21,6 +21,7 @@ from fastapi.responses import FileResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 
 from hvv_map.announcement_categories import classify_category
+from hvv_map.departures import berlin_now
 from hvv_map.departures_tree import build_station_tree, build_trip_tree, parse_anchor
 from hvv_map.gti_shapes import DEFAULT_DB_PATH as GTI_SHAPES_DB_PATH
 from hvv_map.gti_shapes import apply_derived_sublines, read_course_log
@@ -333,7 +334,7 @@ def get_trips():
     raw_vehicles = _redis_client.get(REDIS_VEHICLES_KEY)
     memory = json.loads(raw_vehicles)["data"] if raw_vehicles else {}
     table = build_trip_table(
-        plan, _read_anchor(), live_payload["data"], courses, memory
+        plan, _read_anchor(), live_payload["data"], courses, memory, berlin_now()
     )
     return {"fetched_at": live_payload.get("fetched_at"), **table}
 
