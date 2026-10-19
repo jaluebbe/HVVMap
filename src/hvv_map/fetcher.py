@@ -25,7 +25,7 @@ from hvv_map.disruptions import (
     build_disruptions_geojson,
     extract_announcement_station_names,
 )
-from hvv_map.departures import run_daily_snapshots
+from hvv_map.departures import run_daily_snapshots, snapshots_stale
 from hvv_map.departures_live import run_live_snapshot
 from hvv_map.trip_courses import run_trip_courses
 from hvv_map.trip_positions import run_loop as run_trip_positions_loop
@@ -44,6 +44,7 @@ LIVE_DEPARTURES_INTERVAL = 240.0  # seconds between live departure snapshots (4 
 TRIP_COURSES_INTERVAL = 120.0  # seconds between trip course fetches (2 min)
 GTI_SHAPES_INTERVAL = 1800.0  # seconds between subline/track updates (30 min)
 DAILY_DEPARTURES_INTERVAL = 3600.0  # seconds between daily snapshot checks (1h)
+DAILY_DEPARTURES_RETRY = 60.0  # seconds between retries while the plan is stale
 ANNOUNCEMENTS_TTL = 7200  # seconds - generous headroom above refresh interval
 
 redis_client = get_redis_client()
@@ -144,7 +145,10 @@ def main() -> None:
             elif cycle_start - last_sublines_cache_update >= SUBLINES_CACHE_INTERVAL:
                 update_sublines_cache(gti, redis_client)
                 last_sublines_cache_update = cycle_start
-            elif cycle_start - last_daily_departures >= DAILY_DEPARTURES_INTERVAL:
+            elif cycle_start - last_daily_departures >= DAILY_DEPARTURES_INTERVAL or (
+                cycle_start - last_daily_departures >= DAILY_DEPARTURES_RETRY
+                and snapshots_stale(redis_client)
+            ):
                 last_daily_departures = cycle_start
                 fetch_daily_departures()
             elif cycle_start - last_live_departures >= LIVE_DEPARTURES_INTERVAL:

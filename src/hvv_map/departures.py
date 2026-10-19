@@ -7,7 +7,7 @@ fetcher loop - run manually or on its own schedule.
 
 import json
 import time
-from datetime import datetime, timedelta
+from datetime import datetime
 
 from hvv_map.gti_client import GtiClient
 from hvv_map.lines import LINE_NAME_PATTERN, WANTED_R_BAHN_LINES, load_sublines_cache
@@ -79,27 +79,36 @@ REDIS_BY_SERVICE_KEY = "hvv:departures:by_service"
 REDIS_ANCHOR_KEY = "hvv:departures:anchor_start"
 
 
-QUERY_ANCHOR_HOUR = 4  # most services first run around here
+# GTI resolves the part of a query after midnight with the previous day's
+# timetable, so a plan query must start at 00:00 and end before 24:00.
+QUERY_ANCHOR_HOUR = 0
+PLAN_MINUTES = 24 * 60 - 1
 
 
 def _query_start_time(now: datetime) -> datetime:
-    """Anchor at the most recent ~4:00 - most services first run around
-    then, so this captures the full day's service_id set from one query."""
-    anchor = now.replace(hour=QUERY_ANCHOR_HOUR, minute=0, second=0, microsecond=0)
-    if anchor > now:
-        anchor -= timedelta(days=1)
-    return anchor
+    """Start of the current calendar day: one query holds the day's services."""
+    return now.replace(hour=QUERY_ANCHOR_HOUR, minute=0, second=0, microsecond=0)
+
+
+def snapshots_stale(redis_client, now: datetime | None = None) -> bool:
+    """True if the main or regional snapshot is not anchored at today's start,
+    e.g. right after midnight."""
+    start = _query_start_time(now or berlin_now())
+    return not (
+        _is_current(redis_client, REDIS_MAIN_KEY, start)
+        and _is_current(redis_client, REDIS_R_KEY, start)
+    )
 
 
 def _build_request(
     stations: set[str],
     service_types: list[str],
     start: datetime,
-    minutes: int = 1440,
+    minutes: int = PLAN_MINUTES,
 ) -> dict:
     return {
         "maxList": 25000,
-        "maxTimeOffset": minutes,  # default 24h from start: the full day
+        "maxTimeOffset": minutes,
         "stations": [{"type": "STATION", "name": name} for name in stations],
         "time": {
             "date": start.strftime("%Y-%m-%d"),
@@ -128,14 +137,16 @@ def _is_current(redis_client, key: str, start: datetime) -> bool:
 
 
 def fetch_main_departures(
-    client: GtiClient, start: datetime, minutes: int = 1440
+    client: GtiClient, start: datetime, minutes: int = PLAN_MINUTES
 ) -> dict:
     """departureList across every U/S/AKN/ferry anchor station."""
     request = _build_request(ANCHOR_STATIONS_MAIN, MAIN_SERVICE_TYPES, start, minutes)
     return client.send("departureList", request)
 
 
-def fetch_r_departures(client: GtiClient, start: datetime, minutes: int = 1440) -> dict:
+def fetch_r_departures(
+    client: GtiClient, start: datetime, minutes: int = PLAN_MINUTES
+) -> dict:
     """departureList across the regional-train anchor stations, filtered
     down to WANTED_R_BAHN_LINES - RBAHN alone also returns other DB regional trains
     passing through."""
@@ -161,7 +172,7 @@ def _is_wanted_departure(departure: dict) -> bool:
 
 
 def fetch_sev_departures(
-    client: GtiClient, redis_client, start: datetime, minutes: int = 1440
+    client: GtiClient, redis_client, start: datetime, minutes: int = PLAN_MINUTES
 ) -> dict | None:
     """departureList (incl. bus) across stations currently named in
     active announcements, filtered down to is_line_of_interest() - widens

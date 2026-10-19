@@ -1,4 +1,12 @@
+import json
+from datetime import datetime
+
 from hvv_map.departures import (
+    REDIS_MAIN_KEY,
+    REDIS_R_KEY,
+    _build_request,
+    _query_start_time,
+    snapshots_stale,
     ANCHOR_STATIONS_MAIN,
     ANCHOR_STATIONS_R,
     _anchor_set,
@@ -240,3 +248,34 @@ def test_berlin_now_follows_berlin_time_regardless_of_container_timezone(monkeyp
         monkeypatch.delenv("TZ")
         time_module.tzset()
         os.environ.pop("TZ", None)
+
+
+def test_query_start_is_midnight_of_the_current_day():
+    assert _query_start_time(datetime(2026, 10, 19, 2, 30)) == datetime(2026, 10, 19)
+
+
+def test_plan_query_ends_before_the_next_midnight():
+    request = _build_request({"Altona"}, ["SBAHN"], datetime(2026, 10, 19))
+    assert request["maxTimeOffset"] == 1439
+
+
+class _FakeRedis:
+    def __init__(self, data):
+        self.data = data
+
+    def get(self, key):
+        return self.data.get(key)
+
+
+def _snapshot(date, time):
+    return json.dumps({"data": {"time": {"date": date, "time": time}}})
+
+
+def test_snapshots_are_stale_after_midnight_until_refetched():
+    old = _snapshot("18.10.2026", "00:00")
+    new = _snapshot("19.10.2026", "00:00")
+    now = datetime(2026, 10, 19, 0, 5)
+    stale = _FakeRedis({REDIS_MAIN_KEY: old, REDIS_R_KEY: old})
+    fresh = _FakeRedis({REDIS_MAIN_KEY: new, REDIS_R_KEY: new})
+    assert snapshots_stale(stale, now)
+    assert not snapshots_stale(fresh, now)
