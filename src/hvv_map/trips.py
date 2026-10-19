@@ -783,7 +783,8 @@ def build_trip_table(
     live_trips = [
         t
         for t in live_trips
-        if trip_end(t, (courses or {}).get(course_key(t)))
+        if t["service_id"] not in by_service  # a remembered one the plan now has
+        and trip_end(t, (courses or {}).get(course_key(t)))
         + timedelta(minutes=LIVE_TRIP_KEEP_MINUTES)
         >= live_anchor
     ]

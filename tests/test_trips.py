@@ -636,6 +636,23 @@ def test_live_only_trips_of_known_plan_services_are_not_duplicated():
     assert [e["reason"] for e in table["live_only"]] == ["ohne Plan-Treffer"]
 
 
+def test_remembered_live_trip_is_dropped_once_the_plan_has_the_service():
+    from hvv_map.trips import remember_live_trips
+
+    first = {
+        "anchor": LIVE_ANCHOR,
+        "departures": [_live("S7", "R", 2, 1, service_id=77)],
+    }
+    memory: dict = {}
+    remember_live_trips(memory, build_trip_table({}, PLAN_ANCHOR, first), 1.0)
+    plan = {"77": _plan_entry("S7", 1, [("R", 302), ("W", 304)])}
+    later = {"anchor": LIVE_ANCHOR, "departures": []}
+
+    table = build_trip_table(plan, PLAN_ANCHOR, later, None, memory)
+
+    assert not any(t["live_only"] for t in table["trips"])
+
+
 def _missing_plan():
     plan = dict(PLAN)
     plan["2"] = _plan_entry("U1", 6, [("C", 303), ("D", 308)])
