@@ -765,13 +765,16 @@ def test_missing_trip_seen_live_after_all_is_forgotten():
     assert list(memory) == ["missing:1@2026-10-17T09:02"]
 
 
-def test_api_imports_without_gti_client():
+def test_api_module_imports_without_the_gti_client_dependency():
     import subprocess
     import sys
 
     code = "import sys; sys.modules['requests'] = None; import hvv_map.api"
-    result = subprocess.run([sys.executable, "-c", code], capture_output=True)
-    assert result.returncode == 0, result.stderr.decode()
+    result = subprocess.run(
+        [sys.executable, "-c", code], capture_output=True, text=True
+    )
+
+    assert result.returncode == 0, result.stderr[-400:]
 
 
 def test_regional_trip_is_expected_within_twenty_minutes_but_a_subway_within_five():

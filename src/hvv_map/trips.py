@@ -28,11 +28,6 @@ ID_MATCH_WINDOW_MINUTES = 5  # same serviceId at the station: accept this offset
 GAP_THRESHOLD_MINUTES = 120  # same as departures.GAP_THRESHOLD_MINUTES
 
 
-def berlin_now() -> datetime:
-    """Current Berlin wall-clock time, naive (the container clock may be UTC)."""
-    return datetime.now(ZoneInfo("Europe/Berlin")).replace(tzinfo=None)
-
-
 STATUS_CONFIRMED = "bestätigt"
 STATUS_NOT_SEEN = "nicht gesehen"
 STATUS_CANCELLED = "ausgefallen"
@@ -43,6 +38,11 @@ STATUS_MISSING = "vermutlich ausgefallen"  # expected in the live window, never 
 MISSING_MODES = {"U", "S"}
 LIVE_FRESH_MINUTES = 3
 MISSING_PREFIX = "missing:"  # memory key prefix, see remember_missing
+
+
+def berlin_now() -> datetime:
+    """Current Berlin wall-clock time, naive like the plan and live anchors."""
+    return datetime.now(ZoneInfo("Europe/Berlin")).replace(tzinfo=None)
 
 
 def _is_trip_line(line: dict) -> bool:

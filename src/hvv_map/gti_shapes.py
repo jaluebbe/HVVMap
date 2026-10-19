@@ -32,6 +32,7 @@ from typing import TYPE_CHECKING
 from zoneinfo import ZoneInfo
 
 from hvv_map.geometry import haversine
+from hvv_map.stations import load_stations
 
 if TYPE_CHECKING:
     # Type-only: keeps gti_client's requests dependency out of this module's
@@ -151,6 +152,77 @@ def is_real_track(segment: Coordinates | None) -> bool:
         haversine(a[0], a[1], b[0], b[1]) <= REAL_TRACK_MAX_HOP_M
         for a, b in zip(segment, segment[1:])
     )
+
+
+CLIP_MAX_OFFSET_M = 400.0  # station may lie this far from the track it is cut at
+
+
+def _nearest_vertex(path: Coordinates, lon: float, lat: float) -> tuple[int, float]:
+    return min(
+        ((i, haversine(lon, lat, p[0], p[1])) for i, p in enumerate(path)),
+        key=lambda item: item[1],
+    )
+
+
+def clip_track(
+    path: Coordinates, start: tuple[float, float], end: tuple[float, float]
+) -> Coordinates | None:
+    """Part of `path` between the vertices nearest to start and end (in start
+    to end direction), or None if a station is off the path or the part is no
+    real track."""
+    i, dist_i = _nearest_vertex(path, *start)
+    j, dist_j = _nearest_vertex(path, *end)
+    if i == j or max(dist_i, dist_j) > CLIP_MAX_OFFSET_M:
+        return None
+    part = path[i : j + 1] if i < j else path[j : i + 1][::-1]
+    return part if is_real_track(part) else None
+
+
+def clipped_hop_tracks(
+    conn: sqlite3.Connection, station_ids: tuple[str, ...], stations: dict
+) -> list[tuple[str, str, Coordinates]]:
+    """Tracks for the hops of a subline that have no real one, cut from the
+    shortest stored real track whose end stations enclose the hop (e.g. a
+    leg Stade-Buxtehude for the hops Dollern-Agathenburg-Stade). `stations`
+    maps id to an object with lon/lat."""
+    hops = subline_hops(conn, station_ids)
+    if all(is_real_track(segment) for _a, _b, segment in hops):
+        return []
+    position: dict[str, int] = {}
+    for index, station_id in enumerate(station_ids):
+        position.setdefault(station_id, index)
+    marks = ",".join("?" * len(position))
+    rows = conn.execute(
+        "SELECT from_id, to_id, coordinates_json FROM segments "
+        f"WHERE from_id IN ({marks}) AND to_id IN ({marks})",
+        [*position, *position],
+    ).fetchall()
+    covers = []
+    for from_id, to_id, coordinates_json in rows:
+        low, high = sorted((position[from_id], position[to_id]))
+        path = json.loads(coordinates_json)
+        if low != high and is_real_track(path):
+            covers.append((high - low, low, high, path))
+    covers.sort(key=lambda item: item[0])
+    result = []
+    for a, b, segment in hops:
+        if is_real_track(segment):
+            continue
+        from_station, to_station = stations.get(a), stations.get(b)
+        if from_station is None or to_station is None:
+            continue
+        low, high = sorted((position[a], position[b]))
+        for _span, cover_low, cover_high, path in covers:
+            if cover_low <= low and high <= cover_high:
+                clipped = clip_track(
+                    path,
+                    (from_station.lon, from_station.lat),
+                    (to_station.lon, to_station.lat),
+                )
+                if clipped:
+                    result.append((a, b, clipped))
+                    break
+    return result
 
 
 def store_segment(
@@ -664,6 +736,24 @@ def derive_unresolved_sublines(
     return summary
 
 
+def store_clipped_tracks(
+    conn: sqlite3.Connection, by_service: dict, stations: dict
+) -> int:
+    """Store tracks cut from longer stored ones (see clipped_hop_tracks) for
+    every distinct subline; returns the number of hops filled."""
+    sublines = {
+        tuple(stop["id"] for stop in entry["subline"])
+        for entry in apply_derived_sublines(conn, by_service).values()
+        if entry.get("subline")
+    }
+    filled = 0
+    for station_ids in sorted(sublines):
+        for a, b, coordinates in clipped_hop_tracks(conn, station_ids, stations):
+            store_segment(conn, a, b, coordinates)
+            filled += 1
+    return filled
+
+
 def run_update(
     client: GtiClient, redis_client, conn: sqlite3.Connection
 ) -> tuple[dict, dict | None]:
@@ -673,9 +763,10 @@ def run_update(
     anchor_start = _load_anchor_start(redis_client)
     if anchor_start is None:
         return summary, None
-    derived = derive_unresolved_sublines(
-        client, _load_by_service(redis_client), anchor_start, conn
-    )
+    by_service = _load_by_service(redis_client)
+    derived = derive_unresolved_sublines(client, by_service, anchor_start, conn)
+    stations = {s.id: s for s in load_stations(redis_client)}
+    derived["clipped"] = store_clipped_tracks(conn, by_service, stations)
     return summary, derived
 
 
@@ -696,6 +787,7 @@ def main() -> None:
             f"{derived['derived']} service variants got a subline from their "
             f"course, {derived['failed']} failed, {derived['remaining']} still waiting"
         )
+        print(f"{derived['clipped']} hops filled from longer stored tracks")
 
 
 if __name__ == "__main__":
