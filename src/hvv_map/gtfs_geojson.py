@@ -456,6 +456,57 @@ def build_stops_geojson(schedule: Schedule, reference_date: date | None = None) 
     return {"type": "FeatureCollection", "features": features}
 
 
+COVER_MAX_OFFSET_KM = 0.4  # run end points this close to a real track are covered
+
+
+def _bbox(coords: list) -> tuple[float, float, float, float]:
+    lons = [c[0] for c in coords]
+    lats = [c[1] for c in coords]
+    return min(lons), min(lats), max(lons), max(lats)
+
+
+def _real_runs_by_mode(runs: list) -> dict:
+    """Real (not straight) runs of non-replacement shapes per mode:
+    mode -> [(shape_id, coordinates, bbox), ...]."""
+    covers: dict = {}
+    for shape_id, info, run, straight in runs:
+        if straight or any(_is_replacement(name) for name in info["lines"]):
+            continue
+        for mode in info["modes"]:
+            covers.setdefault(mode, []).append((shape_id, run, _bbox(run)))
+    return covers
+
+
+def _near(run: list, point: tuple, bbox: tuple) -> bool:
+    """Whether some vertex of the run lies within COVER_MAX_OFFSET_KM."""
+    lon, lat = point
+    margin = 0.01
+    if not (
+        bbox[0] - margin <= lon <= bbox[2] + margin
+        and bbox[1] - margin <= lat <= bbox[3] + margin
+    ):
+        return False
+    return any(_hop_km(p, point) <= COVER_MAX_OFFSET_KM for p in run)
+
+
+def _is_covered(shape_id: str, info: dict, run: list, covers: dict) -> bool:
+    """A straight run is dropped when another shape of the same mode has a real
+    track through both its end points (the feed often holds sparse and dense
+    shapes of the same line). Replacement buses are never dropped."""
+    if any(_is_replacement(name) for name in info["lines"]):
+        return False
+    start, end = run[0], run[-1]
+    for mode in info["modes"]:
+        for other_id, other, bbox in covers.get(mode, ()):
+            if (
+                other_id != shape_id
+                and _near(other, start, bbox)
+                and _near(other, end, bbox)
+            ):
+                return True
+    return False
+
+
 def build_lines_geojson(schedule: Schedule, reference_date: date | None = None) -> dict:
     """Draws each recently-active trip's full shapes.txt polyline directly -
     no stop-to-stop straight lines, so curves render correctly. A shape_id
@@ -491,7 +542,7 @@ def build_lines_geojson(schedule: Schedule, reference_date: date | None = None) 
         entry["modes"].add(mode)
         entry["lines"].add(route["route_short_name"])
 
-    features = []
+    runs = []  # (shape_id, info, coordinates, straight)
     for shape_id, info in info_by_shape.items():
         coords = schedule.shapes.get(shape_id)
         if not coords or len(coords) < 2:
@@ -499,19 +550,26 @@ def build_lines_geojson(schedule: Schedule, reference_date: date | None = None) 
         for run, straight in _straight_runs(
             coords, _long_hop_km(info["modes"], info["lines"])
         ):
-            features.append(
-                {
-                    "type": "Feature",
-                    "geometry": {
-                        "type": "LineString",
-                        "coordinates": [list(c) for c in run],
-                    },
-                    "properties": {
-                        "color": info["color"],
-                        "modes": sorted(info["modes"]),
-                        "lines": sorted(info["lines"]),
-                        "straight": straight,
-                    },
-                }
-            )
+            runs.append((shape_id, info, run, straight))
+    covers = _real_runs_by_mode(runs)
+
+    features = []
+    for shape_id, info, run, straight in runs:
+        if straight and _is_covered(shape_id, info, run, covers):
+            continue
+        features.append(
+            {
+                "type": "Feature",
+                "geometry": {
+                    "type": "LineString",
+                    "coordinates": [list(c) for c in run],
+                },
+                "properties": {
+                    "color": info["color"],
+                    "modes": sorted(info["modes"]),
+                    "lines": sorted(info["lines"]),
+                    "straight": straight,
+                },
+            }
+        )
     return {"type": "FeatureCollection", "features": features}
