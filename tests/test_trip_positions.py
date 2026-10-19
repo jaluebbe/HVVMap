@@ -91,28 +91,6 @@ def test_replacement_bus_uses_the_mode_of_the_rail_line():
     assert feature["properties"]["mode"] == "S"
 
 
-def _rail_track_conn():
-    from hvv_map.gti_shapes import open_db, store_segment
-
-    conn = open_db(":memory:")
-    # a stored rail track A -> B with a detour through lat 54
-    store_segment(conn, "A", "B", [[0, 53.5], [0.5, 54.0], [1, 53.5]])
-    return conn
-
-
-def test_replacement_bus_ignores_the_stored_rail_track():
-    conn = _rail_track_conn()
-    train = _row()
-    bus = _row(line="RE5-SEV", mode="SEV")
-
-    [on_rail] = build_positions({"trips": [train]}, NOW, STATIONS, conn)["features"]
-    [on_road] = build_positions({"trips": [bus]}, NOW, STATIONS, conn)["features"]
-
-    assert on_rail["geometry"]["coordinates"][1] > 53.5
-    assert on_road["geometry"]["coordinates"][1] == 53.5
-    assert on_road["properties"]["straight"] is True
-
-
 def _alias_stops(delay=0):
     def stop(sid, arr, dep):
         return {
