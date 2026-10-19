@@ -21,6 +21,7 @@ from hvv_map.departures import (
     group_by_service,
     merge_departures,
 )
+from hvv_map.departures_tree import _station_name
 from hvv_map.gti_client import GtiClient
 from hvv_map.redis_client import get_redis_client
 from hvv_map.trips import berlin_now
@@ -49,21 +50,29 @@ def night_trips(
             continue
         key = (
             entry["line"].get("name"),
-            (first.get("station") or {}).get("name"),
+            _station_name(first.get("station") or {}),
             start.strftime("%H:%M"),
         )
         trips[key] = {"destination": entry.get("destination")}
     return trips
 
 
-def fetch_night(client: GtiClient, redis_client, evening: date) -> dict[tuple, dict]:
-    """Fresh plan of the night after the evening date."""
-    anchor = datetime.combine(evening, dtime(QUERY_START_HOUR))
+def fetch_night(
+    client: GtiClient, redis_client, evening: date, from_midnight: bool = False
+) -> dict[tuple, dict]:
+    """Fresh plan of the night after the evening date, queried from the
+    evening before or, with from_midnight, from 00:00 of the night itself."""
+    if from_midnight:
+        anchor = datetime.combine(evening + timedelta(days=1), dtime.min)
+        minutes = NIGHT_END_HOUR * 60
+    else:
+        anchor = datetime.combine(evening, dtime(QUERY_START_HOUR))
+        minutes = QUERY_MINUTES
     responses = []
     for fetch in (
-        lambda: fetch_main_departures(client, anchor, QUERY_MINUTES),
-        lambda: fetch_r_departures(client, anchor, QUERY_MINUTES),
-        lambda: fetch_sev_departures(client, redis_client, anchor, QUERY_MINUTES),
+        lambda: fetch_main_departures(client, anchor, minutes),
+        lambda: fetch_r_departures(client, anchor, minutes),
+        lambda: fetch_sev_departures(client, redis_client, anchor, minutes),
     ):
         responses.append(fetch() or {})
         time.sleep(1)  # 1 req/s rate limit across all GTI endpoints
@@ -107,10 +116,11 @@ def compare(nights: dict[str, dict[tuple, dict]]) -> str:
 
 
 def main() -> None:
-    """Usage: hvvmap-plan-compare [YYYY-MM-DD ...] [--no-cache]
+    """Usage: hvvmap-plan-compare [YYYY-MM-DD ...] [--midnight] [--no-cache]
 
     Each date is the evening before a night (default: the last three evenings).
-    The cached plan of the app is added unless --no-cache is given."""
+    --midnight adds a column per night queried from 00:00 instead of the
+    evening before. The cached plan of the app is added unless --no-cache."""
     args = [a for a in sys.argv[1:] if not a.startswith("--")]
     today = berlin_now().date()
     evenings = (
@@ -122,7 +132,12 @@ def main() -> None:
     client = GtiClient()
     nights = {}
     for evening in evenings:
-        nights[f"{evening:%a %d.%m.}"] = fetch_night(client, redis_client, evening)
+        label = f"{evening:%a %d.%m.}"
+        nights[label] = fetch_night(client, redis_client, evening)
+        if "--midnight" in sys.argv:
+            nights[f"{label} 0:00"] = fetch_night(
+                client, redis_client, evening, from_midnight=True
+            )
     if "--no-cache" not in sys.argv:
         cached = cached_night(redis_client)
         if cached:
