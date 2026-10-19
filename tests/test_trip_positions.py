@@ -271,3 +271,9 @@ def test_run_positions_persists_the_vehicle_memory(monkeypatch):
 
     stored = json.loads(redis_client.values[module.REDIS_VEHICLES_KEY])["data"]
     assert stored[row["course_key"]]["vehicles"] == "DT5.1 (417)"
+
+
+def test_missing_trip_is_not_placed_on_the_map():
+    row = {**_row(), "status": "vermutlich ausgefallen"}
+
+    assert build_positions({"trips": [row]}, NOW, STATIONS)["features"] == []

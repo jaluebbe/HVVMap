@@ -339,6 +339,7 @@
                 '<option value="nicht gesehen">nicht gesehen</option>' +
                 '<option value="zwischen Ankern">zwischen Ankern</option>' +
                 '<option value="ausgefallen">ausgefallen</option>' +
+                '<option value="vermutlich ausgefallen">vermutlich ausgefallen</option>' +
                 '<option value="geändert">Ziel geändert</option>';
         }
 
@@ -375,6 +376,7 @@
                 stat(s.not_seen ?? 0, 'nicht gesehen') +
                 stat(s.between ?? 0, 'zwischen Ankern (laufend, kein Anker im Fenster)') +
                 stat(s.cancelled ?? 0, 'ausgefallen (cancelled)') +
+                stat(s.missing ?? 0, 'vermutlich ausgefallen (erwartet, nie gesehen)') +
                 stat(s.extra ?? 0, 'Zusatzfahrten (extra)') +
                 `<div class="stat"><b class="small">${q}</b><span>Trefferqualität</span></div>`;
             document.getElementById('meta').textContent =

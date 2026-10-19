@@ -7,6 +7,7 @@ Pure functions over the cached payloads, so the api image needs no GTI client.
 
 from collections import defaultdict
 from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
 
 from hvv_map.gtilive_geojson import mode_for_line
 from hvv_map.departures_tree import (
@@ -27,6 +28,17 @@ STATUS_CONFIRMED = "bestätigt"
 STATUS_NOT_SEEN = "nicht gesehen"
 STATUS_CANCELLED = "ausgefallen"
 STATUS_BETWEEN = "zwischen Ankern"  # running, no anchor stop in the live window
+STATUS_MISSING = "vermutlich ausgefallen"  # expected in the live window, never seen
+# Only where live coverage is dense, a trip absent from the live window is
+# taken as not running - and only while the live data is fresh.
+MISSING_MODES = {"U", "S"}
+LIVE_FRESH_MINUTES = 3
+MISSING_PREFIX = "missing:"  # memory key prefix, see remember_missing
+
+
+def berlin_now() -> datetime:
+    """Current Berlin wall-clock time, naive like the plan and live anchors."""
+    return datetime.now(ZoneInfo("Europe/Berlin")).replace(tzinfo=None)
 
 
 def _is_trip_line(line: dict) -> bool:
@@ -46,6 +58,7 @@ _COUNTER_KEY = {
     STATUS_NOT_SEEN: "not_seen",
     STATUS_CANCELLED: "cancelled",
     STATUS_BETWEEN: "between",
+    STATUS_MISSING: "missing",
 }
 
 
@@ -505,12 +518,40 @@ def remember_vehicles(memory: dict, table: dict, now_ts: float) -> bool:
     return changed
 
 
+def _is_missing(trip: dict, status: str, live_fresh: bool, memory: dict | None) -> bool:
+    """A trip whose anchor stop was due in the live window but never showed
+    up there while the live data is fresh; or one already judged so earlier
+    (until it shows up live again)."""
+    if _mode_label(trip["line_obj"]) not in MISSING_MODES:
+        return False
+    if MISSING_PREFIX + course_key(trip) in (memory or {}):
+        return True
+    return status == STATUS_NOT_SEEN and live_fresh
+
+
+def remember_missing(memory: dict, table: dict, now_ts: float) -> bool:
+    """Remember trips judged missing, so they stay so once their expected
+    stop has left the live window; forget those seen live after all (e.g.
+    late). True if `memory` changed."""
+    changed = False
+    for row in table["trips"]:
+        key = MISSING_PREFIX + row["course_key"]
+        if row["status"] == STATUS_MISSING and key not in memory:
+            memory[key] = {"seen_at": now_ts}
+            changed = True
+        elif row["status"] == STATUS_CONFIRMED and key in memory:
+            del memory[key]
+            changed = True
+    return changed
+
+
 def build_trip_table(
     by_service: dict,
     plan_anchor: datetime | None,
     live: dict,
     courses: dict | None = None,
     vehicle_memory: dict | None = None,
+    now: datetime | None = None,
 ) -> dict:
     """Plan trips matched against the live departures:
     {"summary", "trips", "live_only"}. A live departure matches the plan
@@ -527,6 +568,9 @@ def build_trip_table(
     window_end = live_anchor + timedelta(minutes=LIVE_WINDOW_MINUTES)
 
     live_only, quality_counts, live_total = [], defaultdict(int), 0
+    live_fresh = now is None or now - live_anchor <= timedelta(
+        minutes=LIVE_FRESH_MINUTES
+    )
     per_line: dict[str, dict] = defaultdict(
         lambda: {
             "live": 0,
@@ -536,6 +580,7 @@ def build_trip_table(
             "not_seen": 0,
             "cancelled": 0,
             "between": 0,
+            "missing": 0,
         }
     )
 
@@ -648,6 +693,8 @@ def build_trip_table(
                 if expected
                 else STATUS_BETWEEN
             )
+            if not matched and _is_missing(trip, status, live_fresh, vehicle_memory):
+                status = STATUS_MISSING
         vehicles = [v for s in matched for v in s["match"]["_vehicles"]]
         unique = list({(v.get("id"), v.get("number")): v for v in vehicles}.values())
         delays = [
@@ -724,6 +771,7 @@ def build_trip_table(
             "not_seen": sum(r["status"] == STATUS_NOT_SEEN for r in rows),
             "cancelled": sum(r["status"] == STATUS_CANCELLED for r in rows),
             "between": sum(r["status"] == STATUS_BETWEEN for r in rows),
+            "missing": sum(r["status"] == STATUS_MISSING for r in rows),
             "extra": sum(e["extra"] for e in live_only),
             "by_line": {
                 name: per_line[name] for name in sorted(per_line, key=_natural_key)
