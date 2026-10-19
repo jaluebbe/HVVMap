@@ -65,8 +65,9 @@ def test_same_service_id_matches_despite_a_minute_offset():
 def test_without_a_known_service_id_only_the_exact_minute_matches():
     live = {"anchor": LIVE_ANCHOR, "departures": [_live("U1", "A", 3, 6)]}
     table = build_trip_table(PLAN, PLAN_ANCHOR, live)
-    assert table["summary"]["live_matched"] == 0
-    assert table["live_only"][0]["reason"] == "ohne Plan-Treffer"
+    plan_trip = next(t for t in table["trips"] if not t["live_only"])
+    assert plan_trip["status"] == "nicht gesehen"
+    assert table["summary"]["quality"] == {"nur live": 1}
 
 
 def test_unique_plan_stop_matches_despite_different_direction_id():
@@ -85,6 +86,7 @@ def test_ambiguous_plan_stops_without_direction_stay_unmatched():
     live = {"anchor": LIVE_ANCHOR, "departures": [_live("U1", "A", 2, 1)]}
     table = build_trip_table(plan, PLAN_ANCHOR, live)
     assert [e["reason"] for e in table["live_only"]] == ["mehrdeutig"]
+    assert not any(t["live_only"] for t in table["trips"])
 
 
 def test_plan_trip_inside_the_window_without_live_entry_is_not_seen():
@@ -167,8 +169,10 @@ def test_extra_live_departure_without_plan_is_reported_as_extra_trip():
         "departures": [_live("U1", "A", 2, 1, service_id=5, extra=True)],
     }
     table = build_trip_table(PLAN, PLAN_ANCHOR, live)
-    assert table["live_only"][0]["reason"] == "Zusatzfahrt (extra)"
-    assert table["summary"]["extra"] == 1
+    extra = [t for t in table["trips"] if t["live_only"]]
+    assert [t["status"] for t in extra] == ["bestätigt"]
+    assert extra[0]["stops"][0]["match"]["extra"] is True
+    assert table["live_only"] == []
 
 
 def _routed_plan():
@@ -577,3 +581,54 @@ def test_trip_stays_listed_after_its_last_anchor_while_the_course_continues():
     assert build_trip_table(plan, PLAN_ANCHOR, live)["trips"] == []
     trips = build_trip_table(plan, PLAN_ANCHOR, live, {key: course})["trips"]
     assert [t["status"] for t in trips] == ["zwischen Ankern"]
+
+
+def test_live_departure_without_plan_becomes_a_trip_with_a_stable_course_key():
+    live = {
+        "anchor": LIVE_ANCHOR,
+        "departures": [
+            _live("S7", "R", 2, 1, service_id=77),
+            _live("S7", "W", 4, 1, service_id=77),
+        ],
+    }
+
+    table = build_trip_table({}, PLAN_ANCHOR, live)
+
+    [trip] = table["trips"]
+    assert trip["live_only"] and trip["service_id"] == "77"
+    assert trip["course_key"] == "livetrip:77@2026-10-17"
+    assert [s["station_id"] for s in trip["stops"]] == ["R", "W"]
+    assert table["live_only"] == []
+
+
+def test_live_only_trip_is_kept_from_memory_until_its_end():
+    from hvv_map.trips import remember_live_trips
+
+    first = {
+        "anchor": LIVE_ANCHOR,
+        "departures": [_live("S7", "R", 2, 1, service_id=77)],
+    }
+    table = build_trip_table({}, PLAN_ANCHOR, first)
+    memory: dict = {}
+    assert remember_live_trips(memory, table, 1.0)
+    assert not remember_live_trips(memory, table, 2.0)
+
+    later = {"anchor": {"date": "2026-10-17", "time": "09:01:00"}, "departures": []}
+    kept = build_trip_table({}, PLAN_ANCHOR, later, None, memory)
+    assert [t["service_id"] for t in kept["trips"]] == ["77"]
+
+    gone = {"anchor": {"date": "2026-10-17", "time": "09:10:00"}, "departures": []}
+    assert build_trip_table({}, PLAN_ANCHOR, gone, None, memory)["trips"] == []
+
+
+def test_live_only_trips_of_known_plan_services_are_not_duplicated():
+    plan = {"77": _plan_entry("U1", 6, [("A", 330)])}
+    live = {
+        "anchor": LIVE_ANCHOR,
+        "departures": [_live("U1", "A", 2, 6, service_id=77)],
+    }
+
+    table = build_trip_table(plan, PLAN_ANCHOR, live)
+
+    assert not any(t["live_only"] for t in table["trips"])
+    assert [e["reason"] for e in table["live_only"]] == ["ohne Plan-Treffer"]

@@ -99,6 +99,8 @@ def _plan_trips(by_service: dict, plan_anchor: datetime) -> list[dict]:
 
 def course_key(trip: dict) -> str:
     """Cache key of a trip occurrence's departureCourse."""
+    if trip.get("live_only"):
+        return trip["id"]
     return f"{trip['service_id']}@{trip['stops'][0]['planned']:%Y-%m-%dT%H:%M}"
 
 
@@ -477,6 +479,7 @@ def _live_entry(dep: dict, planned: datetime) -> dict:
         "vehicles": vehicles_text(vehicles, _is_ubahn(line)),
         "model": refined_model(line, vehicles),
         "_vehicles": vehicles or [],
+        "_line": line,
     }
 
 
@@ -514,6 +517,97 @@ def remember_vehicles(memory: dict, table: dict, now_ts: float) -> bool:
         del memory[key]
         changed = True
     return changed
+
+
+LIVE_TRIP_PREFIX = "livetrip:"  # id prefix of live-only trips
+LIVE_TRIP_MEMORY_PREFIX = "trip:"  # their key prefix in the vehicle memory
+LIVE_TRIP_QUALITY = "nur live"
+LIVE_TRIP_KEEP_MINUTES = 3  # a live-only trip is shown this long past its end
+LIVE_TRIP_MEMORY_SECONDS = 6 * 3600
+
+
+def _live_trip_stop(entry: dict, station_id: str, planned: datetime) -> dict:
+    return {
+        "station_id": station_id,
+        "station": entry["station"],
+        "direction": entry["destination"],
+        "platform": entry["platform"],
+        "planned": planned,
+        "match": {
+            **_public(entry),
+            "quality": LIVE_TRIP_QUALITY,
+            "destination_changed": False,
+            "aliases": [],
+            "_vehicles": entry["_vehicles"],
+        },
+    }
+
+
+def _merge_live_trips(found: list[tuple], remembered: dict) -> list[dict]:
+    """Live-only trips: one per serviceId and service day, with the live stops
+    seen so far. `found` is [(entry, station id, planned)] of this snapshot,
+    `remembered` the earlier trips from memory (see remember_live_trips)."""
+    trips: dict[str, dict] = {}
+    for memory_key, saved in remembered.items():
+        if not memory_key.startswith(LIVE_TRIP_MEMORY_PREFIX):
+            continue
+        trips[memory_key[len(LIVE_TRIP_MEMORY_PREFIX) :]] = {
+            **saved["trip"],
+            "stops": [
+                {**s, "planned": datetime.fromisoformat(s["planned"])}
+                for s in saved["trip"]["stops"]
+            ],
+        }
+    for entry, station_id, planned in found:
+        day = (planned - timedelta(hours=4)).date()
+        key = f"{LIVE_TRIP_PREFIX}{entry['service_id']}@{day}"
+        trip = trips.setdefault(
+            key,
+            {
+                "id": key,
+                "service_id": str(entry["service_id"]),
+                "line": entry["line"],
+                "line_obj": entry["_line"],
+                "direction_id": entry["direction_id"],
+                "destination": entry["destination"],
+                "subline": None,
+                "live_only": True,
+                "stops": [],
+            },
+        )
+        trip["destination"] = entry["destination"]
+        trip["stops"] = [s for s in trip["stops"] if s["station_id"] != station_id] + [
+            _live_trip_stop(entry, station_id, planned)
+        ]
+        trip["stops"].sort(key=lambda s: s["planned"])
+    return list(trips.values())
+
+
+def remember_live_trips(memory: dict, table: dict, now_ts: float) -> bool:
+    """Store the table's live-only trips (see build_trip_table) in `memory`
+    and drop old ones. True if `memory` changed."""
+    changed = False
+    for key, trip in table.get("live_trips", {}).items():
+        memory_key = LIVE_TRIP_MEMORY_PREFIX + key
+        if memory.get(memory_key, {}).get("trip") != trip:
+            memory[memory_key] = {"trip": trip, "seen_at": now_ts}
+            changed = True
+    for key in [
+        key
+        for key, entry in memory.items()
+        if key.startswith(LIVE_TRIP_MEMORY_PREFIX)
+        and now_ts - entry["seen_at"] > LIVE_TRIP_MEMORY_SECONDS
+    ]:
+        del memory[key]
+        changed = True
+    return changed
+
+
+def _serialized_live_trip(trip: dict) -> dict:
+    return {
+        **{k: v for k, v in trip.items() if k != "stops"},
+        "stops": [{**s, "planned": s["planned"].isoformat()} for s in trip["stops"]],
+    }
 
 
 def build_trip_table(
@@ -562,6 +656,7 @@ def build_trip_table(
         }
 
     leftovers = []
+    live_found: list[tuple] = []
     placed: dict[tuple, dict] = {}
     for dep in live.get("departures", []):
         line = dep.get("line") or {}
@@ -619,6 +714,11 @@ def build_trip_table(
         if len(free) == 1 and not entry["extra"]:
             assign(entry, free[0][1], f"{quality}, ohne Richtung")
             continue
+        if (entry["extra"] or (not had_candidates and not free)) and str(
+            entry["service_id"]
+        ) not in by_service:
+            live_found.append((entry, station_id, planned))
+            continue
         live_only.append(
             {
                 **_public(entry),
@@ -631,6 +731,20 @@ def build_trip_table(
                 else "ohne Plan-Treffer",
             }
         )
+
+    # Live departures without any plan trip become trips of their own.
+    live_trips = _merge_live_trips(live_found, vehicle_memory or {})
+    live_trips = [
+        t
+        for t in live_trips
+        if trip_end(t, (courses or {}).get(course_key(t)))
+        + timedelta(minutes=LIVE_TRIP_KEEP_MINUTES)
+        >= live_anchor
+    ]
+    quality_counts[LIVE_TRIP_QUALITY] += len(live_found)
+    for entry, _station_id, _planned in live_found:
+        per_line[entry["line"]]["matched"] += 1
+    trips = trips + live_trips
 
     rows = []
     for trip in trips:
@@ -702,6 +816,7 @@ def build_trip_table(
                 ),
                 "max_delay": max(delays) if delays else None,
                 "course_key": course_key(trip),
+                "live_only": bool(trip.get("live_only")),
                 **_vehicle_fields(trip, unique, vehicle_memory),
                 "route_start": None,
                 "route_end": None,
@@ -746,4 +861,5 @@ def build_trip_table(
         },
         "trips": rows,
         "live_only": live_only,
+        "live_trips": {t["id"]: _serialized_live_trip(t) for t in live_trips},
     }

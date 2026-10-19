@@ -179,6 +179,12 @@ def run_trip_courses(client: GtiClient, redis_client, now: datetime | None = Non
         live = json.loads(raw_live)["data"]
         table = build_trip_table(json.loads(raw_plan)["data"], plan_anchor, live)
         for row in table["trips"]:
+            if row["live_only"]:
+                request = course_request(live, int(row["service_id"]))
+                key = row["course_key"]
+                if request and not _is_current(cached.get(key), running=True):
+                    jobs.append((key, request))
+                    queued.add(key)
             for alias in row["aliases"]:
                 key = alias_course_key(alias["service_id"])
                 request = course_request(
