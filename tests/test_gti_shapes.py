@@ -552,3 +552,50 @@ def test_store_segment_keeps_gapless_track_over_gappy_one():
     store_segment(conn, "A", "B", good)
     store_segment(conn, "A", "B", [[9.0, 53.0], [9.01, 53.0], [9.3, 53.2]])
     assert get_segment(conn, "A", "B") == good
+
+
+class _Station:
+    def __init__(self, lon, lat):
+        self.lon, self.lat = lon, lat
+
+
+def _line_track(n=12):
+    return [[9.0 + 0.01 * i, 53.0] for i in range(n)]
+
+
+def test_clip_track_cuts_between_nearest_vertices_in_both_directions():
+    from hvv_map.gti_shapes import clip_track
+
+    path = _line_track()
+    assert clip_track(path, (9.02, 53.0), (9.05, 53.0)) == path[2:6]
+    assert clip_track(path, (9.05, 53.0), (9.02, 53.0)) == path[2:6][::-1]
+
+
+def test_clip_track_rejects_stations_off_the_track_and_two_point_parts():
+    from hvv_map.gti_shapes import clip_track
+
+    path = _line_track()
+    assert clip_track(path, (9.02, 53.0), (9.05, 53.1)) is None
+    assert clip_track(path, (9.02, 53.0), (9.03, 53.0)) is None
+
+
+def test_clipped_hop_tracks_fill_hops_from_a_longer_stored_track():
+    from hvv_map.gti_shapes import clipped_hop_tracks
+
+    conn = open_db(":memory:")
+    path = _line_track()
+    store_segment(conn, "Z", "A", path)  # long leg, stored against the order
+    store_segment(conn, "A", "B", [path[3], path[5]])  # straight fallback
+    stations = {
+        "A": _Station(*path[8]),
+        "B": _Station(*path[6]),
+        "Z": _Station(*path[0]),
+    }
+
+    tracks = {
+        (a, b): track
+        for a, b, track in clipped_hop_tracks(conn, ("A", "B", "Z"), stations)
+    }
+
+    assert tracks[("A", "B")] == path[6:9][::-1]
+    assert tracks[("B", "Z")] == path[0:7][::-1]
