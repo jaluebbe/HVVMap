@@ -405,6 +405,9 @@ _gtfs_lines_cache = CachedJsonResponse(
 _gtfs_stops_cache = CachedJsonResponse(
     lambda: _read_cached_json("hvv:gtfs:reference_stops")
 )
+_gtfs_bus_tracks_cache = CachedJsonResponse(
+    lambda: _read_cached_json("hvv:gtfs:bus_tracks"), ttl=300
+)
 
 
 @app.get("/api/hvv/gtilive/lines.geojson", tags=["hvv_gtilive"])
@@ -437,6 +440,12 @@ def get_gtfs_positions():
 @app.get("/api/hvv/gtfs/lines.geojson", tags=["hvv_gtfs"])
 def get_gtfs_lines(request: Request):
     return _gtfs_lines_cache.response(request)
+
+
+@app.get("/api/hvv/gtfs/bus-tracks.geojson", tags=["hvv_gtfs"])
+def get_gtfs_bus_tracks(request: Request):
+    """All GTFS bus tracks (simplified), for static/dev_bus_tracks.html."""
+    return _gtfs_bus_tracks_cache.response(request)
 
 
 @app.get("/api/hvv/gtfs/stops.geojson", tags=["hvv_gtfs"])

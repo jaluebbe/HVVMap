@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="de">
+
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width,initial-scale=1.0">
+    <meta name="robots" content="noindex">
+    <title>HVV Bustracks (GTFS) - Entwickleransicht</title>
+    <link rel="stylesheet" href="maplibre-gl/maplibre-gl.css">
+    <style>
+        * {
+            box-sizing: border-box;
+        }
+
+        html,
+        body {
+            margin: 0;
+            height: 100%;
+            font-family: -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            color: #1a2733;
+        }
+
+        #map {
+            position: absolute;
+            inset: 0;
+        }
+
+        #panel {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            z-index: 2;
+            width: 260px;
+            background: #fff;
+            border: 1px solid #d8dee3;
+            border-radius: 8px;
+            padding: 10px 12px;
+            font-size: 0.8rem;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+        }
+
+        #panel h1 {
+            margin: 0 0 2px;
+            font-size: 0.95rem;
+        }
+
+        #summary {
+            color: #5b6b78;
+        }
+
+        #search {
+            width: 100%;
+            margin-top: 8px;
+            padding: 6px 8px;
+            border: 1px solid #d8dee3;
+            border-radius: 6px;
+            font-size: 0.82rem;
+        }
+    </style>
+</head>
+
+<body>
+    <div id="map"></div>
+    <div id="panel">
+        <h1>Bustracks (GTFS)</h1>
+        <div id="summary">Lade ...</div>
+        <input id="search" type="search" placeholder="Linie, z. B. 150 oder S7-SEV" autocomplete="off">
+    </div>
+    <script src="maplibre-gl/maplibre-gl.js"></script>
+    <script>
+        const ENDPOINT = '/api/hvv/gtfs/bus-tracks.geojson';
+        const SOURCE = 'bus-tracks';
+        const LAYER = 'bus-tracks-line';
+        const COLOR = '#ff2d95'; // not used by any line of the normal maps
+
+        const map = new maplibregl.Map({
+            container: 'map',
+            style: '/api/vector/style/positron.json',
+            center: [9.99, 53.55],
+            zoom: 9,
+        });
+        map.addControl(new maplibregl.NavigationControl(), 'top-right');
+
+        async function load() {
+            const summary = document.getElementById('summary');
+            try {
+                const response = await fetch(ENDPOINT);
+                if (!response.ok) {
+                    throw new Error(`${response.status}: ${(await response.json()).detail || response.statusText}`);
+                }
+                const data = await response.json();
+                map.addSource(SOURCE, { type: 'geojson', data });
+                map.addLayer({
+                    id: LAYER, type: 'line', source: SOURCE,
+                    layout: { 'line-cap': 'round', 'line-join': 'round' },
+                    paint: { 'line-color': COLOR, 'line-width': 1.5, 'line-opacity': 0.6 },
+                });
+                summary.textContent = `${data.features.length} Tracks`;
+            } catch (error) {
+                summary.textContent = 'Fehler beim Laden: ' + error.message;
+            }
+        }
+
+        map.on('load', load);
+        map.on('click', event => {
+            if (!map.getLayer(LAYER)) return;
+            const box = [[event.point.x - 4, event.point.y - 4], [event.point.x + 4, event.point.y + 4]];
+            const hit = map.queryRenderedFeatures(box, { layers: [LAYER] })[0];
+            if (!hit) return;
+            const lines = JSON.parse(hit.properties.lines);
+            const text = document.createElement('div');
+            text.textContent = 'Linien: ' + lines.join(', ');
+            new maplibregl.Popup({ maxWidth: '320px' }).setLngLat(event.lngLat).setDOMContent(text).addTo(map);
+        });
+        map.on('mousemove', event => {
+            if (!map.getLayer(LAYER)) return;
+            map.getCanvas().style.cursor = map.queryRenderedFeatures(event.point, { layers: [LAYER] }).length ? 'pointer' : '';
+        });
+        document.getElementById('search').addEventListener('input', event => {
+            if (!map.getLayer(LAYER)) return;
+            const query = event.target.value.trim().toLowerCase();
+            map.setFilter(LAYER, query ? ['in', query, ['get', 'search']] : null);
+        });
+    </script>
+</body>
+
+</html>

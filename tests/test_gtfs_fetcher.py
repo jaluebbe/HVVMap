@@ -51,6 +51,8 @@ def test_fetch_once_stores_all_three_layers(tmp_path, monkeypatch):
 
     with (
         patch("hvv_map.gtfs_fetcher.load_schedule", return_value=object()),
+        patch("hvv_map.gtfs_fetcher._build_bus_tracks"),
+        patch("hvv_map.gtfs_fetcher._routes_txt_mtime", return_value=1.0),
         patch(
             "hvv_map.gtfs_fetcher.build_positions_geojson",
             return_value={"type": "FeatureCollection", "features": []},
