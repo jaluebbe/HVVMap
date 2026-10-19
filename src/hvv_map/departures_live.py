@@ -25,6 +25,7 @@ from hvv_map.redis_client import get_redis_client
 
 REDIS_LIVE_KEY = "hvv:departures:live"
 LIVE_WINDOW_MINUTES = 5
+LIVE_WINDOW_LONG_MINUTES = 20  # regional trains and replacement buses stop rarely
 LIVE_MAX_LIST = 2000
 
 # One request per category, covering all of its anchor stations.
@@ -34,10 +35,15 @@ LIVE_CATEGORIES = [
 ]
 
 
-def _live_request(stations: set[str], service_types: list[str], start: datetime):
+def _live_request(
+    stations: set[str],
+    service_types: list[str],
+    start: datetime,
+    minutes: int = LIVE_WINDOW_MINUTES,
+):
     return {
         "maxList": LIVE_MAX_LIST,
-        "maxTimeOffset": LIVE_WINDOW_MINUTES,
+        "maxTimeOffset": minutes,
         "useRealtime": True,
         "stations": [{"type": "STATION", "name": name} for name in sorted(stations)],
         "time": {
@@ -62,8 +68,13 @@ def fetch_live_departures(
     for index, (stations, service_types) in enumerate(categories):
         if index:
             time.sleep(1)  # 1 req/s rate limit across all GTI endpoints
+        minutes = (
+            LIVE_WINDOW_MINUTES
+            if service_types == MAIN_SERVICE_TYPES
+            else LIVE_WINDOW_LONG_MINUTES
+        )
         response = client.send(
-            "departureList", _live_request(stations, service_types, start)
+            "departureList", _live_request(stations, service_types, start, minutes)
         )
         if response.get("returnCode") != "OK":
             failed += 1

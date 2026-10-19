@@ -24,6 +24,7 @@ from hvv_map.trips import (
     STATUS_CANCELLED,
     STATUS_MISSING,
     build_trip_table,
+    remember_live_trips,
     remember_missing,
     remember_vehicles,
 )
@@ -233,7 +234,9 @@ def _refresh(redis_client, state: PositionsState) -> bool:
         )
         now_ts = time.time()
         changed = remember_vehicles(state.memory, state.table, now_ts)
-        if remember_missing(state.memory, state.table, now_ts) or changed:
+        changed = remember_live_trips(state.memory, state.table, now_ts) or changed
+        changed = remember_missing(state.memory, state.table, now_ts) or changed
+        if changed:
             redis_client.set(
                 REDIS_VEHICLES_KEY,
                 json.dumps({"fetched_at": int(time.time()), "data": state.memory}),

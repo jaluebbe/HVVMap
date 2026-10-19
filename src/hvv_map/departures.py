@@ -7,12 +7,13 @@ fetcher loop - run manually or on its own schedule.
 
 import json
 import time
-from datetime import datetime, timedelta
-from zoneinfo import ZoneInfo
+from datetime import date, datetime, time as dtime, timedelta
 
+from hvv_map.departures_tree import parse_anchor
 from hvv_map.gti_client import GtiClient
 from hvv_map.lines import LINE_NAME_PATTERN, WANTED_R_BAHN_LINES, load_sublines_cache
 from hvv_map.redis_client import get_redis_client
+from hvv_map.trips import berlin_now
 
 REDIS_TTL = 2 * 24 * 60 * 60  # 2 days - headroom to analyze before the next run
 
@@ -68,9 +69,7 @@ R_SERVICE_TYPES = ["RBAHN"]  # GTI service type, covers RB and RE
 SEV_SERVICE_TYPES = ["SBAHN", "UBAHN", "AKN", "FAEHRE", "BUS"]
 REDIS_ANNOUNCEMENT_STATIONS_KEY = "hvv:announcement_stations"
 
-REDIS_MAIN_KEY = "hvv:departures:main"
-REDIS_R_KEY = "hvv:departures:r"
-REDIS_SEV_KEY = "hvv:departures:sev"
+REDIS_DAY_KEY = "hvv:departures:day:{date}"  # merged departures of one day
 REDIS_MERGED_KEY = "hvv:departures:merged"
 REDIS_BY_SERVICE_KEY = "hvv:departures:by_service"
 # The anchor time all three snapshots were queried from - needed to turn a
@@ -79,30 +78,40 @@ REDIS_BY_SERVICE_KEY = "hvv:departures:by_service"
 REDIS_ANCHOR_KEY = "hvv:departures:anchor_start"
 
 
-QUERY_ANCHOR_HOUR = 4  # most services first run around here
-
-
-def berlin_now() -> datetime:
-    """Current Berlin wall-clock time, naive - GTI takes local times and the
-    container clock may run in UTC."""
-    return datetime.now(ZoneInfo("Europe/Berlin")).replace(tzinfo=None)
+# GTI resolves the part of a query after midnight with the previous day's
+# timetable, so a plan query must start at 00:00 and end before 24:00.
+QUERY_ANCHOR_HOUR = 0
+NEXT_DAY_TAIL_MINUTES = 6 * 60  # tomorrow's hours kept in the plan
+PLAN_MINUTES = 24 * 60 - 1
 
 
 def _query_start_time(now: datetime) -> datetime:
-    """Anchor at the most recent ~4:00 - most services first run around
-    then, so this captures the full day's service_id set from one query."""
-    anchor = now.replace(hour=QUERY_ANCHOR_HOUR, minute=0, second=0, microsecond=0)
-    if anchor > now:
-        anchor -= timedelta(days=1)
-    return anchor
+    """Start of the current calendar day: one query holds the day's services."""
+    return now.replace(hour=QUERY_ANCHOR_HOUR, minute=0, second=0, microsecond=0)
+
+
+def _day_key(day: date) -> str:
+    return REDIS_DAY_KEY.format(date=day.isoformat())
+
+
+def snapshots_stale(redis_client, now: datetime | None = None) -> bool:
+    """True if the combined plan is not anchored at today's start (e.g. right
+    after midnight) or today's snapshot is missing."""
+    start = _query_start_time(now or berlin_now())
+    raw = redis_client.get(REDIS_ANCHOR_KEY)
+    anchor = parse_anchor(json.loads(raw)["data"]) if raw else None
+    return anchor != start or not redis_client.get(_day_key(start.date()))
 
 
 def _build_request(
-    stations: set[str], service_types: list[str], start: datetime
+    stations: set[str],
+    service_types: list[str],
+    start: datetime,
+    minutes: int = PLAN_MINUTES,
 ) -> dict:
     return {
         "maxList": 25000,
-        "maxTimeOffset": 1440,  # 24h from start, so it still covers the full day
+        "maxTimeOffset": minutes,
         "stations": [{"type": "STATION", "name": name} for name in stations],
         "time": {
             "date": start.strftime("%Y-%m-%d"),
@@ -117,30 +126,21 @@ def _store(redis_client, key: str, data: dict) -> None:
     redis_client.set(key, payload, ex=REDIS_TTL)
 
 
-def _is_current(redis_client, key: str, start: datetime) -> bool:
-    """True if the cached response under key already echoes our anchor time
-    - the response's own "time" field uses a different format than the
-    request ("19.09.2026"/"04:00" vs "2026-09-19"/"04:00:00")."""
-    payload = redis_client.get(key)
-    if not payload:
-        return False
-    cached_time = json.loads(payload).get("data", {}).get("time") or {}
-    return cached_time.get("date") == start.strftime("%d.%m.%Y") and cached_time.get(
-        "time"
-    ) == start.strftime("%H:%M")
-
-
-def fetch_main_departures(client: GtiClient, start: datetime) -> dict:
-    """24h departureList across every U/S/AKN/ferry anchor station."""
-    request = _build_request(ANCHOR_STATIONS_MAIN, MAIN_SERVICE_TYPES, start)
+def fetch_main_departures(
+    client: GtiClient, start: datetime, minutes: int = PLAN_MINUTES
+) -> dict:
+    """departureList across every U/S/AKN/ferry anchor station."""
+    request = _build_request(ANCHOR_STATIONS_MAIN, MAIN_SERVICE_TYPES, start, minutes)
     return client.send("departureList", request)
 
 
-def fetch_r_departures(client: GtiClient, start: datetime) -> dict:
-    """24h departureList across the regional-train anchor stations, filtered
+def fetch_r_departures(
+    client: GtiClient, start: datetime, minutes: int = PLAN_MINUTES
+) -> dict:
+    """departureList across the regional-train anchor stations, filtered
     down to WANTED_R_BAHN_LINES - RBAHN alone also returns other DB regional trains
     passing through."""
-    request = _build_request(ANCHOR_STATIONS_R, R_SERVICE_TYPES, start)
+    request = _build_request(ANCHOR_STATIONS_R, R_SERVICE_TYPES, start, minutes)
     response = client.send("departureList", request)
     response["departures"] = [
         d
@@ -162,9 +162,9 @@ def _is_wanted_departure(departure: dict) -> bool:
 
 
 def fetch_sev_departures(
-    client: GtiClient, redis_client, start: datetime
+    client: GtiClient, redis_client, start: datetime, minutes: int = PLAN_MINUTES
 ) -> dict | None:
-    """24h departureList (incl. bus) across stations currently named in
+    """departureList (incl. bus) across stations currently named in
     active announcements, filtered down to is_line_of_interest() - widens
     beyond the fixed anchors to catch replacement services without pulling
     in every other bus line passing through. None if no announcement
@@ -173,7 +173,7 @@ def fetch_sev_departures(
     station_names = json.loads(payload)["data"] if payload else []
     if not station_names:
         return None
-    request = _build_request(set(station_names), SEV_SERVICE_TYPES, start)
+    request = _build_request(set(station_names), SEV_SERVICE_TYPES, start, minutes)
     response = client.send("departureList", request)
     response["departures"] = [
         d for d in response.get("departures", []) if _is_wanted_departure(d)
@@ -385,56 +385,58 @@ def match_sublines(by_service: dict[str, dict], sublines_cache: dict) -> None:
         entry["subline"] = candidates[0] if len(candidates) == 1 else None
 
 
-def _run_snapshot(redis_client, key: str, start: datetime, fetch) -> bool:
-    """Fetch and store one snapshot via fetch(), unless the cached response
-    is already anchored at start. Returns whether an API call was made, so
-    the caller can pace the next one to the 1 req/s rate limit."""
-    if _is_current(redis_client, key, start):
-        print(f"already current, skipped ({key})")
-        return False
-    response = fetch()
-    if response is None:
-        print(f"nothing to query, skipped ({key})")
-        return False
-    _store(redis_client, key, response)
-    print(f"{len(response.get('departures', []))} departures ({key})")
-    return True
+def fetch_day(client: GtiClient, redis_client, day: date) -> list[dict]:
+    """Merged departures of all three queries for one calendar day."""
+    start = datetime.combine(day, dtime.min)
+    main = fetch_main_departures(client, start)
+    time.sleep(1)  # 1 req/s rate limit across all GTI endpoints
+    regional = fetch_r_departures(client, start)
+    time.sleep(1)
+    sev = fetch_sev_departures(client, redis_client, start) or {}
+    return merge_departures(main, regional, sev)
+
+
+def _ensure_day(client: GtiClient, redis_client, day: date) -> list[dict]:
+    """The stored departures of a day, fetched first if missing."""
+    key = _day_key(day)
+    if not redis_client.get(key):
+        departures = fetch_day(client, redis_client, day)
+        _store(redis_client, key, {"departures": departures})
+        print(f"{len(departures)} departures ({key})")
+        time.sleep(1)
+    return _load_data(redis_client, key).get("departures", [])
+
+
+def _shifted(departures: list[dict], minutes: int, limit: int) -> list[dict]:
+    """Copies with timeOffset moved by minutes, keeping those up to limit."""
+    shifted = []
+    for departure in departures:
+        offset = departure.get("timeOffset")
+        if offset is None or offset > limit:
+            continue
+        shifted.append({**departure, "timeOffset": offset + minutes})
+    return shifted
+
+
+def combine_days(today: list[dict], tomorrow: list[dict]) -> list[dict]:
+    """Today's departures plus the early hours of tomorrow, as offsets from
+    today's start, so trips running past midnight stay in one piece."""
+    return today + _shifted(tomorrow, 24 * 60, NEXT_DAY_TAIL_MINUTES)
 
 
 def run_daily_snapshots(client: GtiClient, redis_client) -> None:
-    """Run the three departureList snapshots, store raw in Redis - each
-    skipped once its cache already reflects today's anchor time - then
-    rebuild the merged and by-service views."""
+    """Fetch today's and tomorrow's plan once each (a day is stored as soon
+    as it is known, so the midnight rollover needs no new query), then
+    rebuild the merged and by-service views anchored at today's 00:00."""
     start = _query_start_time(berlin_now())
-    _store(
-        redis_client,
-        REDIS_ANCHOR_KEY,
-        {"date": start.strftime("%Y-%m-%d"), "time": start.strftime("%H:%M:%S")},
-    )
+    today = _ensure_day(client, redis_client, start.date())
+    try:
+        tomorrow = _ensure_day(client, redis_client, start.date() + timedelta(days=1))
+    except Exception as e:  # tomorrow is a bonus, today's plan is enough
+        print(f"tomorrow's plan not available: {e}")
+        tomorrow = []
 
-    if _run_snapshot(
-        redis_client,
-        REDIS_MAIN_KEY,
-        start,
-        lambda: fetch_main_departures(client, start),
-    ):
-        time.sleep(1)  # 1 req/s rate limit across all GTI endpoints
-    if _run_snapshot(
-        redis_client, REDIS_R_KEY, start, lambda: fetch_r_departures(client, start)
-    ):
-        time.sleep(1)
-    _run_snapshot(
-        redis_client,
-        REDIS_SEV_KEY,
-        start,
-        lambda: fetch_sev_departures(client, redis_client, start),
-    )
-
-    merged = merge_departures(
-        _load_data(redis_client, REDIS_MAIN_KEY),
-        _load_data(redis_client, REDIS_R_KEY),
-        _load_data(redis_client, REDIS_SEV_KEY),
-    )
+    merged = combine_days(today, tomorrow)
     _store(redis_client, REDIS_MERGED_KEY, {"departures": merged})
     print(f"{len(merged)} unique departures ({REDIS_MERGED_KEY})")
 
@@ -443,6 +445,11 @@ def run_daily_snapshots(client: GtiClient, redis_client) -> None:
     match_sublines(by_service, sublines_cache)
     resolved = sum(1 for e in by_service.values() if e["subline"] is not None)
     _store(redis_client, REDIS_BY_SERVICE_KEY, by_service)
+    _store(
+        redis_client,
+        REDIS_ANCHOR_KEY,
+        {"date": start.strftime("%Y-%m-%d"), "time": start.strftime("%H:%M:%S")},
+    )
     print(
         f"{len(by_service)} service_ids, {resolved} matched to a subline "
         f"({REDIS_BY_SERVICE_KEY})"

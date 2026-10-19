@@ -287,7 +287,7 @@ def get_live_sublines():
 
 
 # --- Departures debug trees (static/dev_departures.html) --------------------
-# Snapshot of the daily 4:00 departureList run (departures.py), grouped for
+# Snapshot of the daily departureList run (departures.py), grouped for
 # browsing - not linked from any map page.
 
 

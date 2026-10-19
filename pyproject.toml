@@ -32,6 +32,7 @@ hvvmap-departures-live = "hvv_map.departures_live:main"
 hvvmap-trip-courses = "hvv_map.trip_courses:main"
 hvvmap-course = "hvv_map.course_debug:main"
 hvvmap-subline-check = "hvv_map.subline_debug:main"
+hvvmap-plan-compare = "hvv_map.plan_debug:main"
 hvvmap-trip-positions = "hvv_map.trip_positions:main"
 
 [tool.hatch.build.targets.wheel]

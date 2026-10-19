@@ -413,7 +413,8 @@
                 const nextIdx = nextStopIndex(t, Date.now());
                 const nextText = nextIdx >= 0 ? `${esc(t.stops[nextIdx].station)} <span class="muted">${esc(t.stops[nextIdx].planned)}</span>`
                     : (nextIdx === -1 ? '<span class="muted">Ziel erreicht</span>' : '<span class="muted">noch nicht gestartet</span>');
-                const changed = t.destination_changed ? ' <span class="badge warn">Ziel geändert</span>' : '';
+                const changed = (t.destination_changed ? ' <span class="badge warn">Ziel geändert</span>' : '')
+                    + (t.live_only ? ' <span class="badge">nur live (ohne Plan)</span>' : '');
                 let html = `<tr class="trip" data-id="${esc(t.id)}">
                     <td>${isOpen ? '▾' : '▸'} ${esc(t.start_time)} <span class="muted">${esc(t.start_station)}</span></td>
                     <td>${esc(t.window_time)} <span class="muted">${esc(t.window_station)}</span></td><td><b>${esc(t.line)}</b> <span class="muted small">${esc(t.mode)}</span></td>

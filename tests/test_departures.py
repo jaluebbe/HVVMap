@@ -1,4 +1,12 @@
+import json
+from datetime import datetime
+
 from hvv_map.departures import (
+    REDIS_ANCHOR_KEY,
+    combine_days,
+    _build_request,
+    _query_start_time,
+    snapshots_stale,
     ANCHOR_STATIONS_MAIN,
     ANCHOR_STATIONS_R,
     _anchor_set,
@@ -240,3 +248,84 @@ def test_berlin_now_follows_berlin_time_regardless_of_container_timezone(monkeyp
         monkeypatch.delenv("TZ")
         time_module.tzset()
         os.environ.pop("TZ", None)
+
+
+def test_query_start_is_midnight_of_the_current_day():
+    assert _query_start_time(datetime(2026, 10, 19, 2, 30)) == datetime(2026, 10, 19)
+
+
+def test_plan_query_ends_before_the_next_midnight():
+    request = _build_request({"Altona"}, ["SBAHN"], datetime(2026, 10, 19))
+    assert request["maxTimeOffset"] == 1439
+
+
+class _FakeRedis:
+    def __init__(self, data):
+        self.data = data
+
+    def get(self, key):
+        return self.data.get(key)
+
+
+def _anchor(day):
+    return json.dumps({"data": {"date": day, "time": "00:00:00"}})
+
+
+def test_snapshots_are_stale_after_midnight_until_rebuilt():
+    now = datetime(2026, 10, 19, 0, 5)
+    day = "hvv:departures:day:2026-10-19"
+    old = _FakeRedis({REDIS_ANCHOR_KEY: _anchor("2026-10-18"), day: "{}"})
+    new = _FakeRedis({REDIS_ANCHOR_KEY: _anchor("2026-10-19"), day: "{}"})
+    assert snapshots_stale(old, now)
+    assert not snapshots_stale(new, now)
+
+
+def test_snapshots_are_stale_without_todays_day_snapshot():
+    now = datetime(2026, 10, 19, 12, 0)
+    assert snapshots_stale(_FakeRedis({REDIS_ANCHOR_KEY: _anchor("2026-10-19")}), now)
+
+
+def test_combine_days_appends_tomorrows_early_hours_as_offsets():
+    today = [{"serviceId": "1", "timeOffset": 1430}]
+    tomorrow = [
+        {"serviceId": "1", "timeOffset": 10},
+        {"serviceId": "1", "timeOffset": 24 * 60 - 1},  # beyond the kept tail
+    ]
+    combined = combine_days(today, tomorrow)
+    assert [d["timeOffset"] for d in combined] == [1430, 1450]
+    assert tomorrow[0]["timeOffset"] == 10  # input untouched
+
+
+class _StoreRedis(_FakeRedis):
+    def set(self, key, value, ex=None):
+        self.data[key] = value
+
+
+def test_run_daily_snapshots_fetches_today_and_tomorrow_once(monkeypatch):
+    from hvv_map import departures
+
+    calls = []
+
+    def fake_fetch_day(client, redis_client, day):
+        calls.append(day)
+        return [
+            {
+                "serviceId": "7",
+                "station": {"id": "s"},
+                "line": {"name": "RE8", "direction": "X"},
+                "timeOffset": 600,
+            }
+        ]
+
+    monkeypatch.setattr(departures, "fetch_day", fake_fetch_day)
+    monkeypatch.setattr(departures.time, "sleep", lambda _: None)
+    monkeypatch.setattr(departures, "berlin_now", lambda: datetime(2026, 10, 19, 12))
+    redis_client = _StoreRedis({})
+
+    departures.run_daily_snapshots(None, redis_client)
+    departures.run_daily_snapshots(None, redis_client)
+
+    assert [d.isoformat() for d in calls] == ["2026-10-19", "2026-10-20"]
+    by_service = json.loads(redis_client.data[departures.REDIS_BY_SERVICE_KEY])["data"]
+    assert [s["timeOffset"] for s in by_service["7"]["stops"]] == [600]
+    assert not departures.snapshots_stale(redis_client, datetime(2026, 10, 19, 12))
