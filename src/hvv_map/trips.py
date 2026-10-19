@@ -7,6 +7,7 @@ Pure functions over the cached payloads, so the api image needs no GTI client.
 
 from collections import defaultdict
 from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
 
 from hvv_map.gtilive_geojson import mode_for_line
 from hvv_map.departures_tree import (
@@ -22,6 +23,12 @@ LIVE_WINDOW_MINUTES = 5  # keep in sync with departures_live.LIVE_WINDOW_MINUTES
 MATCH_TOLERANCE_MINUTES = 0  # time-only matches: exact minute
 ID_MATCH_WINDOW_MINUTES = 5  # same serviceId at the station: accept this offset
 GAP_THRESHOLD_MINUTES = 120  # same as departures.GAP_THRESHOLD_MINUTES
+
+
+def berlin_now() -> datetime:
+    """Current Berlin wall-clock time, naive (the container clock may be UTC)."""
+    return datetime.now(ZoneInfo("Europe/Berlin")).replace(tzinfo=None)
+
 
 STATUS_CONFIRMED = "bestätigt"
 STATUS_NOT_SEEN = "nicht gesehen"
