@@ -92,11 +92,14 @@ def _query_start_time(now: datetime) -> datetime:
 
 
 def _build_request(
-    stations: set[str], service_types: list[str], start: datetime
+    stations: set[str],
+    service_types: list[str],
+    start: datetime,
+    minutes: int = 1440,
 ) -> dict:
     return {
         "maxList": 25000,
-        "maxTimeOffset": 1440,  # 24h from start, so it still covers the full day
+        "maxTimeOffset": minutes,  # default 24h from start: the full day
         "stations": [{"type": "STATION", "name": name} for name in stations],
         "time": {
             "date": start.strftime("%Y-%m-%d"),
@@ -124,17 +127,19 @@ def _is_current(redis_client, key: str, start: datetime) -> bool:
     ) == start.strftime("%H:%M")
 
 
-def fetch_main_departures(client: GtiClient, start: datetime) -> dict:
-    """24h departureList across every U/S/AKN/ferry anchor station."""
-    request = _build_request(ANCHOR_STATIONS_MAIN, MAIN_SERVICE_TYPES, start)
+def fetch_main_departures(
+    client: GtiClient, start: datetime, minutes: int = 1440
+) -> dict:
+    """departureList across every U/S/AKN/ferry anchor station."""
+    request = _build_request(ANCHOR_STATIONS_MAIN, MAIN_SERVICE_TYPES, start, minutes)
     return client.send("departureList", request)
 
 
-def fetch_r_departures(client: GtiClient, start: datetime) -> dict:
-    """24h departureList across the regional-train anchor stations, filtered
+def fetch_r_departures(client: GtiClient, start: datetime, minutes: int = 1440) -> dict:
+    """departureList across the regional-train anchor stations, filtered
     down to WANTED_R_BAHN_LINES - RBAHN alone also returns other DB regional trains
     passing through."""
-    request = _build_request(ANCHOR_STATIONS_R, R_SERVICE_TYPES, start)
+    request = _build_request(ANCHOR_STATIONS_R, R_SERVICE_TYPES, start, minutes)
     response = client.send("departureList", request)
     response["departures"] = [
         d
@@ -156,9 +161,9 @@ def _is_wanted_departure(departure: dict) -> bool:
 
 
 def fetch_sev_departures(
-    client: GtiClient, redis_client, start: datetime
+    client: GtiClient, redis_client, start: datetime, minutes: int = 1440
 ) -> dict | None:
-    """24h departureList (incl. bus) across stations currently named in
+    """departureList (incl. bus) across stations currently named in
     active announcements, filtered down to is_line_of_interest() - widens
     beyond the fixed anchors to catch replacement services without pulling
     in every other bus line passing through. None if no announcement
@@ -167,7 +172,7 @@ def fetch_sev_departures(
     station_names = json.loads(payload)["data"] if payload else []
     if not station_names:
         return None
-    request = _build_request(set(station_names), SEV_SERVICE_TYPES, start)
+    request = _build_request(set(station_names), SEV_SERVICE_TYPES, start, minutes)
     response = client.send("departureList", request)
     response["departures"] = [
         d for d in response.get("departures", []) if _is_wanted_departure(d)
