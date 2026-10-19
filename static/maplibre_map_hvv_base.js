@@ -14,7 +14,7 @@ const map = new maplibregl.Map({
     style: '/api/vector/style/positron.json',
     center: PAGE_CONFIG.center || HAMBURG_CENTER,
     zoom: PAGE_CONFIG.zoom ?? HAMBURG_DEFAULT_ZOOM,
-    minZoom: 7,
+    minZoom: 6,
     maxZoom: 18,
     attributionControl: false, // added manually below, with our own extra links
 });
@@ -434,6 +434,38 @@ function vehicleModelFromText(text, delay) {
     return (lines[0] || '').slice(0, 3);
 }
 
+// Mimics the icon service's look (geometry measured on its SVGs, drawn at 40 units
+// high): replacement-bus lines get a red hexagon with white text, others plain text.
+function buildLineIconFallback(name, height) {
+    const ns = 'http://www.w3.org/2000/svg';
+    const replacement = /-(SEV|Bus|ERSATZ)/i.test(name);
+    const textWidth = 28 * name.length;
+    const width = replacement ? textWidth + 12 : textWidth;
+    const svg = document.createElementNS(ns, 'svg');
+    svg.setAttribute('viewBox', `0 0 ${width} 40`);
+    svg.setAttribute('height', height);
+    svg.setAttribute('width', (height * width) / 40);
+    if (replacement) {
+        const hexagon = document.createElementNS(ns, 'path');
+        hexagon.setAttribute('d', `M0 20 L20 0 L${width - 20} 0 L${width} 20 L${width - 20} 40 L20 40 Z`);
+        hexagon.setAttribute('fill', '#E2001A');
+        svg.appendChild(hexagon);
+    }
+    const text = document.createElementNS(ns, 'text');
+    const inset = replacement ? 22 : 2;
+    text.setAttribute('x', inset);
+    text.setAttribute('y', 34.4);
+    text.setAttribute('textLength', width - 2 * inset);
+    text.setAttribute('lengthAdjust', 'spacingAndGlyphs');
+    text.setAttribute('font-size', 43);
+    text.setAttribute('font-weight', 'bold');
+    text.setAttribute('font-family', 'Arial, Helvetica, sans-serif');
+    text.setAttribute('fill', replacement ? '#fff' : '#000');
+    text.textContent = name;
+    svg.appendChild(text);
+    return svg;
+}
+
 function buildMarkerElement(properties) {
     const wrapper = document.createElement('div');
     wrapper.className = 'hvv-marker-wrapper';
@@ -456,6 +488,10 @@ function buildMarkerElement(properties) {
             ? `<span class="hvv-marker-delay-standalone" style="left:${labelOffset}px;">${delayText}</span>`
             : '';
         wrapper.innerHTML = `<img src="${properties.icon}" alt="" style="height:${height}px" />${label}${delayStandalone}`;
+
+        // The icon service has no symbol for some (e.g. replacement-bus) lines.
+        const img = wrapper.querySelector('img');
+        img.addEventListener('error', () => img.replaceWith(buildLineIconFallback(properties.line || '', height)));
 
         // Hit area spans icon + estimated label width - doesn't need to be pixel-exact.
         const halfHeight = height / 2;

@@ -115,6 +115,17 @@ def course_key(trip: dict) -> str:
     return f"{trip['service_id']}@{trip['stops'][0]['planned']:%Y-%m-%dT%H:%M}"
 
 
+def trip_end(trip: dict, course: dict | None) -> datetime:
+    """Last known time of a trip: its last anchor stop or, if later, the end
+    of its cached departureCourse."""
+    end = trip["stops"][-1]["planned"]
+    for stop in (course or {}).get("stops") or []:
+        for key in ("dep", "arr"):
+            if stop.get(key):
+                end = max(end, datetime.fromisoformat(stop[key]))
+    return end
+
+
 def _hm(iso: str | None) -> str | None:
     """HH:MM of an ISO timestamp."""
     return iso[11:16] if iso else None
@@ -673,7 +684,9 @@ def build_trip_table(
             s for s in trip["stops"] if live_anchor <= s["planned"] <= window_end
         ]
         running = (
-            trip["stops"][0]["planned"] <= live_anchor <= trip["stops"][-1]["planned"]
+            trip["stops"][0]["planned"]
+            <= live_anchor
+            <= trip_end(trip, (courses or {}).get(course_key(trip)))
         )
         if not matched and not expected and not running:
             continue

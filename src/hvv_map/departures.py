@@ -52,12 +52,16 @@ ANCHOR_STATIONS_MAIN = {
 MAIN_SERVICE_TYPES = ["SBAHN", "UBAHN", "AKN", "FAEHRE"]
 
 # Terminal/hub and subline-disambiguating stations covering the regional
-# trains in R_BAHN_LINES (Lübeck-Kücknitz tells the RE8 shuttle variants apart).
+# trains in R_BAHN_LINES (Lübeck-Kücknitz tells the RE8 shuttle variants apart;
+# Harburg, Buxtehude and Buchholz cover the lines south of the Elbe; the far
+# terminals and hubs give live data for the whole route).
 ANCHOR_STATIONS_R = {
     "Elmshorn", "Ahrensburg", "Wrist", "Itzehoe", "Bad Oldesloe",
     "Hamburg-Altona", "Hamburg Hbf", "Lübeck Hbf", "Bargteheide",
     "Hamburg Dammtor", "Hasselbrook", "Tonndorf", "Glückstadt",
-    "Lübeck-Kücknitz",
+    "Lübeck-Kücknitz", "Harburg", "Buxtehude", "Buchholz",
+    "Hannover Hbf", "Bremen Hbf", "Husum", "Westerland(Sylt)", "Flensburg",
+    "Cuxhaven", "Neumünster", "Uelzen", "Lüneburg", "Kiel Hbf", "Schwerin Hbf",
 }  # fmt: skip
 R_SERVICE_TYPES = ["RBAHN"]  # GTI service type, covers RB and RE
 

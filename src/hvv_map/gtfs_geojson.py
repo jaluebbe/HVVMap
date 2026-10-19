@@ -17,7 +17,7 @@ from hvv_map.gtfs_schedule import (
     recently_active_service_ids,
     recently_active_shape_ids,
 )
-from hvv_map.lines import LINE_COLORS
+from hvv_map.lines import LINE_COLORS, SEV_COLOR, is_regional_name
 
 BERLIN_TZ = ZoneInfo("Europe/Berlin")
 
@@ -34,6 +34,13 @@ ORIGIN_LEAD_SECONDS = 60
 # when its points are sparse; real tracks have a median spacing of ~50 m.
 SPARSE_MEDIAN_KM = 0.4
 LONG_HOP_KM = 2.0  # a single hop this long is a straight link within a track
+# U-Bahn shapes are dense, so a hop of 1.3 km+ is a chord (seen in the feed).
+UBAHN_LONG_HOP_KM = 1.2
+# Regional shapes have sparse points on straight sections (hops of 2-4 km
+# are track); the 10+ km hops seen in the feed are straight chords.
+REGIONAL_LONG_HOP_KM = 6.0
+# Replacement buses follow roads with dense points; a hop this long is a chord.
+SEV_LONG_HOP_KM = 1.0
 
 # geofox icon service lineKey format. GTFS route_short_name has no
 # equivalent field, so this mapping has to be maintained by hand - ported
@@ -64,13 +71,6 @@ LINE_ID_MAP = {
     "A2-SEV": "DB-EFZ:A2-SEV_DB-EFZ_Z",
     "A3-Bus": "VHH:A3-Bus_VHH",
     "S5-SEV": "SBH:S5-SEV_SBH_SBAHNS",
-    "RB81": "DB-EFZ:RB81_DB-EFZ_Z",
-    "RB71": "DB-EFZ:RB71_DB-EFZ_Z",
-    "RB61": "DB-EFZ:RB61_DB-EFZ_Z",
-    "RB60": "DB-EFZ:RB60_DB-EFZ_Z",
-    "RE8": "DB-EFZ:RE8_DB-EFZ_Z",
-    "RE80": "DB-EFZ:RE80_DB-EFZ_Z",
-    "RE80-SEV": "DB-EFZ:RE80-SEV_DB-EFZ_Z",
 }
 
 
@@ -113,23 +113,65 @@ def _hop_km(a, b) -> float:
     return math.hypot((a[0] - b[0]) * 66, (a[1] - b[1]) * 111)
 
 
-def _straight_hops(coords: list) -> list[bool]:
+def _is_replacement(line_name: str) -> bool:
+    return LINE_COLORS.get(line_name) == SEV_COLOR
+
+
+def _long_hop_km(modes, lines=()) -> float:
+    """Hop length counted as a straight link for a shape of these modes and
+    lines."""
+    if any(_is_replacement(name) for name in lines):
+        return SEV_LONG_HOP_KM
+    if "R" in modes:
+        return REGIONAL_LONG_HOP_KM
+    return UBAHN_LONG_HOP_KM if "U" in modes else LONG_HOP_KM
+
+
+def _straight_hops(coords: list, long_hop_km: float = LONG_HOP_KM) -> list[bool]:
     """Per hop of a polyline: True if it is a straight link, not a track."""
     hops = [_hop_km(a, b) for a, b in zip(coords, coords[1:])]
     if hops and statistics.median(hops) > SPARSE_MEDIAN_KM:
         return [True] * len(hops)
-    return [hop > LONG_HOP_KM for hop in hops]
+    return [hop > long_hop_km for hop in hops]
 
 
-def _straight_runs(coords: list) -> list[tuple[list, bool]]:
+def _segment_is_straight(
+    shape_coords: list, coords: list, mode: str, line_name: str = ""
+) -> bool:
+    """A vehicle segment is drawn straight if its points are. On regional
+    shapes a single stop-to-stop section may hold just two distant points, so
+    there the whole shape decides (none or sparse = straight, as for
+    replacement buses), plus a hop beyond the regional limit."""
+    if _is_replacement(line_name) or mode != "R":
+        limit = _long_hop_km({mode}, (line_name,))
+        return any(_straight_hops(coords, limit))
+    if len(shape_coords) < 2 or all(_straight_hops(shape_coords)):
+        return True
+    return any(_hop_km(a, b) > REGIONAL_LONG_HOP_KM for a, b in zip(coords, coords[1:]))
+
+
+def _straight_runs(
+    coords: list, long_hop_km: float = LONG_HOP_KM
+) -> list[tuple[list, bool]]:
     """Coordinates split into runs of consecutive hops with the same flag."""
-    flags = _straight_hops(coords)
+    flags = _straight_hops(coords, long_hop_km)
     runs, start = [], 0
     for index in range(1, len(flags) + 1):
         if index == len(flags) or flags[index] != flags[start]:
             runs.append((coords[start : index + 1], flags[start]))
             start = index
     return runs
+
+
+def icon_key_for(line_name: str) -> str | None:
+    """Icon service key of a line: the fixed map for U/S/AKN/ferry and
+    special lines, derived from the name for regional lines and their
+    replacement buses (including ones that appear spontaneously)."""
+    if line_name in LINE_ID_MAP:
+        return LINE_ID_MAP[line_name]
+    if is_regional_name(line_name):
+        return f"DB-EFZ:{line_name}_DB-EFZ_Z"
+    return None
 
 
 def _build_point_feature(
@@ -143,7 +185,7 @@ def _build_point_feature(
     mode,
     straight=False,
 ):
-    icon_key = LINE_ID_MAP.get(line_short_name)
+    icon_key = icon_key_for(line_short_name)
     label = direction.split("(")[0].strip()
     if icon_key:
         icon_url = f"https://cloud.geofox.de/icon/line?height={ICON_HEIGHT}&lineKey={icon_key}&fileFormat=SVG"
@@ -312,7 +354,7 @@ def build_positions_geojson(schedule: Schedule, now_ts: int) -> dict:
         if result is None:
             continue
         progress, head = result
-        straight = any(_straight_hops(coords))
+        straight = _segment_is_straight(shape_coords, coords, mode, line_short_name)
 
         model = MODEL_BY_ROUTE_TYPE.get(route["route_type"], "")
         text = "<br>".join([trip["trip_headsign"], model])
@@ -454,7 +496,9 @@ def build_lines_geojson(schedule: Schedule, reference_date: date | None = None) 
         coords = schedule.shapes.get(shape_id)
         if not coords or len(coords) < 2:
             continue
-        for run, straight in _straight_runs(coords):
+        for run, straight in _straight_runs(
+            coords, _long_hop_km(info["modes"], info["lines"])
+        ):
             features.append(
                 {
                     "type": "Feature",

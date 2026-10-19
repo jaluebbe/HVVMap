@@ -74,8 +74,11 @@ def test_is_line_of_interest_matches_u_s_akn_and_their_replacement_buses():
         )
 
 
-def test_is_line_of_interest_matches_re8_re80_and_their_sev():
-    for name in ["RE8", "RE80", "RE8-SEV", "RE80-SEV"]:
+def test_is_line_of_interest_matches_wanted_regional_lines_and_their_sev():
+    names = ["RE8", "RE80", "RE8-SEV", "RE80-SEV", "RE6", "RE6x", "RE7", "RE70"]
+    names += ["RE3", "RE4", "RE5", "RB31", "RB38", "RB41", "RE4-SEV"]
+    names += ["RE1", "RE1-SEV"]
+    for name in names:
         assert is_line_of_interest(
             LineInfo(id="x", name=name, carrier_short="", simple_type="")
         )
@@ -87,7 +90,19 @@ def test_is_line_of_interest_matches_ferries_by_carrier_not_name():
 
 
 def test_is_line_of_interest_excludes_unrelated_lines():
-    for name in ["1", "20", "RE7", "Metrobus 5", ""]:
+    for name in [
+        "1",
+        "20",
+        "RE74",
+        "RE60",
+        "RE700",
+        "RE10",
+        "RE6y",
+        "RE30",
+        "RB39",
+        "Metrobus 5",
+        "",
+    ]:
         line = LineInfo(id="x", name=name, carrier_short="VHH", simple_type="BUS")
         assert not is_line_of_interest(line)
 
@@ -98,6 +113,12 @@ def test_is_line_of_interest_excludes_re83_despite_re8_prefix():
     for name in ["RE83", "RE83-SEV"]:
         line = LineInfo(id="x", name=name, carrier_short="erixx", simple_type="TRAIN")
         assert not is_line_of_interest(line)
+
+
+def test_re4_mv_is_a_separate_line_not_an_re4_replacement_bus():
+    line = LineInfo(id="x", name="RE4-MV", carrier_short="ODEG", simple_type="TRAIN")
+    assert not is_line_of_interest(line)
+    assert replacement_bus_mode("RE4-MV") == ""
 
 
 def test_replacement_bus_mode_by_prefix():
