@@ -376,3 +376,53 @@ def test_ubahn_chord_of_over_a_kilometre_is_straight_but_not_on_other_modes():
     coords = dense + [[10.0, 53.03 + 0.014]]  # 1.5 km chord
     assert any(_straight_hops(coords, _long_hop_km({"U"})))
     assert not any(_straight_hops(coords, _long_hop_km({"AKN"})))
+
+
+def _two_shape_schedule(dense_shape):
+    trips = {
+        "T1": {
+            "trip_id": "T1",
+            "route_id": "R1",
+            "service_id": "ALLDAYS",
+            "trip_headsign": "Beta",
+            "shape_id": "SPARSE",
+        },
+        "T2": {
+            "trip_id": "T2",
+            "route_id": "R1",
+            "service_id": "ALLDAYS",
+            "trip_headsign": "Beta",
+            "shape_id": "DENSE",
+        },
+    }
+    times = [(1, "A", 28800, 28800), (2, "B", 28920, 28920)]
+    return _make_schedule(
+        trips=trips,
+        trip_stop_times={"T1": times, "T2": times},
+        shapes={"SPARSE": [(10.0, 53.50), (10.0, 53.52)], "DENSE": dense_shape},
+    )
+
+
+def test_straight_run_is_dropped_where_another_shape_has_a_real_track():
+    schedule = _two_shape_schedule(_dense_track())
+
+    lines = build_lines_geojson(schedule, reference_date=date(2025, 6, 2))["features"]
+
+    assert [f["properties"]["straight"] for f in lines] == [False]
+
+
+def test_straight_run_stays_without_a_real_track_between_its_end_points():
+    schedule = _two_shape_schedule([(10.0, 53.50), (10.0, 53.52)])
+
+    lines = build_lines_geojson(schedule, reference_date=date(2025, 6, 2))["features"]
+
+    assert [f["properties"]["straight"] for f in lines] == [True, True]
+
+
+def test_straight_run_stays_when_the_real_track_is_elsewhere():
+    far = [(10.5 + 0.0005 * i, 53.80) for i in range(60)]
+    schedule = _two_shape_schedule(far)
+
+    lines = build_lines_geojson(schedule, reference_date=date(2025, 6, 2))["features"]
+
+    assert sorted(f["properties"]["straight"] for f in lines) == [False, True]
