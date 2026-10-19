@@ -106,3 +106,30 @@ def test_fetcher_stores_the_tracks_once_per_feed(tmp_path, monkeypatch):
     assert redis_client.sets == 2  # rebuilt only for the changed feed
     assert stored["feed_mtime"] == 2.0
     assert len(stored["data"]["features"]) == 1
+
+
+def test_long_straight_links_are_left_out(tmp_path):
+    near = _line("sh1", 10.0)  # ~70 m between points
+    far = [f"sh1,53.5,{10.2 + 0.001 * i:.6f},{10 + i}" for i in range(5)]
+    feed = _feed(tmp_path, near + far)
+
+    features = build_bus_tracks_geojson(feed)["features"]
+
+    assert len(features) == 2  # the ~13 km link between them is gone
+    assert all(len(f["geometry"]["coordinates"]) == 2 for f in features)
+
+
+def test_shape_made_only_of_long_links_has_no_track(tmp_path):
+    rows = ["sh1,53.5,10.0,0", "sh1,53.5,10.5,1", "sh1,53.5,11.0,2"]
+    feed = _feed(tmp_path, rows)
+
+    assert build_bus_tracks_geojson(feed)["features"] == []
+
+
+def test_split_at_gaps():
+    from hvv_map.gtfs_bus_tracks import split_at_gaps
+
+    points = [(10.0, 53.5), (10.001, 53.5), (10.5, 53.5), (10.501, 53.5)]
+
+    assert split_at_gaps(points) == [points[:2], points[2:]]
+    assert split_at_gaps([]) == []

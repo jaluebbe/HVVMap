@@ -11,6 +11,7 @@ from pathlib import Path
 csv.field_size_limit(10_000_000)
 
 TOLERANCE_M = 5.0  # simplification tolerance
+MAX_GAP_M = 1000.0  # longer gaps between points are straight links, left out
 PRECISION = 5  # decimals of the output coordinates (~1 m)
 M_PER_DEG_LAT = 111_200.0
 
@@ -53,6 +54,23 @@ def simplify(points: list, tolerance_m: float = TOLERANCE_M) -> list:
     return [p for p, k in zip(points, keep) if k]
 
 
+def split_at_gaps(points: list, max_gap_m: float = MAX_GAP_M) -> list[list]:
+    """Parts of the polyline without a gap of max_gap_m or more; a straight
+    link has no point in between and is no track."""
+    parts, part = [], [points[0]] if points else []
+    for previous, point in zip(points, points[1:]):
+        lat = math.radians((previous[1] + point[1]) / 2)
+        gap = math.hypot(
+            (point[0] - previous[0]) * M_PER_DEG_LAT * math.cos(lat),
+            (point[1] - previous[1]) * M_PER_DEG_LAT,
+        )
+        if gap >= max_gap_m:
+            parts.append(part)
+            part = []
+        part.append(point)
+    return [*parts, part] if part else parts
+
+
 def _bus_routes(gtfs_path: Path) -> dict[str, str]:
     with open(gtfs_path / "routes.txt", encoding="utf-8") as f:
         return {
@@ -72,21 +90,23 @@ def _lines_by_shape(gtfs_path: Path, routes: dict[str, str]) -> dict[str, set]:
 
 
 def _simplified_shapes(gtfs_path: Path, wanted: set):
-    """(shape_id, simplified points) per wanted shape. shapes.txt is read
-    once; a shape is simplified as soon as its rows end, so only one shape's
-    raw points are in memory (rows of a shape are expected to be adjacent)."""
+    """(shape_id, simplified points) per track part of a wanted shape, gaps
+    removed. shapes.txt is read once; a shape is processed as soon as its
+    rows end, so only one shape's raw points are in memory (rows of a shape
+    are expected to be adjacent)."""
     current, rows = None, []
 
     def finish():
         rows.sort()
-        return current, simplify([(lon, lat) for _seq, lon, lat in rows])
+        points = [(lon, lat) for _seq, lon, lat in rows]
+        return [(current, simplify(part)) for part in split_at_gaps(points)]
 
     with open(gtfs_path / "shapes.txt", encoding="utf-8") as f:
         for row in csv.DictReader(f):
             shape_id = row["shape_id"]
             if shape_id != current:
                 if rows:
-                    yield finish()
+                    yield from finish()
                 current, rows = shape_id, []
             if shape_id in wanted:
                 rows.append(
@@ -97,7 +117,7 @@ def _simplified_shapes(gtfs_path: Path, wanted: set):
                     )
                 )
     if rows:
-        yield finish()
+        yield from finish()
 
 
 def build_bus_tracks_geojson(gtfs_dir: str, tolerance_m: float = TOLERANCE_M) -> dict:

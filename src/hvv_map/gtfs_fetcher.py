@@ -33,6 +33,7 @@ POSITIONS_KEY = "hvv:gtfs:positions"
 LINES_KEY = "hvv:gtfs:reference_lines"
 STOPS_KEY = "hvv:gtfs:reference_stops"
 BUS_TRACKS_KEY = "hvv:gtfs:bus_tracks"  # developer map only, no TTL
+BUS_TRACKS_VERSION = 2  # bump when the layer changes, rebuilds the stored one
 
 
 def _store(redis_client, key: str, data: dict, ttl) -> None:
@@ -54,12 +55,18 @@ def _build_bus_tracks(redis_client, feed_mtime: float) -> None:
         return
     try:
         raw = redis_client.get(BUS_TRACKS_KEY)
-        if raw and json.loads(raw).get("feed_mtime") == feed_mtime:
-            return
+        if raw:
+            stored = json.loads(raw)
+            if (
+                stored.get("feed_mtime") == feed_mtime
+                and stored.get("version") == BUS_TRACKS_VERSION
+            ):
+                return
         data = build_bus_tracks_geojson(GTFS_DIR)
         payload = {
             "fetched_at": int(time.time()),
             "feed_mtime": feed_mtime,
+            "version": BUS_TRACKS_VERSION,
             "data": data,
         }
         redis_client.set(BUS_TRACKS_KEY, json.dumps(payload, separators=(",", ":")))
