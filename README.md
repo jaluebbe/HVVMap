@@ -178,6 +178,10 @@ and, mounted as a volume at runtime:
 The **gtfs-fetcher** image needs a static GTFS feed mounted at `GTFS_DIR`
 (default `data/gtfs`) - unzipped, not the raw `.zip`.
 
+The **fetcher** image reads the same feed (read-only mount at `GTFS_DIR`) if it
+is there: rail hops GTI delivers no track for are then cut from the GTFS
+shapes (`gtfs_tracks.py`). Without a feed this step is skipped.
+
 All images read `REDIS_HOST`/`REDIS_DB` (default `127.0.0.1`/`0`); only the
 GTI fetcher needs `GTI_USER`/`GTI_HMAC_SECRET`.
 

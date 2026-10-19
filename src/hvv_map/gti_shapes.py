@@ -759,6 +759,8 @@ def run_update(
 ) -> tuple[dict, dict | None]:
     """Resolve new sublines and derive variant sublines; returns both
     summaries (the second is None without a cached anchor)."""
+    from hvv_map.gtfs_tracks import fill_from_gtfs
+
     summary = update_gti_shapes(client, redis_client, conn)
     anchor_start = _load_anchor_start(redis_client)
     if anchor_start is None:
@@ -767,6 +769,7 @@ def run_update(
     derived = derive_unresolved_sublines(client, by_service, anchor_start, conn)
     stations = {s.id: s for s in load_stations(redis_client)}
     derived["clipped"] = store_clipped_tracks(conn, by_service, stations)
+    derived["gtfs"] = fill_from_gtfs(conn, by_service, stations)
     return summary, derived
 
 
@@ -788,6 +791,7 @@ def main() -> None:
             f"course, {derived['failed']} failed, {derived['remaining']} still waiting"
         )
         print(f"{derived['clipped']} hops filled from longer stored tracks")
+        print(f"{derived['gtfs']} hops filled from GTFS shapes")
 
 
 if __name__ == "__main__":
