@@ -70,6 +70,50 @@ def test_without_a_known_service_id_only_the_exact_minute_matches():
     assert table["summary"]["quality"] == {"nur live": 1}
 
 
+def test_coupled_train_matches_the_unique_plan_stop_one_minute_off():
+    departure = _live("U1", "A", 1, 6, service_id=555)
+    departure["line"]["direction"] = "Ziel / Anderes"
+    live = {"anchor": LIVE_ANCHOR, "departures": [departure]}
+
+    table = build_trip_table(PLAN, PLAN_ANCHOR, live)
+
+    trip = next(t for t in table["trips"] if not t["live_only"])
+    assert trip["status"] == "bestätigt"
+    assert trip["stops"][0]["match"]["quality"] == "±1 min, ohne Richtung"
+
+
+def test_later_stops_of_a_matched_live_service_follow_its_plan_trip():
+    plan = {"1": _plan_entry("U1", 6, [("A", 302), ("B", 306)])}
+    live = {
+        "anchor": LIVE_ANCHOR,
+        "departures": [
+            _live("U1", "B", 6, 6, service_id=555),  # exact: learns 555 -> 1
+            _live("U1", "A", 4, 6, service_id=555),  # two minutes off
+        ],
+    }
+
+    table = build_trip_table(plan, PLAN_ANCHOR, live)
+
+    [trip] = table["trips"]
+    qualities = [s["match"]["quality"] for s in trip["stops"]]
+    assert qualities == ["ID, ±2 min (gelernt)", "exakt"]
+
+
+def test_live_only_stops_across_04_00_stay_one_trip():
+    live = {
+        "anchor": {"date": "2026-10-17", "time": "03:50:00"},
+        "departures": [
+            _live("S1", "R", 2, 1, service_id=77),  # 03:52
+            _live("S1", "W", 16, 1, service_id=77),  # 04:06
+        ],
+    }
+
+    table = build_trip_table({}, PLAN_ANCHOR, live)
+
+    [trip] = table["trips"]
+    assert [s["station_id"] for s in trip["stops"]] == ["R", "W"]
+
+
 def test_unique_plan_stop_matches_despite_different_direction_id():
     live = {"anchor": LIVE_ANCHOR, "departures": [_live("U1", "A", 2, 1)]}
     table = build_trip_table(PLAN, PLAN_ANCHOR, live)

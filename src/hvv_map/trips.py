@@ -340,6 +340,22 @@ def _match_by_service(
     return stop, "ID" if not minutes else f"ID, ±{minutes} min"
 
 
+COMBINED_DESTINATION = " / "  # a coupled train lists both destinations
+
+
+def _near_free_stop(
+    relaxed: dict, entry: dict, station_id: str, planned: datetime
+) -> dict | None:
+    """The only free plan stop of the line at this station one minute off -
+    GTI times a coupled train one minute apart from its plan trips."""
+    free = []
+    for delta in (-1, 1):
+        key = (entry["line"], station_id, planned + timedelta(minutes=delta), None)
+        free += [(t, s) for t, s in relaxed.get(key, []) if s["match"] is None]
+    free = _prefer_platform(free, entry["platform"])
+    return free[0][1] if len(free) == 1 else None
+
+
 def _prefer_platform(free: list, platform: str | None) -> list:
     """Narrow several candidates down to the ones on the live platform."""
     if len(free) > 1 and platform:
@@ -567,6 +583,19 @@ def _live_trip_stop(entry: dict, station_id: str, planned: datetime) -> dict:
     }
 
 
+def _live_trip_key(trips: dict, entry: dict, planned: datetime) -> str:
+    """The key of the trip with the entry's serviceId that has a stop close in
+    time, else a new one named by the service day."""
+    close = timedelta(minutes=GAP_THRESHOLD_MINUTES)
+    for key, trip in trips.items():
+        if trip["service_id"] == str(entry["service_id"]) and any(
+            abs(s["planned"] - planned) <= close for s in trip["stops"]
+        ):
+            return key
+    day = (planned - timedelta(hours=4)).date()
+    return f"{LIVE_TRIP_PREFIX}{entry['service_id']}@{day}"
+
+
 def _merge_live_trips(found: list[tuple], remembered: dict) -> list[dict]:
     """Live-only trips: one per serviceId and service day, with the live stops
     seen so far. `found` is [(entry, station id, planned)] of this snapshot,
@@ -583,8 +612,7 @@ def _merge_live_trips(found: list[tuple], remembered: dict) -> list[dict]:
             ],
         }
     for entry, station_id, planned in found:
-        day = (planned - timedelta(hours=4)).date()
-        key = f"{LIVE_TRIP_PREFIX}{entry['service_id']}@{day}"
+        key = _live_trip_key(trips, entry, planned)
         trip = trips.setdefault(
             key,
             {
@@ -681,6 +709,8 @@ def build_trip_table(
     trips = _plan_trips(by_service, plan_anchor)
     index = _index_plan(trips)
     by_service_index = _index_by_service(trips)
+    stop_trip = {id(stop): trip for trip in trips for stop in trip["stops"]}
+    learned: dict[str, str] = {}  # live serviceId -> plan serviceId it matched
 
     live_only, quality_counts, live_total = [], defaultdict(int), 0
     live_fresh = now is None or now - live_anchor <= timedelta(
@@ -700,6 +730,10 @@ def build_trip_table(
     )
 
     def assign(entry: dict, stop: dict, quality: str) -> None:
+        if "mehrdeutig" not in quality:
+            learned.setdefault(
+                str(entry["service_id"]), stop_trip[id(stop)]["service_id"]
+            )
         quality_counts[quality] += 1
         per_line[entry["line"]]["matched"] += 1
         stop["match"] = {
@@ -746,6 +780,14 @@ def build_trip_table(
     # only in the direction id.
     relaxed = _index_relaxed(trips)
     for entry, station_id, planned, had_candidates in leftovers:
+        known = learned.get(str(entry["service_id"]))
+        if known and not entry["extra"]:
+            by_known = _match_by_service(
+                by_service_index, {**entry, "service_id": known}, station_id, planned
+            )
+            if by_known:
+                assign(entry, by_known[0], f"{by_known[1]} (gelernt)")
+                continue
         twin = placed.get((entry["line"], station_id, planned, entry["platform"]))
         if twin is not None and entry["platform"]:
             twin["match"]["aliases"].append(
@@ -769,6 +811,15 @@ def build_trip_table(
         if len(free) == 1 and not entry["extra"]:
             assign(entry, free[0][1], f"{quality}, ohne Richtung")
             continue
+        if (
+            not free
+            and not entry["extra"]
+            and COMBINED_DESTINATION in (entry["destination"] or "")
+        ):
+            near = _near_free_stop(relaxed, entry, station_id, planned)
+            if near:
+                assign(entry, near, "±1 min, ohne Richtung")
+                continue
         if (entry["extra"] or (not had_candidates and not free)) and str(
             entry["service_id"]
         ) not in by_service:
