@@ -728,3 +728,17 @@ def test_api_imports_without_gti_client():
     code = "import sys; sys.modules['requests'] = None; import hvv_map.api"
     result = subprocess.run([sys.executable, "-c", code], capture_output=True)
     assert result.returncode == 0, result.stderr.decode()
+
+
+def test_regional_trip_is_expected_within_twenty_minutes_but_a_subway_within_five():
+    r_type = {"shortInfo": "RE"}
+    regional = _plan_entry("RE8", 1, [("A", 315)])  # 09:15
+    regional["line"]["type"] = r_type
+    plan = {"1": regional, "2": _plan_entry("U1", 6, [("A", 315)])}
+    live = {"anchor": LIVE_ANCHOR, "departures": []}
+
+    table = build_trip_table(plan, PLAN_ANCHOR, live)
+
+    status = {t["line"]: t["status"] for t in table["trips"]}
+    assert status.get("RE8") == "nicht gesehen"
+    assert "U1" not in status

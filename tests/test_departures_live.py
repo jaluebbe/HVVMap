@@ -47,7 +47,11 @@ def test_fetch_live_departures_one_realtime_request_per_category(monkeypatch):
     ):
         assert endpoint == "departureList"
         assert request["useRealtime"] is True
-        assert request["maxTimeOffset"] == live.LIVE_WINDOW_MINUTES
+        assert request["maxTimeOffset"] == (
+            live.LIVE_WINDOW_MINUTES
+            if types == live.MAIN_SERVICE_TYPES
+            else live.LIVE_WINDOW_LONG_MINUTES
+        )
         assert len(request["stations"]) == len(stations)
         assert request["serviceTypes"] == types
         assert request["time"] == {"date": "2026-10-17", "time": "00:20:00"}

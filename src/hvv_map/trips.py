@@ -19,7 +19,10 @@ from hvv_map.departures_tree import (
     vehicles_text,
 )
 
-LIVE_WINDOW_MINUTES = 5  # keep in sync with departures_live.LIVE_WINDOW_MINUTES
+# keep in sync with departures_live
+LIVE_WINDOW_MINUTES = 5
+LIVE_WINDOW_LONG_MINUTES = 20  # regional trains and replacement buses
+LONG_WINDOW_MODES = {"R", "SEV"}
 MATCH_TOLERANCE_MINUTES = 0  # time-only matches: exact minute
 ID_MATCH_WINDOW_MINUTES = 5  # same serviceId at the station: accept this offset
 GAP_THRESHOLD_MINUTES = 120  # same as departures.GAP_THRESHOLD_MINUTES
@@ -195,6 +198,13 @@ def _anchor_positions(anchors: list[dict], stations: list[dict]) -> list[int]:
         positions.append(found)
         start = found + 1
     return positions
+
+
+def _window_end(trip: dict, live_anchor: datetime) -> datetime:
+    """End of the live window that covers the trip's line."""
+    long_window = _mode_label(trip["line_obj"] or {}) in LONG_WINDOW_MODES
+    minutes = LIVE_WINDOW_LONG_MINUTES if long_window else LIVE_WINDOW_MINUTES
+    return live_anchor + timedelta(minutes=minutes)
 
 
 def _route_rows(
@@ -671,7 +681,6 @@ def build_trip_table(
     trips = _plan_trips(by_service, plan_anchor)
     index = _index_plan(trips)
     by_service_index = _index_by_service(trips)
-    window_end = live_anchor + timedelta(minutes=LIVE_WINDOW_MINUTES)
 
     live_only, quality_counts, live_total = [], defaultdict(int), 0
     live_fresh = now is None or now - live_anchor <= timedelta(
@@ -796,6 +805,7 @@ def build_trip_table(
     rows = []
     for trip in trips:
         matched = [s for s in trip["stops"] if s["match"]]
+        window_end = _window_end(trip, live_anchor)
         expected = [
             s for s in trip["stops"] if live_anchor <= s["planned"] <= window_end
         ]
