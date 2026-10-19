@@ -38,11 +38,15 @@ ERROR_LOG_INTERVAL = 60.0  # seconds before an identical error is logged again
 RELOAD_INTERVAL = 10.0  # seconds between checks for new source data
 
 
-def _track(start, end, stations, shapes_conn, cache):
+def _track(start, end, stations, shapes_conn, cache, bus=False):
     """(points, cumulative distances, straight) of a segment, memoized in
-    `cache`; straight = no stored track, just the line between stations."""
-    key = (start, end)
+    `cache`; straight = no stored track, just the line between stations. A
+    replacement bus never takes the stored track: it is keyed by the station
+    pair, so it would be the rail line's."""
+    key = (start, end, bus)
     if key not in cache:
+        if bus:
+            shapes_conn = None
         coordinates = _subline_coordinates((start, end), stations, shapes_conn)
         points = [tuple(c) for c in coordinates]
         if len(points) < 2:
@@ -60,6 +64,7 @@ def _coordinates(
     stations: dict[str, StationInfo],
     shapes_conn: sqlite3.Connection | None,
     cache: dict,
+    bus: bool = False,
 ) -> tuple[tuple[float, float], bool] | None:
     """(point, straight): the station at a stop, a point on the segment's
     track between stops."""
@@ -69,7 +74,7 @@ def _coordinates(
     start, end = ids[position.index], ids[position.end_index]
     if not start or not end:
         return None
-    track = _track(start, end, stations, shapes_conn, cache)
+    track = _track(start, end, stations, shapes_conn, cache, bus)
     if track is None:
         return None
     points, distances, straight = track
@@ -165,7 +170,9 @@ def build_positions(
         position = locate(stops, now, ferry)
         if position and position.state in (AT_STOP, BETWEEN):
             ids = [s["station_id"] for s in row["stops"]]
-            placed = _coordinates(position, ids, stations, shapes_conn, cache)
+            placed = _coordinates(
+                position, ids, stations, shapes_conn, cache, row["mode"] == "SEV"
+            )
             if placed:
                 point, straight = placed
                 delay = row["stops"][position.index]["delay"]
@@ -181,7 +188,9 @@ def build_positions(
             ):
                 continue
             ids = [s["id"] for s in alias["stops"]]
-            placed = _coordinates(position, ids, stations, shapes_conn, cache)
+            placed = _coordinates(
+                position, ids, stations, shapes_conn, cache, row["mode"] == "SEV"
+            )
             if placed:
                 point, straight = placed
                 delay = alias["stops"][position.index]["delay"]
