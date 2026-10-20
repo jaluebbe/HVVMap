@@ -30,6 +30,7 @@ COURSE_KEEP_SECONDS = 2 * 24 * 3600
 COURSE_RETRY_SECONDS = 600  # a failed fetch is not retried before this
 COURSE_REFRESH_SECONDS = 300  # running trips refetch their course after this
 COURSE_RUNNING_SLACK_MINUTES = 2
+COURSE_TIME_TOLERANCE_MINUTES = 10  # requested time vs. the course's own times
 
 
 def _parse_time(value: str | None) -> str | None:
@@ -77,6 +78,19 @@ def parse_course(response: dict) -> list[dict] | None:
         }
     )
     return stops
+
+
+def course_fits_request(stops: list[dict], request: dict) -> bool:
+    """GTI may answer a serviceId with another run of the same day; the course
+    must pass the requested time within the tolerance."""
+    wanted = datetime.fromisoformat(request["time"]).replace(tzinfo=None)
+    tolerance = timedelta(minutes=COURSE_TIME_TOLERANCE_MINUTES)
+    return any(
+        abs(datetime.fromisoformat(stop[key]) - wanted) <= tolerance
+        for stop in stops
+        for key in ("dep", "arr")
+        if stop.get(key)
+    )
 
 
 def course_request(live: dict, service_id: int, station_id: str | None = None):
@@ -213,6 +227,11 @@ def run_trip_courses(client: GtiClient, redis_client, now: datetime | None = Non
             response = {}
         time.sleep(1)  # 1 req/s rate limit across all GTI endpoints
         stops = parse_course(response)
+        if stops is not None and not course_fits_request(stops, request):
+            print(
+                f"[trip_courses] {key}: course does not match the request", flush=True
+            )
+            stops = None
         cached[key] = {"fetched_at": int(time.time()), "stops": stops}
         if stops is None:
             failed += 1

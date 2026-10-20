@@ -44,6 +44,15 @@ def test_parse_course_without_elements_is_none():
     assert parse_course({"returnCode": "OK"}) is None
 
 
+def test_course_of_another_run_does_not_fit_the_request():
+    stops = parse_course(_response())
+    at = "2026-10-17T09:03:00.000+0200"
+    later = "2026-10-17T13:33:00.000+0200"
+
+    assert trip_courses.course_fits_request(stops, {"time": at})
+    assert not trip_courses.course_fits_request(stops, {"time": later})
+
+
 def _trip(service_id, minute):
     return {
         "service_id": service_id,
