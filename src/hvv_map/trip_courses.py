@@ -241,18 +241,15 @@ def run_trip_courses(client: GtiClient, redis_client, now: datetime | None = Non
                         jobs.append((course_key(main), main_request))
                         queued.add(course_key(main))
     renumbered.sort(key=lambda job: abs(_request_time(job[1]) - now))
-    live_jobs = len(jobs)
     jobs += renumbered
     for trip in due_trips(trips, cached, now):
         request = _query(trip)
         if request and course_key(trip) not in queued:
             jobs.append((course_key(trip), request))
 
-    if jobs:
+    if len(jobs) > COURSE_MAX_CALLS:
         print(
-            f"[trip_courses] {len(jobs)} jobs ({live_jobs} live-only/alias, "
-            f"{len(renumbered)} renumbered), running {COURSE_MAX_CALLS}",
-            flush=True,
+            f"[trip_courses] {len(jobs)} jobs, running {COURSE_MAX_CALLS}", flush=True
         )
     fetched = failed = 0
     for key, request in jobs[:COURSE_MAX_CALLS]:
