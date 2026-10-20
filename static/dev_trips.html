@@ -423,7 +423,7 @@
             if (a.shared_until) parts.push(`identisch bis ${esc(a.shared_until)}`);
             if (a.shared_from) parts.push(`identisch ab ${esc(a.shared_from)}`);
             const note = parts.join(', ') || 'nicht vergleichbar';
-            return `<div class="alias"><h4>Live-ID ${esc(a.service_id)} → ${esc(a.destination)} <span class="muted">(${note})</span>${asOf(a.fetched_at)}</h4>` +
+            return `<div class="alias"><h4>Live-ID ${esc(a.service_id)} → ${esc(a.destination)} <span class="muted">(${note})</span>${asOf(a.fetched_at)}${a.vehicles ? ' <span class="muted">· ' + esc(a.vehicles) + '</span>' : ''}</h4>` +
                 `<table class="inner small"><tr><th>Halt</th><th>an</th><th>ab</th><th>Verspätung</th><th>Gleis</th></tr>${rows}</table></div>`;
         }
 
@@ -443,7 +443,7 @@
                     <td>${esc(t.window_time)} <span class="muted">${esc(t.window_station)}</span></td><td><b>${esc(t.line)}</b> <span class="muted small">${esc(t.mode)}</span></td>
                     <td>${esc(t.destination)}${changed}</td><td>${nextText}</td><td>${status}</td>
                     <td>${esc(delayText(t.max_delay))}</td>
-                    <td>${esc(t.vehicles)}${t.vehicles_remembered ? ' <span class="muted" title="aus dem Gedächtnis, kein aktueller Treffer">(gemerkt)</span>' : ''}</td><td class="muted">${esc(t.id)}${t.live_ids.length && !(t.live_ids.length === 1 && t.live_ids[0] === String(t.id)) ? ' → ' + esc(t.live_ids.join(', ')) : ''}</td></tr>`;
+                    <td>${esc(t.vehicles)}${t.vehicles_remembered ? ' <span class="muted" title="aus dem Gedächtnis, kein aktueller Treffer">(gemerkt)</span>' : ''}${t.vehicles_from_course ? ' <span class="muted" title="aus dem Fahrtverlauf (departureCourse), kein aktueller Live-Treffer">(Verlauf)</span>' : ''}</td><td class="muted">${esc(t.id)}${t.live_ids.length && !(t.live_ids.length === 1 && t.live_ids[0] === String(t.id)) ? ' → ' + esc(t.live_ids.join(', ')) : ''}</td></tr>`;
                 if (isOpen) {
                     const stops = t.stops.map((s, idx) => {
                         const m = s.match;

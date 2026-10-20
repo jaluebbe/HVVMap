@@ -273,6 +273,7 @@ def run_trip_courses(client: GtiClient, redis_client, now: datetime | None = Non
             "fetched_at": int(time.time()),
             "stops": stops,
             "service_id": str(request["serviceId"]),
+            "vehicles": (response.get("vehicles") or []) if stops else [],
         }
         if stops is None:
             failed += 1

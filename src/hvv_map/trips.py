@@ -445,22 +445,48 @@ def unify_shared_delays(rows: list[dict], main_at: float, aliases: list[dict]):
             row["delay"] = stop["delay"] = delay
 
 
-def _vehicle_fields(trip: dict, unique: list, memory: dict | None) -> dict:
-    """Vehicles text and model of a trip from its live entries; falls back to
-    what was remembered while the trip has none (e.g. between anchors)."""
-    text = vehicles_text(unique, _is_ubahn(trip["line_obj"]))
-    model = refined_model(trip["line_obj"], unique)
+def _vehicle_fields(
+    trip: dict, unique: list, memory: dict | None, course: dict | None = None
+) -> dict:
+    """Vehicles text and model of a trip: from its live entries, else from the
+    vehicles of its departureCourse, else what was remembered while it had none
+    (e.g. between anchors)."""
+    ubahn = _is_ubahn(trip["line_obj"])
+    text = vehicles_text(unique, ubahn)
+    if text:
+        return {
+            "vehicles": text,
+            "model": refined_model(trip["line_obj"], unique),
+            "vehicles_remembered": False,
+            "vehicles_from_course": False,
+        }
+    from_course = (course or {}).get("vehicles") or []
+    if from_course:
+        return {
+            "vehicles": vehicles_text(from_course, ubahn),
+            "model": refined_model(trip["line_obj"], from_course),
+            "vehicles_remembered": False,
+            "vehicles_from_course": True,
+        }
     remembered = (memory or {}).get(course_key(trip))
-    if not text and remembered:
+    if remembered:
         return {
             "vehicles": remembered["vehicles"],
             "model": remembered["model"],
             "vehicles_remembered": True,
+            "vehicles_from_course": False,
         }
-    return {"vehicles": text, "model": model, "vehicles_remembered": False}
+    return {
+        "vehicles": "",
+        "model": refined_model(trip["line_obj"], unique),
+        "vehicles_remembered": False,
+        "vehicles_from_course": False,
+    }
 
 
-def _alias_courses(aliases: list[dict], main: dict | None, courses: dict) -> list:
+def _alias_courses(
+    aliases: list[dict], main: dict | None, courses: dict, ubahn: bool = False
+) -> list:
     """Courses of the extra live entries of a trip (e.g. the second half of a
     split train), with the station up to which they match the trip's own."""
     result = []
@@ -478,6 +504,7 @@ def _alias_courses(aliases: list[dict], main: dict | None, courses: dict) -> lis
                 "shared_until": shared,
                 "shared_from": joined,
                 "fetched_at": course.get("fetched_at"),
+                "vehicles": vehicles_text(course.get("vehicles"), ubahn),
                 "stops": course["stops"],
             }
         )
@@ -920,7 +947,10 @@ def build_trip_table(
                     "fetched_at"
                 ),
                 "alias_courses": _alias_courses(
-                    aliases, (courses or {}).get(course_key(trip)), courses or {}
+                    aliases,
+                    (courses or {}).get(course_key(trip)),
+                    courses or {},
+                    _is_ubahn(trip["line_obj"]),
                 ),
                 "destination_changed": any(
                     s["match"]["destination_changed"] for s in matched
@@ -928,7 +958,9 @@ def build_trip_table(
                 "max_delay": max(delays) if delays else None,
                 "course_key": course_key(trip),
                 "live_only": bool(trip.get("live_only")),
-                **_vehicle_fields(trip, unique, vehicle_memory),
+                **_vehicle_fields(
+                    trip, unique, vehicle_memory, (courses or {}).get(course_key(trip))
+                ),
                 "route_start": None,
                 "route_end": None,
                 "stops": _route_rows(
