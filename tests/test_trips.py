@@ -860,3 +860,19 @@ def test_alias_course_with_a_failed_main_course_fetch_does_not_crash():
     alias = row["alias_courses"][0]
     assert alias["shared_until"] is None
     assert alias["shared_from"] is None
+
+
+def test_a_departure_heading_to_a_station_the_trip_already_left_does_not_match():
+    plan = {"1": _plan_entry("U1", 6, [("A", 302), ("B", 306), ("C", 310)])}
+    back = _live("U1", "B", 6, 6, service_id=777)
+    back["line"]["direction"] = "A"  # opposite direction, same minute and id
+    ahead = _live("U1", "B", 6, 6, service_id=555)
+    ahead["line"]["direction"] = "C"
+    live = {"anchor": LIVE_ANCHOR, "departures": [back, ahead]}
+
+    table = build_trip_table(plan, PLAN_ANCHOR, live)
+
+    plan_trip = next(t for t in table["trips"] if not t["live_only"])
+    own_trip = next(t for t in table["trips"] if t["live_only"])
+    assert plan_trip["live_ids"] == ["555"]
+    assert own_trip["service_id"] == "777"
