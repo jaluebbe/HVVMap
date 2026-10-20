@@ -6,6 +6,7 @@ from hvv_map.redis_client import get_redis_client
 from hvv_map.vehicle_sightings import (
     LAST_KEY,
     STREAM_KEY,
+    course_sightings,
     extract_sightings,
     record_sightings,
 )
@@ -85,3 +86,31 @@ def test_record_writes_changes_only_and_keeps_the_latest_sightings(redis_client)
     assert last["seen_at"] == 1480 and last["sightings"][0]["delay"] == 60
     newest = json.loads(redis_client.xrange(STREAM_KEY)[-1][1]["data"])
     assert newest["seen_at"] == 1480
+
+
+def test_course_sightings_take_the_vehicles_of_the_whole_course():
+    request = {
+        "station": {"name": "Wandsbek-Gartenstadt"},
+        "time": "2026-10-20T15:46:00.000+0200",
+        "lineId": "de:hvv:U3:",
+        "serviceId": 24598,
+    }
+    response = {
+        "vehicles": [
+            {"id": "x_218", "number": "218"},
+            {"id": "x_215", "number": "215"},
+        ],
+        "courseElements": [{"toStation": {"name": "Barmbek"}}],
+    }
+
+    first, second = course_sightings(request, response)
+
+    assert (first["vehicle"], first["with"], first["series"]) == (
+        "218",
+        ["215"],
+        "DT4.6",
+    )
+    assert first["source"] == "departureCourse" and first["destination"] == "Barmbek"
+    assert first["planned"] == "2026-10-20T15:46" and first["service_id"] == 24598
+    assert second["vehicle"] == "215"
+    assert course_sightings(request, {"courseElements": []}) == []

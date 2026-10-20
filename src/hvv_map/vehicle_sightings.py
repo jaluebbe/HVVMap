@@ -6,6 +6,7 @@ hvv:vehicles:last       hash vehicle -> its sightings in the latest snapshot
 """
 
 import json
+import re
 import time
 from collections import defaultdict
 from datetime import datetime, timedelta
@@ -72,8 +73,45 @@ def extract_sightings(live: dict) -> list[dict]:
     return sightings
 
 
+def course_sightings(request: dict, response: dict) -> list[dict]:
+    """One sighting per vehicle GTI lists for a whole departureCourse."""
+    vehicles = [(v, vehicle_key(v)) for v in response.get("vehicles") or []]
+    vehicles = [(v, key) for v, key in vehicles if key]
+    if not vehicles:
+        return []
+    line_id = request["lineId"]
+    elements = response.get("courseElements") or []
+    target = (elements[-1].get("toStation") or {}) if elements else {}
+    planned = datetime.fromisoformat(request["time"]).replace(tzinfo=None)
+    ubahn = re.fullmatch(r"de:hvv:U\d+:", line_id) is not None
+    return [
+        {
+            "vehicle": key,
+            "number": vehicle.get("number"),
+            "id": vehicle.get("id"),
+            "series": ubahn_series(vehicle.get("number")) if ubahn else None,
+            "with": [other for _, other in vehicles if other != key],
+            "line": line_id.split(":")[2],
+            "destination": target.get("name"),
+            "station": request["station"]["name"],
+            "station_id": None,
+            "planned": planned.isoformat(timespec="minutes"),
+            "delay": None,
+            "platform": None,
+            "service_id": request["serviceId"],
+            "cancelled": False,
+            "extra": False,
+            "source": "departureCourse",
+        }
+        for vehicle, key in vehicles
+    ]
+
+
 def _signature(sighting: dict) -> str:
-    return f"{sighting['delay']}|{sighting['platform']}|{sighting['cancelled']}"
+    return (
+        f"{sighting['delay']}|{sighting['platform']}|{sighting['cancelled']}|"
+        + ",".join(sighting["with"])
+    )
 
 
 def _seen_key(sighting: dict) -> str:
@@ -82,9 +120,13 @@ def _seen_key(sighting: dict) -> str:
 
 
 def record_sightings(redis_client, live: dict, now: float | None = None) -> int:
-    """Append the new or changed sightings of a live snapshot to the stream and
-    refresh the per-vehicle hash; returns the number of stream entries."""
-    sightings = extract_sightings(live)
+    """Record the sightings of a live snapshot, see record."""
+    return record(redis_client, extract_sightings(live), now)
+
+
+def record(redis_client, sightings: list[dict], now: float | None = None) -> int:
+    """Append the new or changed sightings to the stream and refresh the
+    per-vehicle hash; returns the number of stream entries."""
     if not sightings:
         return 0
     seen_at = int(time.time() if now is None else now)

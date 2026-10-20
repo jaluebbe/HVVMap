@@ -12,6 +12,7 @@ from hvv_map.departures import REDIS_ANCHOR_KEY, REDIS_BY_SERVICE_KEY, berlin_no
 from hvv_map.departures_tree import parse_anchor
 from hvv_map.gti_client import GtiClient
 from hvv_map.redis_client import get_redis_client
+from hvv_map.vehicle_sightings import course_sightings, record
 from hvv_map.departures_live import REDIS_LIVE_KEY
 from hvv_map.trips import (
     _plan_trips,
@@ -252,6 +253,7 @@ def run_trip_courses(client: GtiClient, redis_client, now: datetime | None = Non
             f"[trip_courses] {len(jobs)} jobs, running {COURSE_MAX_CALLS}", flush=True
         )
     fetched = failed = 0
+    sightings = []
     for key, request in jobs[:COURSE_MAX_CALLS]:
         try:
             response = client.send("departureCourse", request)
@@ -265,6 +267,8 @@ def run_trip_courses(client: GtiClient, redis_client, now: datetime | None = Non
                 f"[trip_courses] {key}: course does not match the request", flush=True
             )
             stops = None
+        if stops is not None:
+            sightings += course_sightings(request, response)
         cached[key] = {
             "fetched_at": int(time.time()),
             "stops": stops,
@@ -277,6 +281,7 @@ def run_trip_courses(client: GtiClient, redis_client, now: datetime | None = Non
 
     payload = json.dumps({"fetched_at": int(time.time()), "data": cached})
     redis_client.set(REDIS_COURSES_KEY, payload, ex=COURSES_TTL)
+    record(redis_client, sightings)
     return fetched, failed
 
 
