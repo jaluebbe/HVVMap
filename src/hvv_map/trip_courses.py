@@ -258,13 +258,15 @@ def run_trip_courses(client: GtiClient, redis_client, now: datetime | None = Non
         try:
             response = client.send("departureCourse", request)
         except requests.RequestException as error:
-            print(f"[trip_courses] {key}: {error}", flush=True)
+            print(f"[trip_courses] {key} {request['lineId']}: {error}", flush=True)
             response = {}
         time.sleep(1)  # 1 req/s rate limit across all GTI endpoints
         stops = parse_course(response)
         if stops is not None and not course_fits_request(stops, request):
             print(
-                f"[trip_courses] {key}: course does not match the request", flush=True
+                f"[trip_courses] {key} {request['lineId']}: "
+                "course does not match the request",
+                flush=True,
             )
             stops = None
         if stops is not None:

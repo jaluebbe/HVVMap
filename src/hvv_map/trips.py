@@ -484,6 +484,11 @@ def _vehicle_fields(
     }
 
 
+def _course_failed(course: dict | None) -> bool:
+    """A fetch was tried but gave no stops (GTI error or a discarded answer)."""
+    return course is not None and not course.get("stops")
+
+
 def _alias_courses(
     aliases: list[dict], main: dict | None, courses: dict, ubahn: bool = False
 ) -> list:
@@ -946,6 +951,7 @@ def build_trip_table(
                 "course_fetched_at": ((courses or {}).get(course_key(trip)) or {}).get(
                     "fetched_at"
                 ),
+                "course_failed": _course_failed((courses or {}).get(course_key(trip))),
                 "alias_courses": _alias_courses(
                     aliases,
                     (courses or {}).get(course_key(trip)),

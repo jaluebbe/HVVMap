@@ -627,6 +627,20 @@ def test_live_vehicles_win_over_the_course_and_the_course_over_the_memory():
     assert (course["vehicles"], course["vehicles_from_course"]) == ("DT5.1 (417)", True)
 
 
+def test_a_course_without_stops_is_flagged_as_failed():
+    from hvv_map.trips import _plan_trips, course_key
+
+    key = course_key(_plan_trips(PLAN, PLAN_ANCHOR)[0])
+    live = {"anchor": LIVE_ANCHOR, "departures": [_live("U1", "A", 2, 6)]}
+
+    def row(courses):
+        return build_trip_table(PLAN, PLAN_ANCHOR, live, courses)["trips"][0]
+
+    assert row({key: {"fetched_at": 1, "stops": None}})["course_failed"] is True
+    assert row(None)["course_failed"] is False
+    assert row({})["course_failed"] is False
+
+
 def test_remembering_is_idempotent_and_forgets_old_trips():
     from hvv_map.trips import VEHICLE_MEMORY_SECONDS, remember_vehicles
 
