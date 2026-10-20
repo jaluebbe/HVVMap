@@ -80,10 +80,14 @@ def parse_course(response: dict) -> list[dict] | None:
     return stops
 
 
+def _request_time(request: dict) -> datetime:
+    return datetime.fromisoformat(request["time"]).replace(tzinfo=None)
+
+
 def course_fits_request(stops: list[dict], request: dict) -> bool:
     """GTI may answer a serviceId with another run of the same day; the course
     must pass the requested time within the tolerance."""
-    wanted = datetime.fromisoformat(request["time"]).replace(tzinfo=None)
+    wanted = _request_time(request)
     tolerance = timedelta(minutes=COURSE_TIME_TOLERANCE_MINUTES)
     return any(
         abs(datetime.fromisoformat(stop[key]) - wanted) <= tolerance
@@ -201,6 +205,7 @@ def run_trip_courses(client: GtiClient, redis_client, now: datetime | None = Non
 
     # (cache key, request) - live-only entries (alias ids) first
     jobs = []
+    renumbered = []
     queued = set()
     by_id = {trip["id"]: trip for trip in trips}
     raw_live = redis_client.get(REDIS_LIVE_KEY)
@@ -220,7 +225,7 @@ def run_trip_courses(client: GtiClient, redis_client, now: datetime | None = Non
                 if request:
                     queued.add(key)  # never refetched by the stale plan id
                     if not _is_current_by(cached.get(key), live_id):
-                        jobs.append((key, request))
+                        renumbered.append((key, request))
             for alias in row["aliases"]:
                 key = alias_course_key(alias["service_id"])
                 request = course_request(
@@ -235,6 +240,8 @@ def run_trip_courses(client: GtiClient, redis_client, now: datetime | None = Non
                     if main_request and course_key(main) not in queued:
                         jobs.append((course_key(main), main_request))
                         queued.add(course_key(main))
+    renumbered.sort(key=lambda job: abs(_request_time(job[1]) - now))
+    jobs += renumbered
     for trip in due_trips(trips, cached, now):
         request = _query(trip)
         if request and course_key(trip) not in queued:
