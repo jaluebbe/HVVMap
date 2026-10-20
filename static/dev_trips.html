@@ -275,6 +275,7 @@
             </span>
             <select id="mode"></select>
             <select id="line"></select>
+            <select id="dest"></select>
             <select id="status"></select>
             <input type="search" id="q" placeholder="Suche (Ziel, Fahrzeug, Haltestelle, ID) …">
             <label><input type="checkbox" id="running"> nur laufende Fahrten (±<input type="number" id="buffer" value="5" min="0" max="60" style="width:3.2em"> min)</label>
@@ -325,15 +326,11 @@
         }
 
         function fillSelects() {
-            const lineSel = document.getElementById('line');
             const statusSel = document.getElementById('status');
-            if (lineSel.options.length) return;
+            if (statusSel.options.length) return;
             const modes = [...new Set(data.trips.map(t => t.mode))].sort();
             document.getElementById('mode').innerHTML = '<option value="">Alle Verkehrsmittel</option>' +
                 modes.map(m => `<option>${esc(m)}</option>`).join('');
-            const lines = Object.keys(data.summary.by_line || {});
-            lineSel.innerHTML = '<option value="">Alle Linien</option>' +
-                lines.map(l => `<option>${esc(l)}</option>`).join('');
             statusSel.innerHTML = '<option value="">Alle Status</option>' +
                 '<option value="bestätigt">bestätigt</option>' +
                 '<option value="nicht gesehen">nicht gesehen</option>' +
@@ -341,6 +338,32 @@
                 '<option value="ausgefallen">ausgefallen</option>' +
                 '<option value="vermutlich ausgefallen">vermutlich ausgefallen</option>' +
                 '<option value="geändert">Ziel geändert</option>';
+        }
+
+        const byName = (a, b) => a.localeCompare(b, 'de', { numeric: true });
+
+        // Replace the options of a filter, keeping the selection if still offered.
+        function setOptions(id, allLabel, values) {
+            const sel = document.getElementById(id);
+            const html = `<option value="">${allLabel}</option>` +
+                values.map(v => `<option>${esc(v)}</option>`).join('');
+            if (sel.dataset.html === html) return;
+            sel.dataset.html = html;
+            const keep = sel.value;
+            sel.innerHTML = html;
+            sel.value = values.includes(keep) ? keep : '';
+        }
+
+        // Lines and destinations offered depend on the chosen mode (and line).
+        function fillDependentSelects() {
+            const mode = document.getElementById('mode').value;
+            const inMode = data.trips.filter(t => !mode || t.mode === mode);
+            const lines = new Set(inMode.map(t => t.line));
+            if (!mode) Object.keys(data.summary.by_line || {}).forEach(l => lines.add(l));
+            setOptions('line', 'Alle Linien', [...lines].sort(byName));
+            const line = document.getElementById('line').value;
+            const dests = inMode.filter(t => !line || t.line === line).map(t => t.destination);
+            setOptions('dest', 'Alle Ziele', [...new Set(dests.filter(Boolean))].sort(byName));
         }
 
         function renderWarnings() {
@@ -444,7 +467,9 @@
             fillSelects();
             renderSummary();
             renderWarnings();
+            fillDependentSelects();
             const line = document.getElementById('line').value;
+            const dest = document.getElementById('dest').value;
             const mode = document.getElementById('mode').value;
             const status = document.getElementById('status').value;
             const q = document.getElementById('q').value.trim().toLowerCase();
@@ -453,8 +478,11 @@
             const box = document.getElementById('content');
 
             if (tab === 'live_only') {
+                const modeLines = new Set(data.trips.filter(t => t.mode === mode).map(t => t.line));
                 const rows = data.live_only.filter(e =>
                     (!line || e.line === line) &&
+                    (!mode || modeLines.has(e.line)) &&
+                    (!dest || e.destination === dest) &&
                     (!q || JSON.stringify(e).toLowerCase().includes(q)));
                 box.innerHTML = `<table><tr><th>Plan</th><th>Linie</th><th>Halt</th><th>Ziel</th><th>Gleis</th><th>Verspätung</th><th>Fahrzeuge</th><th>Grund</th><th>Live-ID</th></tr>` +
                     rows.map(e => `<tr><td>${esc(e.planned)}</td><td><b>${esc(e.line)}</b></td><td>${esc(e.station)}</td><td>${esc(e.destination)}</td><td>${esc(e.platform)}</td><td>${esc(delayText(e.delay))}</td><td>${esc(e.vehicles)}</td><td class="warn">${esc(e.reason)}</td><td class="muted">${esc(e.service_id)}</td></tr>`).join('') +
@@ -465,6 +493,7 @@
             const rows = data.trips.filter(t => {
                 if (line && t.line !== line) return false;
                 if (mode && t.mode !== mode) return false;
+                if (dest && t.destination !== dest) return false;
                 if (running) {
                     const now = Date.now(), pad = buffer * 60000;
                     if (now < new Date(t.route_start).getTime() - pad ||
@@ -493,7 +522,7 @@
                 if (data) render();
             }
         });
-        ['mode', 'line', 'status', 'q', 'running', 'buffer'].forEach(id => document.getElementById(id).addEventListener('input', () => data && render()));
+        ['mode', 'line', 'dest', 'status', 'q', 'running', 'buffer'].forEach(id => document.getElementById(id).addEventListener('input', () => data && render()));
         setInterval(() => document.getElementById('auto').checked && load(), 30000);
         load();
     </script>
