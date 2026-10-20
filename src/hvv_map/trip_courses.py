@@ -29,6 +29,8 @@ COURSE_LOOKAHEAD_MINUTES = 60  # fetch trips with a stop up to this far ahead
 COURSE_MAX_CALLS = 30  # per run, at 1 req/s
 COURSE_KEEP_SECONDS = 2 * 24 * 3600
 COURSE_RETRY_SECONDS = 600  # a failed fetch is not retried before this
+COURSE_RETRY_LIVE_SECONDS = 120  # retry of a live-matched trip's failed fetch ...
+COURSE_RETRY_LIVE_ATTEMPTS = 3  # ... for this many tries, then COURSE_RETRY_SECONDS
 COURSE_REFRESH_SECONDS = 300  # running trips refetch their course after this
 COURSE_RUNNING_SLACK_MINUTES = 2
 COURSE_TIME_TOLERANCE_MINUTES = 10  # requested time vs. the course's own times
@@ -153,12 +155,13 @@ def _renumbered(row: dict) -> bool:
 
 
 def _is_current_by(entry: dict | None, service_id: str) -> bool:
-    """A course fetched with this very serviceId that needs no refetch."""
-    return (
-        entry is not None
-        and entry.get("service_id") == service_id
-        and _is_current(entry)
-    )
+    """A course fetched with this very serviceId that needs no refetch; a
+    failed fetch of a live-matched trip is retried soon, a few times."""
+    if entry is None or entry.get("service_id") != service_id:
+        return False
+    if entry["stops"] is None and entry.get("attempts", 1) < COURSE_RETRY_LIVE_ATTEMPTS:
+        return time.time() - entry["fetched_at"] < COURSE_RETRY_LIVE_SECONDS
+    return _is_current(entry)
 
 
 def _is_running(trip: dict, now: datetime, course: dict | None = None) -> bool:
@@ -271,8 +274,12 @@ def run_trip_courses(client: GtiClient, redis_client, now: datetime | None = Non
             stops = None
         if stops is not None:
             sightings += course_sightings(request, response)
+        previous = cached.get(key) or {}
+        same_id = previous.get("service_id") == str(request["serviceId"])
+        attempts = 0 if stops else (previous.get("attempts", 0) if same_id else 0) + 1
         cached[key] = {
             "fetched_at": int(time.time()),
+            "attempts": attempts,
             "stops": stops,
             "service_id": str(request["serviceId"]),
             "vehicles": (response.get("vehicles") or []) if stops else [],
