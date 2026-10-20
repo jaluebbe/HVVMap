@@ -3,6 +3,7 @@ trip_position.locate() and placed on its station or along the stored track
 of its current segment."""
 
 import json
+import traceback
 import sqlite3
 import time
 from datetime import datetime
@@ -280,8 +281,8 @@ def run_loop(interval: float = POSITIONS_INTERVAL) -> None:
         started = time.time()
         try:
             run_positions(redis_client, shapes_conn, state=state)
-        except Exception as error:  # keep the loop alive across bad data
-            message = repr(error)
+        except Exception:  # keep the loop alive across bad data
+            message = traceback.format_exc()
             if (
                 message != last_error[0]
                 or started - last_error[1] >= ERROR_LOG_INTERVAL

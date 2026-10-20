@@ -464,12 +464,13 @@ def _alias_courses(aliases: list[dict], main: dict | None, courses: dict) -> lis
     """Courses of the extra live entries of a trip (e.g. the second half of a
     split train), with the station up to which they match the trip's own."""
     result = []
+    main_stops = (main or {}).get("stops")  # None for a failed course fetch
     for alias in aliases:
         course = courses.get(alias_course_key(alias["service_id"]))
         if not course or not course.get("stops"):
             continue
-        shared = _shared_until(main["stops"], course["stops"]) if main else None
-        joined = _shared_from(main["stops"], course["stops"]) if main else None
+        shared = _shared_until(main_stops, course["stops"]) if main_stops else None
+        joined = _shared_from(main_stops, course["stops"]) if main_stops else None
         result.append(
             {
                 "service_id": alias["service_id"],

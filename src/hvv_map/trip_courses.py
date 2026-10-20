@@ -30,6 +30,7 @@ COURSE_KEEP_SECONDS = 2 * 24 * 3600
 COURSE_RETRY_SECONDS = 600  # a failed fetch is not retried before this
 COURSE_REFRESH_SECONDS = 300  # running trips refetch their course after this
 COURSE_RUNNING_SLACK_MINUTES = 2
+COURSE_TIME_TOLERANCE_MINUTES = 10  # requested time vs. the course's own times
 
 
 def _parse_time(value: str | None) -> str | None:
@@ -77,6 +78,23 @@ def parse_course(response: dict) -> list[dict] | None:
         }
     )
     return stops
+
+
+def _request_time(request: dict) -> datetime:
+    return datetime.fromisoformat(request["time"]).replace(tzinfo=None)
+
+
+def course_fits_request(stops: list[dict], request: dict) -> bool:
+    """GTI may answer a serviceId with another run of the same day; the course
+    must pass the requested time within the tolerance."""
+    wanted = _request_time(request)
+    tolerance = timedelta(minutes=COURSE_TIME_TOLERANCE_MINUTES)
+    return any(
+        abs(datetime.fromisoformat(stop[key]) - wanted) <= tolerance
+        for stop in stops
+        for key in ("dep", "arr")
+        if stop.get(key)
+    )
 
 
 def course_request(live: dict, service_id: int, station_id: str | None = None):
@@ -127,6 +145,21 @@ def _is_current(entry: dict | None, running: bool = False) -> bool:
     return not running or age < COURSE_REFRESH_SECONDS
 
 
+def _renumbered(row: dict) -> bool:
+    """A matched trip whose live serviceId differs from its plan's: GTI
+    renumbers services after plan changes, so the plan id may name another run."""
+    return bool(row["live_ids"]) and row["service_id"] not in row["live_ids"]
+
+
+def _is_current_by(entry: dict | None, service_id: str) -> bool:
+    """A course fetched with this very serviceId that needs no refetch."""
+    return (
+        entry is not None
+        and entry.get("service_id") == service_id
+        and _is_current(entry)
+    )
+
+
 def _is_running(trip: dict, now: datetime, course: dict | None = None) -> bool:
     first, last = trip["stops"][0]["planned"], trip_end(trip, course)
     slack = timedelta(minutes=COURSE_RUNNING_SLACK_MINUTES)
@@ -172,6 +205,7 @@ def run_trip_courses(client: GtiClient, redis_client, now: datetime | None = Non
 
     # (cache key, request) - live-only entries (alias ids) first
     jobs = []
+    renumbered = []
     queued = set()
     by_id = {trip["id"]: trip for trip in trips}
     raw_live = redis_client.get(REDIS_LIVE_KEY)
@@ -185,6 +219,13 @@ def run_trip_courses(client: GtiClient, redis_client, now: datetime | None = Non
                 if request and not _is_current(cached.get(key), running=True):
                     jobs.append((key, request))
                     queued.add(key)
+            elif _renumbered(row):
+                key, live_id = row["course_key"], row["live_ids"][0]
+                request = course_request(live, int(live_id))
+                if request:
+                    queued.add(key)  # never refetched by the stale plan id
+                    if not _is_current_by(cached.get(key), live_id):
+                        renumbered.append((key, request))
             for alias in row["aliases"]:
                 key = alias_course_key(alias["service_id"])
                 request = course_request(
@@ -199,11 +240,17 @@ def run_trip_courses(client: GtiClient, redis_client, now: datetime | None = Non
                     if main_request and course_key(main) not in queued:
                         jobs.append((course_key(main), main_request))
                         queued.add(course_key(main))
+    renumbered.sort(key=lambda job: abs(_request_time(job[1]) - now))
+    jobs += renumbered
     for trip in due_trips(trips, cached, now):
         request = _query(trip)
         if request and course_key(trip) not in queued:
             jobs.append((course_key(trip), request))
 
+    if len(jobs) > COURSE_MAX_CALLS:
+        print(
+            f"[trip_courses] {len(jobs)} jobs, running {COURSE_MAX_CALLS}", flush=True
+        )
     fetched = failed = 0
     for key, request in jobs[:COURSE_MAX_CALLS]:
         try:
@@ -213,7 +260,16 @@ def run_trip_courses(client: GtiClient, redis_client, now: datetime | None = Non
             response = {}
         time.sleep(1)  # 1 req/s rate limit across all GTI endpoints
         stops = parse_course(response)
-        cached[key] = {"fetched_at": int(time.time()), "stops": stops}
+        if stops is not None and not course_fits_request(stops, request):
+            print(
+                f"[trip_courses] {key}: course does not match the request", flush=True
+            )
+            stops = None
+        cached[key] = {
+            "fetched_at": int(time.time()),
+            "stops": stops,
+            "service_id": str(request["serviceId"]),
+        }
         if stops is None:
             failed += 1
         else:
