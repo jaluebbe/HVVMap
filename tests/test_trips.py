@@ -789,3 +789,26 @@ def test_regional_trip_is_expected_within_twenty_minutes_but_a_subway_within_fiv
     status = {t["line"]: t["status"] for t in table["trips"]}
     assert status.get("RE8") == "nicht gesehen"
     assert "U1" not in status
+
+
+def test_alias_course_with_a_failed_main_course_fetch_does_not_crash():
+    from hvv_map.trips import _plan_trips, alias_course_key, course_key
+
+    first = _live("U1", "A", 2, 6, service_id=7, platform="Gleis 1")
+    twin = _live("U1", "A", 2, 6, service_id=999, platform="Gleis 1")
+    plan = {"1": _plan_entry("U1", 6, [("A", 302)])}
+    key = course_key(_plan_trips(plan, PLAN_ANCHOR)[0])
+    courses = {
+        key: {"fetched_at": 1, "stops": None},  # departureCourse failed
+        alias_course_key("999"): _course(
+            ("A", "a", None, "09:02"), ("B", "b", "09:05", None)
+        ),
+    }
+
+    row = build_trip_table(
+        plan, PLAN_ANCHOR, {"anchor": LIVE_ANCHOR, "departures": [first, twin]}, courses
+    )["trips"][0]
+
+    alias = row["alias_courses"][0]
+    assert alias["shared_until"] is None
+    assert alias["shared_from"] is None
