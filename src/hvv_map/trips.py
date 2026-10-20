@@ -516,6 +516,18 @@ def _alias_courses(
     return result
 
 
+def _heads_back(trip: dict, stop: dict, destination: str | None) -> bool:
+    """The live destination is a station the plan trip already left before this
+    stop, so a departure with it runs the other way."""
+    names = [s["station"] for s in trip["stops"]]
+    at = next(i for i, s in enumerate(trip["stops"]) if s is stop)
+    return destination in names[:at] and destination not in names[at + 1 :]
+
+
+def _plausible(candidates: list, destination: str | None) -> list:
+    return [(t, s) for t, s in candidates if not _heads_back(t, s, destination)]
+
+
 def _find_candidates(index: dict, key: tuple) -> tuple[list, str]:
     """Candidates for a live departure's key: exact minute first, then the
     neighbouring minutes. Returns (candidates, quality)."""
@@ -797,6 +809,7 @@ def build_trip_table(
             continue
         key = (entry["line"], station_id, planned, dep.get("directionId"))
         candidates, quality = _find_candidates(index, key)
+        candidates = _plausible(candidates, entry["destination"])
         free = _prefer_platform(
             [(t, s) for t, s in candidates if s["match"] is None], entry["platform"]
         )
@@ -838,6 +851,7 @@ def build_trip_table(
         found, quality = _find_candidates(
             relaxed, (entry["line"], station_id, planned, None)
         )
+        found = _plausible(found, entry["destination"])
         free = _prefer_platform(
             [(t, s) for t, s in found if s["match"] is None], entry["platform"]
         )
