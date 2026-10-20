@@ -593,6 +593,54 @@ def test_live_vehicles_win_over_the_memory_and_are_not_flagged():
     assert row["vehicles_remembered"] is False
 
 
+def _course_table(vehicles, course_vehicles, memory=None):
+    from hvv_map.trips import _plan_trips, course_key
+
+    key = course_key(_plan_trips(PLAN, PLAN_ANCHOR)[0])
+    stop = {"id": "A", "name": "a", "dep": "2026-10-17T09:02", "dep_delay": 0}
+    courses = {key: {"fetched_at": 1, "stops": [stop], "vehicles": course_vehicles}}
+    deps = [_live("U1", "A", 2, 6, vehicles=vehicles)]
+    return build_trip_table(
+        PLAN, PLAN_ANCHOR, {"anchor": LIVE_ANCHOR, "departures": deps}, courses, memory
+    )["trips"][0]
+
+
+def test_course_vehicles_fill_in_when_the_live_entry_has_none():
+    row = _course_table([], [{"id": "x", "number": "417"}])
+
+    assert row["vehicles"] == "DT5.1 (417)"
+    assert row["model"] == "DT5"
+    assert row["vehicles_from_course"] is True
+    assert row["vehicles_remembered"] is False
+
+
+def test_live_vehicles_win_over_the_course_and_the_course_over_the_memory():
+    from hvv_map.trips import remember_vehicles
+
+    memory = {}
+    remember_vehicles(memory, _vehicle_table([{"id": "m", "number": "300"}]), 1000)
+
+    live = _course_table([{"id": "y", "number": "355"}], [{"number": "417"}], memory)
+    course = _course_table([], [{"number": "417"}], memory)
+
+    assert (live["vehicles"], live["vehicles_from_course"]) == ("DT5.1 (355)", False)
+    assert (course["vehicles"], course["vehicles_from_course"]) == ("DT5.1 (417)", True)
+
+
+def test_a_course_without_stops_is_flagged_as_failed():
+    from hvv_map.trips import _plan_trips, course_key
+
+    key = course_key(_plan_trips(PLAN, PLAN_ANCHOR)[0])
+    live = {"anchor": LIVE_ANCHOR, "departures": [_live("U1", "A", 2, 6)]}
+
+    def row(courses):
+        return build_trip_table(PLAN, PLAN_ANCHOR, live, courses)["trips"][0]
+
+    assert row({key: {"fetched_at": 1, "stops": None}})["course_failed"] is True
+    assert row(None)["course_failed"] is False
+    assert row({})["course_failed"] is False
+
+
 def test_remembering_is_idempotent_and_forgets_old_trips():
     from hvv_map.trips import VEHICLE_MEMORY_SECONDS, remember_vehicles
 

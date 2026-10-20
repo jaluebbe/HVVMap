@@ -408,6 +408,7 @@
         }
 
         const clock = iso => iso ? iso.slice(11, 16) : '';
+        const failedAt = ts => ` <span class="warn">(kein Verlauf, Abruf ${new Date(ts * 1000).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' })} ohne Ergebnis)</span>`;
         const asOf = ts => ts ? ` <span class="muted">(Stand ${new Date(ts * 1000).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' })})</span>` : '';
 
         // Second course of a split train, shared part greyed out.
@@ -423,7 +424,7 @@
             if (a.shared_until) parts.push(`identisch bis ${esc(a.shared_until)}`);
             if (a.shared_from) parts.push(`identisch ab ${esc(a.shared_from)}`);
             const note = parts.join(', ') || 'nicht vergleichbar';
-            return `<div class="alias"><h4>Live-ID ${esc(a.service_id)} → ${esc(a.destination)} <span class="muted">(${note})</span>${asOf(a.fetched_at)}</h4>` +
+            return `<div class="alias"><h4>Live-ID ${esc(a.service_id)} → ${esc(a.destination)} <span class="muted">(${note})</span>${asOf(a.fetched_at)}${a.vehicles ? ' <span class="muted">· ' + esc(a.vehicles) + '</span>' : ''}</h4>` +
                 `<table class="inner small"><tr><th>Halt</th><th>an</th><th>ab</th><th>Verspätung</th><th>Gleis</th></tr>${rows}</table></div>`;
         }
 
@@ -443,7 +444,7 @@
                     <td>${esc(t.window_time)} <span class="muted">${esc(t.window_station)}</span></td><td><b>${esc(t.line)}</b> <span class="muted small">${esc(t.mode)}</span></td>
                     <td>${esc(t.destination)}${changed}</td><td>${nextText}</td><td>${status}</td>
                     <td>${esc(delayText(t.max_delay))}</td>
-                    <td>${esc(t.vehicles)}${t.vehicles_remembered ? ' <span class="muted" title="aus dem Gedächtnis, kein aktueller Treffer">(gemerkt)</span>' : ''}</td><td class="muted">${esc(t.id)}${t.live_ids.length && !(t.live_ids.length === 1 && t.live_ids[0] === String(t.id)) ? ' → ' + esc(t.live_ids.join(', ')) : ''}</td></tr>`;
+                    <td>${esc(t.vehicles)}${t.vehicles_remembered ? ' <span class="muted" title="aus dem Gedächtnis, kein aktueller Treffer">(gemerkt)</span>' : ''}${t.vehicles_from_course ? ' <span class="muted" title="aus dem Fahrtverlauf (departureCourse), kein aktueller Live-Treffer">(Verlauf)</span>' : ''}</td><td class="muted">${esc(t.id)}${t.live_ids.length && !(t.live_ids.length === 1 && t.live_ids[0] === String(t.id)) ? ' → ' + esc(t.live_ids.join(', ')) : ''}</td></tr>`;
                 if (isOpen) {
                     const stops = t.stops.map((s, idx) => {
                         const m = s.match;
@@ -456,7 +457,7 @@
                             : `<td class="${s.expected ? 'warn' : 'muted'}">${s.expected ? 'erwartet, nicht gesehen' : ''}</td><td></td><td></td>`;
                         return `<tr class="${s.expected ? 'expected' : ''} ${idx === nextIdx ? 'next' : ''}"><td>${esc(s.station)}</td><td>${esc(s.arr)}</td><td>${dep}</td><td>${esc(delayText(delay))}</td><td>${esc(s.platform)}</td>${cells}</tr>`;
                     }).join('');
-                    const head = `<h4>Plan-ID ${esc(t.id)} → ${esc(t.destination)}${asOf(t.course_fetched_at)}</h4>`;
+                    const head = `<h4>Plan-ID ${esc(t.id)} → ${esc(t.destination)}${t.course_failed ? failedAt(t.course_fetched_at) : asOf(t.course_fetched_at)}</h4>`;
                     html += `<tr class="detail"><td colspan="9"><div class="muted small note">~Zeiten sind linear zwischen den Ankerstationen interpoliert, „–“ = keine Zeit bekannt. Graue Zeilen: identischer Abschnitt eines geteilten Zuges.</div><div class="cols"><div class="alias">${head}<table class="inner small"><tr><th>Halt</th><th>an</th><th>ab</th><th>Verspätung</th><th>Gleis</th><th>Treffer</th><th>Fahrzeuge</th><th>Live-Ziel</th></tr>${stops}</table></div>${(t.alias_courses || []).map(aliasTable).join('')}</div></td></tr>`;
                 }
                 return html;

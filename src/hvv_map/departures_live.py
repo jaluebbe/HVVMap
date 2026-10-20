@@ -7,6 +7,8 @@ import json
 import time
 from datetime import datetime
 
+import redis
+
 from hvv_map.departures import (
     ANCHOR_STATIONS_MAIN,
     ANCHOR_STATIONS_R,
@@ -22,6 +24,7 @@ from hvv_map.departures import (
 from hvv_map.gti_client import GtiClient
 from hvv_map.lines import WANTED_R_BAHN_LINES
 from hvv_map.redis_client import get_redis_client
+from hvv_map.vehicle_sightings import record_sightings
 
 REDIS_LIVE_KEY = "hvv:departures:live"
 LIVE_WINDOW_MINUTES = 5
@@ -107,6 +110,10 @@ def run_live_snapshot(client: GtiClient, redis_client) -> dict:
     sev_stations = set(json.loads(payload)["data"]) if payload else set()
     data = fetch_live_departures(client, start, sev_stations)
     _store(redis_client, REDIS_LIVE_KEY, data)
+    try:
+        record_sightings(redis_client, data)
+    except redis.RedisError as error:
+        print(f"[departures_live] vehicle sightings: {error}", flush=True)
     return data
 
 

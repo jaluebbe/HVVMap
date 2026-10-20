@@ -12,6 +12,7 @@ from hvv_map.departures import REDIS_ANCHOR_KEY, REDIS_BY_SERVICE_KEY, berlin_no
 from hvv_map.departures_tree import parse_anchor
 from hvv_map.gti_client import GtiClient
 from hvv_map.redis_client import get_redis_client
+from hvv_map.vehicle_sightings import course_sightings, record
 from hvv_map.departures_live import REDIS_LIVE_KEY
 from hvv_map.trips import (
     _plan_trips,
@@ -28,6 +29,8 @@ COURSE_LOOKAHEAD_MINUTES = 60  # fetch trips with a stop up to this far ahead
 COURSE_MAX_CALLS = 30  # per run, at 1 req/s
 COURSE_KEEP_SECONDS = 2 * 24 * 3600
 COURSE_RETRY_SECONDS = 600  # a failed fetch is not retried before this
+COURSE_RETRY_LIVE_SECONDS = 120  # retry of a live-matched trip's failed fetch ...
+COURSE_RETRY_LIVE_ATTEMPTS = 3  # ... for this many tries, then COURSE_RETRY_SECONDS
 COURSE_REFRESH_SECONDS = 300  # running trips refetch their course after this
 COURSE_RUNNING_SLACK_MINUTES = 2
 COURSE_TIME_TOLERANCE_MINUTES = 10  # requested time vs. the course's own times
@@ -152,12 +155,13 @@ def _renumbered(row: dict) -> bool:
 
 
 def _is_current_by(entry: dict | None, service_id: str) -> bool:
-    """A course fetched with this very serviceId that needs no refetch."""
-    return (
-        entry is not None
-        and entry.get("service_id") == service_id
-        and _is_current(entry)
-    )
+    """A course fetched with this very serviceId that needs no refetch; a
+    failed fetch of a live-matched trip is retried soon, a few times."""
+    if entry is None or entry.get("service_id") != service_id:
+        return False
+    if entry["stops"] is None and entry.get("attempts", 1) < COURSE_RETRY_LIVE_ATTEMPTS:
+        return time.time() - entry["fetched_at"] < COURSE_RETRY_LIVE_SECONDS
+    return _is_current(entry)
 
 
 def _is_running(trip: dict, now: datetime, course: dict | None = None) -> bool:
@@ -252,23 +256,33 @@ def run_trip_courses(client: GtiClient, redis_client, now: datetime | None = Non
             f"[trip_courses] {len(jobs)} jobs, running {COURSE_MAX_CALLS}", flush=True
         )
     fetched = failed = 0
+    sightings = []
     for key, request in jobs[:COURSE_MAX_CALLS]:
         try:
             response = client.send("departureCourse", request)
         except requests.RequestException as error:
-            print(f"[trip_courses] {key}: {error}", flush=True)
+            print(f"[trip_courses] {key} {request['lineId']}: {error}", flush=True)
             response = {}
         time.sleep(1)  # 1 req/s rate limit across all GTI endpoints
         stops = parse_course(response)
         if stops is not None and not course_fits_request(stops, request):
             print(
-                f"[trip_courses] {key}: course does not match the request", flush=True
+                f"[trip_courses] {key} {request['lineId']}: "
+                "course does not match the request",
+                flush=True,
             )
             stops = None
+        if stops is not None:
+            sightings += course_sightings(request, response)
+        previous = cached.get(key) or {}
+        same_id = previous.get("service_id") == str(request["serviceId"])
+        attempts = 0 if stops else (previous.get("attempts", 0) if same_id else 0) + 1
         cached[key] = {
             "fetched_at": int(time.time()),
+            "attempts": attempts,
             "stops": stops,
             "service_id": str(request["serviceId"]),
+            "vehicles": (response.get("vehicles") or []) if stops else [],
         }
         if stops is None:
             failed += 1
@@ -277,6 +291,7 @@ def run_trip_courses(client: GtiClient, redis_client, now: datetime | None = Non
 
     payload = json.dumps({"fetched_at": int(time.time()), "data": cached})
     redis_client.set(REDIS_COURSES_KEY, payload, ex=COURSES_TTL)
+    record(redis_client, sightings)
     return fetched, failed
 
 
