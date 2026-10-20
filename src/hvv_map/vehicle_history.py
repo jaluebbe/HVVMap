@@ -1,5 +1,8 @@
 """CLI: vehicle sightings from the Redis stream written by vehicle_sightings.
 
+Source: "list" = a live departure at an anchor station, "course" = the vehicles of
+a whole departureCourse.
+
 Usage: hvvmap-vehicle [NUMBER ...] [--station NAME] [--line NAME]
                       [--since HH:MM] [--follow]
 """
@@ -15,6 +18,7 @@ from hvv_map.vehicle_sightings import STREAM_KEY
 
 BERLIN_TZ = ZoneInfo("Europe/Berlin")
 FOLLOW_BLOCK_MS = 5000
+SOURCE_LABELS = {"departureList": "list", "departureCourse": "course"}
 
 
 def parse_since(value: str, now: datetime | None = None) -> int:
@@ -38,7 +42,8 @@ def matches(
 def format_sighting(sighting: dict) -> str:
     seen = datetime.fromtimestamp(sighting["seen_at"], BERLIN_TZ).strftime("%H:%M:%S")
     return (
-        f"{seen} {sighting['vehicle']:>4} {sighting['source'][:10]:10} "
+        f"{seen} {sighting['vehicle']:>4} "
+        f"{SOURCE_LABELS.get(sighting['source'], sighting['source']):6} "
         f"{sighting['line'] or '-':3} {(sighting['station'] or '-')[:22]:22} "
         f"{sighting['planned'][11:]} -> {(sighting['destination'] or '')[:18]:18} "
         f"V {sighting['delay']} {sighting['platform'] or ''} "

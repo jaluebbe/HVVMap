@@ -35,6 +35,8 @@ def test_format_shows_time_vehicle_station_and_partners():
 
     assert "353" in text and "Berliner Tor" in text and "17:26 -> Rathaus" in text
     assert "mit 367" in text and "ID 21599" in text
+    assert " list " in text
+    assert " course " in format_sighting({**SIGHTING, "source": "departureCourse"})
 
 
 def test_since_is_todays_wall_clock_time_as_a_stream_id_in_milliseconds():
