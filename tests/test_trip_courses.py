@@ -179,6 +179,52 @@ def test_run_trip_courses_fetches_course_of_extra_live_entry_first(monkeypatch):
     assert set(stored) == {"live:999", "7@2026-10-17T09:02"}
 
 
+def test_renumbered_trip_asks_for_its_course_by_the_live_service_id(monkeypatch):
+    monkeypatch.setattr(trip_courses.time, "sleep", lambda _: None)
+    line = {"name": "U1", "dlid": "de:hvv:U1:", "type": {"shortInfo": "U"}}
+    plan = {
+        "7": {
+            "line": line,
+            "directionId": 6,
+            "destination": "Z",
+            "stops": [{"timeOffset": 302, "station": {"id": "A", "combinedName": "a"}}],
+        }
+    }
+    departure = {
+        "line": {**line, "direction": "Z"},
+        "station": {"id": "A", "combinedName": "a", "name": "a"},
+        "timeOffset": 2,
+        "directionId": 6,
+        "serviceId": 555,
+        "platform": "Gleis 1",
+    }
+    redis = _Redis(
+        {
+            "hvv:departures:by_service": json.dumps({"data": plan}),
+            "hvv:departures:anchor_start": json.dumps(
+                {"data": {"date": "2026-10-17", "time": "04:00:00"}}
+            ),
+            "hvv:departures:live": json.dumps(
+                {
+                    "data": {
+                        "anchor": {"date": "2026-10-17", "time": "09:00:00"},
+                        "departures": [departure],
+                    }
+                }
+            ),
+        }
+    )
+    client = _Client()
+    now = datetime(2026, 10, 17, 9, 0)
+
+    run_trip_courses(client, redis, now)
+    run_trip_courses(client, redis, now)
+
+    assert [r["serviceId"] for _, r in client.requests] == [555]
+    stored = json.loads(redis.values["hvv:trips:courses"])["data"]
+    assert stored["7@2026-10-17T09:02"]["service_id"] == "555"
+
+
 def test_http_error_for_one_trip_does_not_abort_the_run(monkeypatch):
     import requests
 
