@@ -93,6 +93,16 @@ def vehicles_text(vehicles, ubahn: bool = False) -> str:
     return ", ".join(parts)
 
 
+def vehicle_numbers_text(vehicles) -> str:
+    """Unit numbers only ("417, 418"), the id where a vehicle has no number."""
+    parts = [
+        str(v["number"]) if v.get("number") else f"id {v['id']}"
+        for v in vehicles or []
+        if v.get("number") or v.get("id")
+    ]
+    return ", ".join(parts)
+
+
 def _is_ubahn(line: dict) -> bool:
     return (line.get("type") or {}).get("shortInfo") == "U"
 
@@ -147,6 +157,7 @@ def build_station_tree(departures: list[dict], anchor: datetime | None) -> dict:
                 "realtime_platform": dep.get("realtimePlatform"),
                 "delay": dep.get("delay"),
                 "vehicles": vehicles_text(dep.get("vehicles"), _is_ubahn(line)),
+                "vehicle_numbers": vehicle_numbers_text(dep.get("vehicles")),
                 "model": refined_model(line, dep.get("vehicles")),
             }
         )

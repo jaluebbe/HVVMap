@@ -251,7 +251,7 @@
                     <tr>
                         <th rowspan="2">Geplant</th>
                         <th colspan="3" class="group live-start">GTI Plan</th>
-                        <th colspan="4" class="group live-start">GTI Live</th>
+                        <th colspan="5" class="group live-start">GTI Live</th>
                     </tr>
                     <tr>
                         <th class="live-start">Richtung</th>
@@ -261,6 +261,7 @@
                         <th>Gleis Echtzeit</th>
                         <th>Richtung</th>
                         <th>ServiceId</th>
+                        <th>Fahrzeuge</th>
                     </tr>
                 </thead>
                 <tbody id="rows"></tbody>
@@ -490,12 +491,13 @@
                 tr.append(el('td', l && p && l.direction !== p.direction ? 'changed' : '',
                     l ? l.direction : ''));
                 tr.append(el('td', 'muted', l ? l.service_id ?? '' : ''));
+                tr.append(el('td', null, l ? l.vehicle_numbers || '' : ''));
                 body.append(tr);
             }
             if (!rows.length) {
                 const tr = el('tr');
                 const td = el('td', 'empty', 'Keine Abfahrten im gewählten Zeitraum.');
-                td.colSpan = 8;
+                td.colSpan = 9;
                 tr.append(td);
                 body.append(tr);
             }
