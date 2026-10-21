@@ -207,11 +207,6 @@
             padding: 2px 10px;
         }
 
-        .extended {
-            color: var(--late);
-            font-weight: 700;
-        }
-
         .empty {
             padding: 24px;
             color: var(--muted);
@@ -583,8 +578,7 @@
                 tr.append(delay);
                 const changed = l && l.realtime_platform && l.realtime_platform !== livePlanned;
                 tr.append(el('td', changed ? 'changed' : '', l ? l.realtime_platform || '' : ''));
-                const wedel = cont && p.direction === 'Blankenese' && l.direction === 'Wedel';
-                tr.append(el('td', wedel ? 'extended' : l && p && l.direction !== p.direction ? 'changed' : '',
+                tr.append(el('td', l && p && l.direction !== p.direction ? 'changed' : '',
                     l ? l.direction : ''));
                 const idCell = el('td', 'muted');
                 const liveId = l ? String(l.service_id ?? '') : '';
