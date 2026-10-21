@@ -351,24 +351,39 @@
         // a plan departure only with the same planned minute and the same
         // planned platform (an unknown platform does not conflict); otherwise
         // it starts a row of its own. Among equals the same direction id wins.
-        function pair(planDeps, liveDeps) {
+        // Exception S1 (wing trains): a remaining pair within one minute
+        // matches if platform (known) and destination are identical; the row
+        // then carries the live planned time.
+        function pair(planDeps, liveDeps, line) {
             const free = new Set(liveDeps.keys());
             const livePlatform = l => l.planned_platform ?? l.platform;
-            const compatible = (p, l) => l.at === p.at &&
+            const exact = (p, l) => l.at === p.at &&
                 (!p.platform || !livePlatform(l) || p.platform === livePlatform(l));
-            const rows = planDeps.map(p => {
+            const nearS1 = (p, l) => line === 'S1' && Math.abs(l.at - p.at) <= 1 &&
+                !!p.platform && p.platform === livePlatform(l) && p.direction === l.direction;
+            const take = (p, match) => {
                 let best = null;
                 for (const i of free) {
                     const l = liveDeps[i];
-                    if (!compatible(p, l)) continue;
+                    if (!match(p, l)) continue;
                     if (best === null || (l.direction_id === p.direction_id &&
                         liveDeps[best].direction_id !== p.direction_id)) best = i;
                 }
                 if (best !== null) free.delete(best);
-                return { plan: p, live: best === null ? null : liveDeps[best] };
+                return best;
+            };
+            const rows = planDeps.map(p => {
+                const i = take(p, exact);
+                return { plan: p, live: i === null ? null : liveDeps[i] };
             });
+            for (const row of rows) {
+                if (row.live) continue;
+                const i = take(row.plan, nearS1);
+                if (i !== null) row.live = liveDeps[i];
+            }
             for (const i of free) rows.push({ plan: null, live: liveDeps[i] });
-            return rows.sort((a, b) => (a.plan?.at ?? a.live.at) - (b.plan?.at ?? b.live.at));
+            for (const row of rows) row.at = (row.live ?? row.plan).at;
+            return rows.sort((a, b) => a.at - b.at);
         }
 
         function delayCell(live) {
@@ -405,15 +420,19 @@
                 .map(d => ({ ...d, at: planAnchor + d.offset })).filter(inRange);
             const liveDeps = (liveStation?.departures || [])
                 .map(d => ({ ...d, at: (liveAnchor ?? planAnchor) + d.offset })).filter(inRange);
-            const rows = pair(planDeps, liveDeps);
+            const lineName = (plan.modes || []).find(m => m.mode === sel.mode.value)
+                ?.lines.find(l => l.id === sel.line.value)?.name;
+            const rows = pair(planDeps, liveDeps, lineName);
             const windowEnd = liveAnchor === null ? null
                 : liveAnchor + (LIVE_WINDOW_MIN[sel.mode.value] ?? 20);
 
-            for (const { plan: p, live: l } of rows) {
-                const at = (p ?? l).at;
+            for (const { plan: p, live: l, at } of rows) {
                 const tr = el('tr', at < now ? 'past' : '');
                 const time = el('td', 'time', clock(at));
                 if (l && !p) time.append(' ', el('span', 'tag', 'nur live'));
+                if (p && l && p.at !== l.at) {
+                    time.append(' ', el('span', 'muted', '(' + clock(p.at) + ')'));
+                }
                 tr.append(time);
                 tr.append(el('td', 'live-start', p ? p.direction : ''));
                 const livePlanned = l ? l.planned_platform ?? l.platform : null;
