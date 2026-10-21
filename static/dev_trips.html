@@ -69,6 +69,10 @@
             flex: 1 1 220px;
         }
 
+        .toolbar input[type="search"].narrow {
+            flex: 0 1 140px;
+        }
+
         .tabs button {
             padding: 6px 12px;
             border: 1px solid var(--line);
@@ -97,9 +101,9 @@
         }
 
         .summary {
-            display: grid;
-            grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
-            gap: 8px;
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px;
             margin-bottom: 12px;
         }
 
@@ -107,12 +111,13 @@
             background: var(--card);
             border: 1px solid var(--line);
             border-radius: 6px;
-            padding: 8px 10px;
+            padding: 4px 10px;
+            white-space: nowrap;
         }
 
         .stat b {
-            display: block;
-            font-size: 1.15rem;
+            font-variant-numeric: tabular-nums;
+            margin-right: 4px;
         }
 
         .stat span {
@@ -120,11 +125,67 @@
             font-size: 0.75rem;
         }
 
+        /* narrow screens: scroll the table sideways, nothing sticky */
+        @media (max-width: 900px) {
+            .scroll {
+                overflow-x: auto;
+            }
+
+            header,
+            .trips > tbody > tr:first-child > th {
+                position: static;
+            }
+        }
+
         table {
             width: 100%;
             border-collapse: collapse;
             background: var(--card);
             border: 1px solid var(--line);
+            font-variant-numeric: tabular-nums;
+        }
+
+        .trips > tbody > tr:first-child > th {
+            position: sticky;
+            top: var(--head-h, 0);
+            z-index: 2;
+        }
+
+        tr.trip.open td {
+            background: #e8f1f9;
+            font-weight: 600;
+        }
+
+        .pill {
+            display: inline-block;
+            padding: 0 6px;
+            border-radius: 8px;
+            font-size: 0.76rem;
+            white-space: nowrap;
+        }
+
+        .pill.ok {
+            background: #e3f2e8;
+        }
+
+        .pill.warn {
+            background: #fbe9e1;
+        }
+
+        .pill.muted {
+            background: #eef1f4;
+        }
+
+        .late {
+            color: var(--warn);
+            font-weight: 600;
+        }
+
+        .ids {
+            margin: 4px 0 6px;
+            display: flex;
+            flex-wrap: wrap;
+            gap: 4px 16px;
         }
 
         th,
@@ -271,13 +332,14 @@
         <div class="toolbar">
             <span class="tabs">
                 <button data-tab="trips" class="active">Fahrten</button>
-                <button data-tab="live_only">Nur live</button>
+                <button data-tab="live_only" title="Live-Abfahrten mit Plan-serviceId ohne Plan-Partner">Ungepaart</button>
             </span>
             <select id="mode"></select>
             <select id="line"></select>
             <select id="dest"></select>
             <select id="status"></select>
-            <input type="search" id="q" placeholder="Suche (Ziel, Fahrzeug, Haltestelle, ID) …">
+            <input type="search" id="q" placeholder="Suche (Ziel, Haltestelle, ID) …">
+            <input type="search" id="vehicle" class="narrow" placeholder="Fahrzeug …">
             <label><input type="checkbox" id="running"> nur laufende Fahrten (±<input type="number" id="buffer" value="5" min="0" max="60" style="width:3.2em"> min)</label>
             <label><input type="checkbox" id="auto" checked> alle 30 s</label>
         </div>
@@ -337,7 +399,9 @@
                 '<option value="zwischen Ankern">zwischen Ankern</option>' +
                 '<option value="ausgefallen">ausgefallen</option>' +
                 '<option value="vermutlich ausgefallen">vermutlich ausgefallen</option>' +
-                '<option value="geändert">Ziel geändert</option>';
+                '<option value="geändert">Ziel geändert</option>' +
+                '<option value="kursziel">Kurs-Ziel statt Ansage</option>' +
+                '<option value="anker">Anker nicht im Verlauf</option>';
         }
 
         const byName = (a, b) => a.localeCompare(b, 'de', { numeric: true });
@@ -389,19 +453,20 @@
             const q = Object.entries(s.quality || {})
                 .map(([k, v]) => `${esc(k)}: ${v}`).join(', ') || '–';
             const rate = s.live_total ? Math.round(100 * s.live_matched / s.live_total) : 0;
-            const stat = (v, l) => `<div class="stat"><b>${v}</b><span>${l}</span></div>`;
+            const stat = (v, l, title) => `<div class="stat"${title ? ` title="${esc(title)}"` : ''}><b>${v}</b><span>${l}</span></div>`;
             document.getElementById('summary').innerHTML =
                 stat(s.live_total ?? 0, 'Live-Abfahrten') +
-                stat(`${s.live_matched ?? 0} (${rate} %)`, 'davon einem Plan-Halt zugeordnet') +
-                stat(s.live_unmatched ?? 0, 'ohne Zuordnung') +
+                stat(`${s.live_matched ?? 0} (${rate} %)`, 'gepaart', 'einem Plan-Halt zugeordnet, Flügelzeilen eingeschlossen') +
+                stat(s.live_unmatched ?? 0, 'Plan-ID ohne Paarung', 'Live-Abfahrt mit einer serviceId aus dem Plan, aber ohne Plan-Partner') +
                 stat(s.trips ?? 0, 'Fahrten') +
+                stat(data.trips.filter(t => t.live_only).length, 'nur live') +
                 stat(s.confirmed ?? 0, 'bestätigt') +
                 stat(s.not_seen ?? 0, 'nicht gesehen') +
-                stat(s.between ?? 0, 'zwischen Ankern (laufend, kein Anker im Fenster)') +
-                stat(s.cancelled ?? 0, 'ausgefallen (cancelled)') +
-                stat(s.missing ?? 0, 'vermutlich ausgefallen (erwartet, nie gesehen)') +
-                stat(s.extra ?? 0, 'Zusatzfahrten (extra)') +
-                `<div class="stat"><b class="small">${q}</b><span>Trefferqualität</span></div>`;
+                stat(s.between ?? 0, 'zwischen Ankern', 'laufend, kein Anker im Live-Fenster') +
+                stat(s.cancelled ?? 0, 'ausgefallen') +
+                stat(s.missing ?? 0, 'vermutlich ausgefallen', 'erwartet, nie gesehen') +
+                stat(s.extra ?? 0, 'Zusatzfahrten') +
+                stat(q, 'Paarung');
             document.getElementById('meta').textContent =
                 `Live-Anker ${s.live_anchor || '?'} · Plan-Anker ${s.plan_anchor || '?'}` +
                 (data.fetched_at ? ` · Live-Stand ${new Date(data.fetched_at * 1000).toLocaleTimeString('de-DE')}` : '');
@@ -428,37 +493,73 @@
                 `<table class="inner small"><tr><th>Halt</th><th>an</th><th>ab</th><th>Verspätung</th><th>Gleis</th></tr>${rows}</table></div>`;
         }
 
+        const STATUS_CLASS = { 'bestätigt': 'ok', 'zwischen Ankern': 'muted', 'nicht gesehen': 'muted' };
+        const LATE_SECONDS = 180;
+
+        const delayCell = d => d == null ? '' :
+            `<span class="${d >= LATE_SECONDS ? 'late' : (d > 0 ? '' : 'ok')}">${esc(delayText(d))}</span>`;
+
+        // Vehicle numbers of a trip from all its sources (live, course, wing parts).
+        const tripVehicles = t => [t.vehicles,
+            ...t.stops.map(s => s.match ? s.match.vehicles : ''),
+            ...(t.alias_courses || []).map(a => a.vehicles)].join(' ').toLowerCase();
+
+        function destinationCell(t) {
+            let html = esc(t.destination);
+            if (t.destination_announced && t.destination_announced !== t.destination) {
+                html += ` <span class="pill warn" title="Angekündigt: ${esc(t.destination_announced)} - nicht im Fahrtverlauf, die Karte zeigt das Kurs-Ziel">Kurs-Ziel</span>`;
+            }
+            if (t.destination_changed) html += ' <span class="pill warn" title="Live-Ziel weicht vom Plan ab">Ziel geändert</span>';
+            if (t.live_only) html += ' <span class="pill muted">nur live</span>';
+            if ((t.aliases || []).length) html += ' <span class="pill muted">Flügelzug</span>';
+            return html;
+        }
+
+        function idLine(t) {
+            const parts = [];
+            parts.push(t.live_only ? 'nur live' : `Plan-ID <b>${esc(t.service_id)}</b>`);
+            if ((t.primary_ids || []).length) parts.push(`Live-ID <b>${esc(t.primary_ids.join(', '))}</b>`);
+            if ((t.aliases || []).length) parts.push(`Flügel-ID <b>${esc(t.aliases.map(a => a.service_id).join(', '))}</b>`);
+            if (t.course_id) parts.push(`Verlauf von Live-ID <b>${esc(t.course_id)}</b>${t.course_failed ? failedAt(t.course_fetched_at) : asOf(t.course_fetched_at)}`);
+            else parts.push('<span class="muted">kein Fahrtverlauf, Zeiten zwischen Ankern interpoliert</span>');
+            if (t.destination_announced && t.destination_announced !== t.destination) {
+                parts.push(`<span class="warn">angekündigt: ${esc(t.destination_announced)}</span>`);
+            }
+            if ((t.anchors_outside_course || []).length) {
+                parts.push(`<span class="warn">Anker nicht im Verlauf: ${esc(t.anchors_outside_course.join(', '))}</span>`);
+            }
+            return `<div class="ids small">${parts.map(p => `<span>${p}</span>`).join('')}</div>`;
+        }
+
         function tripRows(list) {
             return list.map(t => {
                 const isOpen = open.has(t.id);
-                const status = t.status === 'bestätigt'
-                    ? '<span class="ok">bestätigt</span>'
-                    : `<span class="warn">${esc(t.status)}</span>`;
+                const status = `<span class="pill ${STATUS_CLASS[t.status] || 'warn'}">${esc(t.status)}</span>`;
                 const nextIdx = nextStopIndex(t, Date.now());
                 const nextText = nextIdx >= 0 ? `${esc(t.stops[nextIdx].station)} <span class="muted">${esc(t.stops[nextIdx].planned)}</span>`
                     : (nextIdx === -1 ? '<span class="muted">Ziel erreicht</span>' : '<span class="muted">noch nicht gestartet</span>');
-                const changed = (t.destination_changed ? ' <span class="badge warn">Ziel geändert</span>' : '')
-                    + (t.live_only ? ' <span class="badge">nur live (ohne Plan)</span>' : '');
-                let html = `<tr class="trip" data-id="${esc(t.id)}">
+                const vehicleNote = t.vehicles_remembered ? ' <span class="muted" title="aus dem Gedächtnis, kein aktueller Treffer">(gemerkt)</span>'
+                    : (t.vehicles_from_course ? ' <span class="muted" title="aus dem Fahrtverlauf (departureCourse), kein aktueller Live-Treffer">(Verlauf)</span>' : '');
+                let html = `<tr class="trip${isOpen ? ' open' : ''}" data-id="${esc(t.id)}">
                     <td>${isOpen ? '▾' : '▸'} ${esc(t.start_time)} <span class="muted">${esc(t.start_station)}</span></td>
-                    <td>${esc(t.window_time)} <span class="muted">${esc(t.window_station)}</span></td><td><b>${esc(t.line)}</b> <span class="muted small">${esc(t.mode)}</span></td>
-                    <td>${esc(t.destination)}${changed}</td><td>${nextText}</td><td>${status}</td>
-                    <td>${esc(delayText(t.max_delay))}</td>
-                    <td>${esc(t.vehicles)}${t.vehicles_remembered ? ' <span class="muted" title="aus dem Gedächtnis, kein aktueller Treffer">(gemerkt)</span>' : ''}${t.vehicles_from_course ? ' <span class="muted" title="aus dem Fahrtverlauf (departureCourse), kein aktueller Live-Treffer">(Verlauf)</span>' : ''}</td><td class="muted">${esc(t.id)}${t.live_ids.length && !(t.live_ids.length === 1 && t.live_ids[0] === String(t.id)) ? ' → ' + esc(t.live_ids.join(', ')) : ''}</td></tr>`;
+                    <td><b>${esc(t.line)}</b></td>
+                    <td>${destinationCell(t)}</td><td>${nextText}</td><td>${status}</td>
+                    <td>${delayCell(t.max_delay)}</td>
+                    <td>${esc(t.vehicles)}${vehicleNote}</td></tr>`;
                 if (isOpen) {
                     const stops = t.stops.map((s, idx) => {
                         const m = s.match;
                         const dep = s.interpolated
                             ? `<span class="interp" title="interpoliert zwischen zwei Ankerstationen">~${esc(s.dep)}</span>`
                             : esc(s.dep);
-                        const delay = s.delay;
+                        const wing = m && (m.aliases || []).length
+                            ? ' <span class="muted">+ ' + esc(m.aliases.map(a => a.service_id).join(', ')) + '</span>' : '';
                         const cells = m
-                            ? `<td class="ok">${esc(m.quality)}</td><td>${esc(m.vehicles)}</td><td>${esc(m.destination)}${m.destination_changed ? ' <span class="warn">≠ Plan</span>' : ''}</td>`
-                            : `<td class="${s.expected ? 'warn' : 'muted'}">${s.expected ? 'erwartet, nicht gesehen' : ''}</td><td></td><td></td>`;
-                        return `<tr class="${s.expected ? 'expected' : ''} ${idx === nextIdx ? 'next' : ''}"><td>${esc(s.station)}</td><td>${esc(s.arr)}</td><td>${dep}</td><td>${esc(delayText(delay))}</td><td>${esc(s.platform)}</td>${cells}</tr>`;
+                            ? `<td class="ok">${esc(m.quality)}</td><td>${esc(m.service_id)}${wing}</td><td>${esc(m.vehicles)}</td><td>${esc(m.destination)}${m.destination_changed ? ' <span class="warn">≠ Plan</span>' : ''}</td>`
+                            : `<td class="${s.expected ? 'warn' : 'muted'}">${s.expected ? 'erwartet, nicht gesehen' : ''}</td><td></td><td></td><td></td>`;
+                        return `<tr class="${s.expected ? 'expected' : ''} ${idx === nextIdx ? 'next' : ''}"><td>${esc(s.station)}</td><td>${esc(s.arr)}</td><td>${dep}</td><td>${delayCell(s.delay)}</td><td>${esc(s.platform)}</td>${cells}</tr>`;
                     }).join('');
-                    const head = `<h4>Plan-ID ${esc(t.id)} → ${esc(t.destination)}${t.course_failed ? failedAt(t.course_fetched_at) : asOf(t.course_fetched_at)}</h4>`;
-                    html += `<tr class="detail"><td colspan="9"><div class="muted small note">~Zeiten sind linear zwischen den Ankerstationen interpoliert, „–“ = keine Zeit bekannt. Graue Zeilen: identischer Abschnitt eines geteilten Zuges.</div><div class="cols"><div class="alias">${head}<table class="inner small"><tr><th>Halt</th><th>an</th><th>ab</th><th>Verspätung</th><th>Gleis</th><th>Treffer</th><th>Fahrzeuge</th><th>Live-Ziel</th></tr>${stops}</table></div>${(t.alias_courses || []).map(aliasTable).join('')}</div></td></tr>`;
+                    html += `<tr class="detail"><td colspan="7">${idLine(t)}<div class="cols"><div class="alias"><table class="inner small"><tr><th>Halt</th><th>an</th><th>ab</th><th>Verspätung</th><th>Gleis</th><th>Paarung</th><th>Live-ID</th><th>Fahrzeuge</th><th>Live-Ziel</th></tr>${stops}</table></div>${(t.alias_courses || []).map(aliasTable).join('')}</div><div class="muted small">~ interpoliert zwischen Ankern · grau: gemeinsamer Abschnitt der Flügelteile</div></td></tr>`;
                 }
                 return html;
             }).join('');
@@ -474,6 +575,7 @@
             const mode = document.getElementById('mode').value;
             const status = document.getElementById('status').value;
             const q = document.getElementById('q').value.trim().toLowerCase();
+            const vehicle = document.getElementById('vehicle').value.trim().toLowerCase();
             const running = document.getElementById('running').checked;
             const buffer = Math.max(0, +document.getElementById('buffer').value || 0);
             const box = document.getElementById('content');
@@ -484,10 +586,11 @@
                     (!line || e.line === line) &&
                     (!mode || modeLines.has(e.line)) &&
                     (!dest || e.destination === dest) &&
-                    (!q || JSON.stringify(e).toLowerCase().includes(q)));
-                box.innerHTML = `<table><tr><th>Plan</th><th>Linie</th><th>Halt</th><th>Ziel</th><th>Gleis</th><th>Verspätung</th><th>Fahrzeuge</th><th>Grund</th><th>Live-ID</th></tr>` +
+                    (!q || [e.destination, e.station, e.service_id].join(' ').toLowerCase().includes(q)) &&
+                    (!vehicle || (e.vehicles || '').toLowerCase().includes(vehicle)));
+                box.innerHTML = `<div class="scroll"><table><tr><th>Plan</th><th>Linie</th><th>Halt</th><th>Ziel</th><th>Gleis</th><th>Verspätung</th><th>Fahrzeuge</th><th>Grund</th><th>Live-ID</th></tr>` +
                     rows.map(e => `<tr><td>${esc(e.planned)}</td><td><b>${esc(e.line)}</b></td><td>${esc(e.station)}</td><td>${esc(e.destination)}</td><td>${esc(e.platform)}</td><td>${esc(delayText(e.delay))}</td><td>${esc(e.vehicles)}</td><td class="warn">${esc(e.reason)}</td><td class="muted">${esc(e.service_id)}</td></tr>`).join('') +
-                    '</table>' + (rows.length ? '' : '<div class="err muted">Keine Einträge.</div>');
+                    '</table></div>' + (rows.length ? '' : '<div class="err muted">Keine Einträge.</div>');
                 return;
             }
 
@@ -500,12 +603,17 @@
                     if (now < new Date(t.route_start).getTime() - pad ||
                         now > new Date(t.route_end).getTime() + pad) return false;
                 }
-                if (status === 'geändert' ? !t.destination_changed : (status && t.status !== status)) return false;
+                if (status === 'geändert') { if (!t.destination_changed) return false; }
+                else if (status === 'kursziel') { if (!t.destination_announced || t.destination_announced === t.destination) return false; }
+                else if (status === 'anker') { if (!(t.anchors_outside_course || []).length) return false; }
+                else if (status && t.status !== status) return false;
+                if (vehicle && !tripVehicles(t).includes(vehicle)) return false;
                 if (!q) return true;
-                const hay = [t.destination, t.vehicles, t.id, t.live_ids.join(' '), t.stops.map(s => s.station).join(' ')].join(' ').toLowerCase();
+                const hay = [t.destination, t.destination_announced, t.service_id, t.live_ids.join(' '),
+                    t.stops.map(s => s.station).join(' ')].join(' ').toLowerCase();
                 return hay.includes(q);
             });
-            box.innerHTML = `<table><tr><th>Start (erster Anker)</th><th>Im Live-Fenster</th><th>Linie</th><th>Ziel (Plan)</th><th>Nächster Halt</th><th>Status</th><th>Max. Verspätung</th><th>Fahrzeuge</th><th>Plan-ID → Live-ID</th></tr>${tripRows(rows)}</table>` +
+            box.innerHTML = `<div class="scroll"><table class="trips"><tr><th>Start (erster Anker)</th><th>Linie</th><th>Ziel</th><th>Nächster Halt</th><th>Status</th><th>Max. Verspätung</th><th>Fahrzeuge</th></tr>${tripRows(rows)}</table></div>` +
                 (rows.length ? '' : '<div class="err muted">Keine Fahrten.</div>');
         }
 
@@ -523,7 +631,12 @@
                 if (data) render();
             }
         });
-        ['mode', 'line', 'dest', 'status', 'q', 'running', 'buffer'].forEach(id => document.getElementById(id).addEventListener('input', () => data && render()));
+        // keep the table header below the sticky page header
+        const setHeadHeight = () => document.documentElement.style.setProperty(
+            '--head-h', document.querySelector('header').offsetHeight + 'px');
+        window.addEventListener('resize', setHeadHeight);
+        setHeadHeight();
+        ['mode', 'line', 'dest', 'status', 'q', 'vehicle', 'running', 'buffer'].forEach(id => document.getElementById(id).addEventListener('input', () => data && render()));
         setInterval(() => document.getElementById('auto').checked && load(), 30000);
         load();
     </script>

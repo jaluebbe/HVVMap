@@ -25,6 +25,8 @@ from hvv_map.trips import (
     STATUS_CANCELLED,
     STATUS_MISSING,
     build_trip_table,
+    destination_from_courses,
+    remember_live_ids,
     remember_live_trips,
     remember_missing,
     remember_vehicles,
@@ -146,6 +148,64 @@ def _is_shared(alias: dict, position: Position) -> bool:
     return all(shared(i) for i in ends)
 
 
+def _label_destination(row: dict, now: datetime, ferry: bool) -> str:
+    """While a coupled train runs as one, the announced destinations of both
+    parts that their courses contain (e.g. "Poppenbüttel / Hamburg Airport");
+    if none is left, the courses' last stops."""
+    if not row.get("course_id") or row.get("course_failed"):
+        return row["destination"]
+    for alias in row["alias_courses"]:
+        position = locate(_alias_stops(alias), now, ferry)
+        if (
+            position
+            and position.state in (AT_STOP, BETWEEN)
+            and _is_shared(alias, position)
+        ):
+            own = [{"name": s["station"]} for s in row["stops"]]
+            return destination_from_courses(
+                [alias.get("destination_announced"), row.get("destination_announced")],
+                [own, alias["stops"]],
+            )
+    return row["destination"]
+
+
+def _drawn_by_others(trips: list[dict], now: datetime) -> tuple[set, set]:
+    """(rows to skip, wing ids not to draw): one train part is drawn once.
+    A trip without a current live departure whose course belongs to another
+    trip's live id is skipped. A trip whose live id is another trip's wing
+    part is skipped while the coupled train runs as one; after the split it
+    draws that part instead of the other trip's wing."""
+    wings = {
+        alias["service_id"]: (row, alias)
+        for row in trips
+        for alias in row["alias_courses"]
+    }
+    primaries = {sid: row for row in trips for sid in row.get("primary_ids") or []}
+    skip, hidden = set(), set()
+    for row in trips:
+        ids = row.get("primary_ids") or []
+        if not ids:
+            course_id = row.get("course_id")
+            other = primaries.get(course_id) or (wings.get(course_id) or (None,))[0]
+            if other is not None and other is not row:
+                skip.add(id(row))
+            continue
+        for service_id in ids:
+            owner, alias = wings.get(service_id) or (None, None)
+            if owner is None or owner is row:
+                continue
+            position = locate(_alias_stops(alias), now, owner["mode"] == "FERRY")
+            if (
+                position
+                and position.state in (AT_STOP, BETWEEN)
+                and _is_shared(alias, position)
+            ):
+                skip.add(id(row))
+            else:
+                hidden.add(service_id)
+    return skip, hidden
+
+
 def build_positions(
     table: dict,
     now: datetime,
@@ -158,8 +218,9 @@ def build_positions(
     `cache` keeps segment tracks between calls on the same data."""
     cache = {} if cache is None else cache
     features = []
+    skip, hidden = _drawn_by_others(table["trips"], now)
     for row in table["trips"]:
-        if row["status"] in (STATUS_CANCELLED, STATUS_MISSING):
+        if row["status"] in (STATUS_CANCELLED, STATUS_MISSING) or id(row) in skip:
             continue
         ferry = row["mode"] == "FERRY"
         stops = stops_from_row(row)
@@ -170,10 +231,13 @@ def build_positions(
             if placed:
                 point, straight = placed
                 delay = row["stops"][position.index]["delay"]
+                destination = _label_destination(row, now, ferry)
                 features.append(
-                    _feature(row, row["destination"], position, point, delay, straight)
+                    _feature(row, destination, position, point, delay, straight)
                 )
         for alias in row["alias_courses"]:
+            if alias["service_id"] in hidden:
+                continue
             position = locate(_alias_stops(alias), now, ferry)
             if (
                 not position
@@ -237,6 +301,7 @@ def _refresh(redis_client, state: PositionsState) -> bool:
         changed = remember_vehicles(state.memory, state.table, now_ts)
         changed = remember_live_trips(state.memory, state.table, now_ts) or changed
         changed = remember_missing(state.memory, state.table, now_ts) or changed
+        changed = remember_live_ids(state.memory, state.table, now_ts) or changed
         if changed:
             redis_client.set(
                 REDIS_VEHICLES_KEY,

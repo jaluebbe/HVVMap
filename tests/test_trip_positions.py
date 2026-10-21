@@ -134,6 +134,83 @@ def test_split_train_shows_the_other_branch_after_the_split():
     assert other["geometry"]["coordinates"][0] == 2.0  # halfway between B(1) and D(3)
 
 
+def _coupled(own_announced, wing_announced):
+    alias = {**_split_alias(), "destination_announced": wing_announced}
+    return _row(
+        alias_courses=[alias],
+        course_id="1",
+        destination=own_announced,
+        destination_announced=own_announced,
+    )
+
+
+def _label(row, now=NOW):
+    features = _positions(row, now)
+    return {f["properties"]["journeyID"]: f["properties"]["label"] for f in features}
+
+
+def test_coupled_train_shows_the_destinations_both_courses_contain():
+    assert _label(_coupled("C", "D / C")) == {"1": "D / C"}
+
+
+def test_coupled_train_keeps_its_own_destination_after_the_split():
+    labels = _label(_coupled("C", "D / C"), datetime(2026, 10, 17, 9, 7))
+    assert labels == {"1": "C", "999": "Other"}
+
+
+def test_announced_destination_missing_from_both_courses_is_dropped():
+    assert _label(_coupled("C", "Wedel")) == {"1": "C"}
+
+
+def test_without_any_announced_destination_in_the_courses_their_ends_are_shown():
+    assert _label(_coupled("Wedel", "Wedel")) == {"1": "C / D"}
+
+
+def test_without_an_own_course_the_label_stays():
+    row = {**_coupled("C", "D / C"), "course_id": None}
+    assert _label(row) == {"1": "C"}
+
+
+def _wing_part(**extra):
+    """A trip of its own for the wing part 999 (e.g. a plan trip from the
+    split station on), running on the alias course's stops."""
+    return _row(
+        id="2",
+        primary_ids=["999"],
+        destination="Other",
+        stops=[
+            _stop("A", None, "09:00"),
+            _stop("B", "09:04", "09:05"),
+            _stop("D", "09:09", None),
+        ],
+        **extra,
+    )
+
+
+def _ids(rows, now=NOW):
+    table = {"trips": rows}
+    return sorted(
+        f["properties"]["journeyID"]
+        for f in build_positions(table, now, STATIONS)["features"]
+    )
+
+
+def test_trip_of_a_wing_part_is_not_drawn_while_the_train_runs_as_one():
+    main = _row(primary_ids=["1"], alias_courses=[_split_alias()])
+    assert _ids([main, _wing_part()]) == ["1"]
+
+
+def test_trip_of_a_wing_part_draws_the_branch_after_the_split():
+    main = _row(primary_ids=["1"], alias_courses=[_split_alias()])
+    assert _ids([main, _wing_part()], datetime(2026, 10, 17, 9, 7)) == ["1", "2"]
+
+
+def test_trip_without_live_departure_on_another_trips_course_is_not_drawn():
+    main = _row(primary_ids=["1"], alias_courses=[_split_alias()])
+    remembered = _row(id="3", primary_ids=[], course_id="999")
+    assert _ids([main, remembered]) == ["1"]
+
+
 class _FakeRedis:
     def __init__(self, values=None):
         self.values = dict(values or {})
