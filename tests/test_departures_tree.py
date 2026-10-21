@@ -7,6 +7,7 @@ from hvv_map.departures_tree import (
     parse_anchor,
     refined_model,
     ubahn_series,
+    vehicle_numbers_text,
     vehicles_text,
 )
 
@@ -81,6 +82,8 @@ def test_station_tree_prefers_realtime_platform():
     departures = [_dep("U1", "U", "A", 5, platform="1", realtimePlatform="2")]
     stop = build_station_tree(departures, ANCHOR)["modes"][0]["lines"][0]["stations"][0]
     assert stop["departures"][0]["platform"] == "2"
+    assert stop["departures"][0]["planned_platform"] == "1"
+    assert stop["departures"][0]["realtime_platform"] == "2"
 
 
 def test_station_tree_puts_unmapped_lines_into_other_mode_last():
@@ -208,3 +211,9 @@ def test_vehicles_text_keeps_the_reported_unit_order():
     assert vehicles_text(vehicles, ubahn=True) == "DT5.1 (362), DT5.1 (329)"
     assert vehicles_text(vehicles[::-1], ubahn=True) == "DT5.1 (329), DT5.1 (362)"
     assert vehicles_text([{"id": "x9"}, {"number": "4711"}]) == "(id x9), 4711"
+
+
+def test_vehicle_numbers_text_lists_numbers_with_id_fallback():
+    vehicles = [{"id": "9001", "number": "4711"}, {"id": "7"}, {}]
+    assert vehicle_numbers_text(vehicles) == "4711, id 7"
+    assert vehicle_numbers_text(None) == ""

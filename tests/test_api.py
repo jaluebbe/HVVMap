@@ -428,3 +428,74 @@ def test_static_cache_headers(client, tmp_path):
         in client.get("/static/maplibre-gl/lib.js").headers["cache-control"]
     )
     assert "max-age=604800" in client.get("/fonts/f.pbf").headers["cache-control"]
+
+
+def test_gtfs_departures_are_filtered_by_line_and_station(client):
+    tree = {
+        "anchor": "2026-10-21 00:00",
+        "modes": [
+            {
+                "mode": "U",
+                "lines": [
+                    {
+                        "name": "U1",
+                        "id": "U1",
+                        "stations": [
+                            {
+                                "id": "Farmsen",
+                                "name": "Farmsen",
+                                "departures": [
+                                    {"offset": 20, "time": "00:20"},
+                                    {"offset": 10, "time": "00:10"},
+                                ],
+                            }
+                        ],
+                    }
+                ],
+            }
+        ],
+    }
+    get_redis_client().set(
+        "hvv:gtfs:departures", json.dumps({"fetched_at": 1, "data": tree})
+    )
+
+    body = client.get(
+        "/api/hvv/gtfs/departures.json", params={"line": "U1", "station": "Farmsen"}
+    ).json()
+    empty = client.get(
+        "/api/hvv/gtfs/departures.json", params={"line": "U2", "station": "Farmsen"}
+    ).json()
+
+    assert [d["offset"] for d in body["departures"]] == [10, 20]
+    assert body["anchor"] == "2026-10-21 00:00" and empty["departures"] == []
+
+
+def test_known_courses_returns_the_newest_course_per_live_service_id(
+    client, monkeypatch
+):
+    stops = [{"name": "A", "dep": "2026-10-21T19:56", "arr": None}]
+    fake = _FakeRedis(
+        {
+            "hvv:trips:courses": {
+                "fetched_at": 1,
+                "data": {
+                    "old": {"fetched_at": 10, "service_id": "7", "stops": stops},
+                    "new": {
+                        "fetched_at": 20,
+                        "service_id": "7",
+                        "stops": stops,
+                        "vehicles": [{"number": "417"}, {"id": "9"}],
+                    },
+                    "failed": {"fetched_at": 30, "service_id": "8", "stops": None},
+                    "other": {"fetched_at": 30, "service_id": "9", "stops": stops},
+                },
+            }
+        }
+    )
+    monkeypatch.setattr(api_module, "_redis_client", fake)
+
+    data = client.get("/api/hvv/live/courses.json?service_ids=7,8").json()
+
+    assert list(data["courses"]) == ["7"]
+    assert data["courses"]["7"]["fetched_at"] == 20
+    assert data["courses"]["7"]["vehicles"] == ["417", "9"]

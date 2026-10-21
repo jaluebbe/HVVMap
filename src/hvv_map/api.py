@@ -338,6 +338,37 @@ def get_trips():
     return {"fetched_at": live_payload.get("fetched_at"), **table}
 
 
+MAX_COURSE_IDS = 100
+
+
+@app.get("/api/hvv/live/courses.json", tags=["hvv_live"])
+def get_known_courses(service_ids: str):
+    """Known departureCourses by live serviceId (comma separated), the newest
+    fetch per id, for static/dev_station_departures.html."""
+    wanted = {i.strip() for i in service_ids.split(",") if i.strip()}
+    if len(wanted) > MAX_COURSE_IDS:
+        raise HTTPException(status_code=400, detail="too many service ids")
+    raw = _redis_client.get(REDIS_TRIP_COURSES_KEY)
+    cached = json.loads(raw)["data"] if raw else {}
+    found: dict[str, dict] = {}
+    for entry in cached.values():
+        service_id = entry.get("service_id")
+        if service_id not in wanted or not entry.get("stops"):
+            continue
+        if (
+            service_id not in found
+            or entry["fetched_at"] > found[service_id]["fetched_at"]
+        ):
+            found[service_id] = {
+                "fetched_at": entry["fetched_at"],
+                "stops": entry["stops"],
+                "vehicles": [
+                    v.get("number") or v.get("id") for v in entry.get("vehicles") or []
+                ],
+            }
+    return {"courses": found}
+
+
 @app.get("/api/hvv/live/departures-by-trip.json", tags=["hvv_live"])
 def get_departures_by_trip():
     """Mode -> line -> trip (serviceId) -> stops, from by_service."""
@@ -432,6 +463,34 @@ def get_gtilive_courses(limit: int = 500):
 @app.get("/api/hvv/gtfs/positions.geojson", tags=["hvv_gtfs"])
 def get_gtfs_positions():
     return _read_cached_json("hvv:gtfs:positions")
+
+
+_gtfs_departures_cache: dict = {}  # fetched_at -> {(line, station): departures}
+
+
+@app.get("/api/hvv/gtfs/departures.json", tags=["hvv_gtfs"])
+def get_gtfs_departures(line: str, station: str):
+    """Scheduled departures of today at one station and line from the static
+    GTFS feed (static/dev_station_departures.html)."""
+    payload = _read_cached_payload("hvv:gtfs:departures")
+    stamp = payload.get("fetched_at")
+    if stamp not in _gtfs_departures_cache:
+        index = {}
+        for mode in payload["data"]["modes"]:
+            for line_node in mode["lines"]:
+                for station_node in line_node["stations"]:
+                    key = (line_node["name"], station_node["name"])
+                    index.setdefault(key, []).extend(station_node["departures"])
+        _gtfs_departures_cache.clear()
+        _gtfs_departures_cache[stamp] = index
+    return {
+        "fetched_at": stamp,
+        "anchor": payload["data"]["anchor"],
+        "departures": sorted(
+            _gtfs_departures_cache[stamp].get((line, station), []),
+            key=lambda d: d["offset"],
+        ),
+    }
 
 
 @app.get("/api/hvv/gtfs/lines.geojson", tags=["hvv_gtfs"])

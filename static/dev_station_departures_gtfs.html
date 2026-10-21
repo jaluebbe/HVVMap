@@ -1,0 +1,602 @@
+<!DOCTYPE html>
+<html lang="de">
+
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width,initial-scale=1.0">
+    <title>HVV Abfahrten - GTFS, GTI-Plan, GTI-Live</title>
+    <style>
+        :root {
+            --ink: #1a2733;
+            --muted: #5b6b78;
+            --line: #d8dee3;
+            --bg: #f4f6f8;
+            --card: #ffffff;
+            --accent: #1e64a0;
+            --warn: #b3541e;
+            --ok: #2b7a4b;
+            --late: #b3261e;
+            --dim: #98a4ad;
+        }
+
+        * {
+            box-sizing: border-box;
+        }
+
+        body {
+            margin: 0;
+            font-family: -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            background: var(--bg);
+            color: var(--ink);
+        }
+
+        header {
+            position: sticky;
+            top: 0;
+            z-index: 5;
+            background: var(--card);
+            border-bottom: 1px solid var(--line);
+            padding: 12px 16px;
+        }
+
+        header h1 {
+            margin: 0 0 2px;
+            font-size: 1.05rem;
+            font-weight: 600;
+        }
+
+        header .meta {
+            font-size: 0.78rem;
+            color: var(--muted);
+        }
+
+        .toolbar {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px 12px;
+            align-items: end;
+            margin-top: 10px;
+        }
+
+        .toolbar label {
+            display: flex;
+            flex-direction: column;
+            gap: 2px;
+            font-size: 0.72rem;
+            color: var(--muted);
+        }
+
+        .toolbar select,
+        .toolbar input {
+            min-width: 130px;
+            padding: 6px 8px;
+            border: 1px solid var(--line);
+            border-radius: 6px;
+            font-size: 0.85rem;
+            background: var(--card);
+            color: var(--ink);
+        }
+
+        .toolbar select#station {
+            min-width: 220px;
+        }
+
+        main {
+            padding: 12px 16px 32px;
+            max-width: 1700px;
+            margin: 0 auto;
+        }
+
+        .count-line {
+            font-size: 0.8rem;
+            color: var(--muted);
+            margin-bottom: 8px;
+        }
+
+        .table-wrap {
+            overflow-x: auto;
+            background: var(--card);
+            border: 1px solid var(--line);
+            border-radius: 8px;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 0.85rem;
+            font-variant-numeric: tabular-nums;
+        }
+
+        th,
+        td {
+            padding: 6px 10px;
+            text-align: left;
+            border-bottom: 1px solid var(--line);
+            white-space: nowrap;
+        }
+
+        th {
+            position: sticky;
+            top: 0;
+            background: #eef2f5;
+            font-size: 0.72rem;
+            font-weight: 600;
+            color: var(--muted);
+            text-transform: uppercase;
+            letter-spacing: 0.03em;
+        }
+
+        th.group {
+            text-align: center;
+            border-left: 1px solid var(--line);
+        }
+
+        td.live-start,
+        th.live-start {
+            border-left: 1px solid var(--line);
+        }
+
+        tr:last-child td {
+            border-bottom: 0;
+        }
+
+        tr.past td {
+            color: var(--dim);
+        }
+
+        .time {
+            font-weight: 600;
+        }
+
+        .delay {
+            font-weight: 600;
+        }
+
+        .delay.on-time {
+            color: var(--ok);
+        }
+
+        .delay.late {
+            color: var(--late);
+        }
+
+        .delay.early {
+            color: var(--accent);
+        }
+
+        .muted {
+            color: var(--dim);
+        }
+
+        .tag {
+            display: inline-block;
+            padding: 0 6px;
+            border-radius: 8px;
+            font-size: 0.7rem;
+            background: #fbe9dc;
+            color: var(--warn);
+        }
+
+        .changed {
+            color: var(--warn);
+            font-weight: 600;
+        }
+
+        .empty {
+            padding: 24px;
+            color: var(--muted);
+            text-align: center;
+        }
+
+        @media (max-width: 600px) {
+            th,
+            td {
+                padding: 5px 6px;
+            }
+
+            .toolbar select,
+            .toolbar input {
+                min-width: 0;
+                width: 100%;
+            }
+
+            .toolbar label {
+                flex: 1 1 44%;
+            }
+
+            .toolbar label.wide {
+                flex-basis: 100%;
+            }
+        }
+    </style>
+</head>
+
+<body>
+    <header>
+        <h1>Abfahrten: GTFS, GTI-Plan und GTI-Live</h1>
+        <div class="meta" id="meta">Lade ...</div>
+        <div class="toolbar">
+            <label>Verkehrsträger
+                <select id="mode"></select>
+            </label>
+            <label>Linie
+                <select id="line"></select>
+            </label>
+            <label class="wide">Haltestelle
+                <select id="station"></select>
+            </label>
+            <label>Rückblick
+                <select id="past">
+                    <option value="10" selected>10 Minuten</option>
+                    <option value="60">1 Stunde</option>
+                    <option value="180">3 Stunden</option>
+                    <option value="1440">Ganzer Tag</option>
+                </select>
+            </label>
+            <label>Zeitraum
+                <select id="range">
+                    <option value="60">1 Stunde</option>
+                    <option value="120" selected>2 Stunden</option>
+                    <option value="360">6 Stunden</option>
+                    <option value="1440">Ganzer Tag</option>
+                </select>
+            </label>
+        </div>
+    </header>
+    <main>
+        <div class="count-line" id="count-line"></div>
+        <div class="table-wrap">
+            <table>
+                <thead>
+                    <tr>
+                        <th rowspan="2">Geplant</th>
+                        <th colspan="3" class="group live-start">GTFS</th>
+                        <th colspan="3" class="group live-start">GTI Plan</th>
+                        <th colspan="4" class="group live-start">GTI Live</th>
+                    </tr>
+                    <tr>
+                        <th class="live-start">Richtung</th>
+                        <th>Gleis</th>
+                        <th>Trip-ID</th>
+                        <th class="live-start">Richtung</th>
+                        <th>Gleis geplant</th>
+                        <th>ServiceId</th>
+                        <th class="live-start">Verspätung</th>
+                        <th>Gleis Echtzeit</th>
+                        <th>Richtung</th>
+                        <th>ServiceId</th>
+                    </tr>
+                </thead>
+                <tbody id="rows"></tbody>
+            </table>
+        </div>
+    </main>
+
+    <script>
+        const URL_PLAN = '/api/hvv/live/departures-by-station.json';
+        const URL_LIVE = '/api/hvv/live/departures-live.json';
+        const URL_GTFS = '/api/hvv/gtfs/departures.json';
+        const LIVE_REFRESH_MS = 30000;
+        const MODE_LABELS = {
+            U: 'U-Bahn', S: 'S-Bahn', AKN: 'AKN', R: 'Regionalzüge',
+            FERRY: 'Fähren', OTHER: 'Sonstige',
+        };
+        // Live data only covers a window after its anchor.
+        const LIVE_WINDOW_MIN = { U: 5, S: 5, AKN: 5, FERRY: 5, R: 20, OTHER: 20 };
+
+        let plan = null;
+        let live = null;
+        let gtfs = null;       // {key, anchor, departures} of the selected line and station
+        let gtfsError = '';
+        const sel = {
+            mode: document.getElementById('mode'),
+            line: document.getElementById('line'),
+            station: document.getElementById('station'),
+            past: document.getElementById('past'),
+            range: document.getElementById('range'),
+        };
+
+        // "YYYY-MM-DD HH:MM" -> minutes on a common (zone-less) scale
+        function anchorMinutes(text) {
+            const m = /^(\d{4})-(\d\d)-(\d\d) (\d\d):(\d\d)$/.exec(text || '');
+            return m ? Date.UTC(+m[1], m[2] - 1, +m[3], +m[4], +m[5]) / 60000 : null;
+        }
+
+        function berlinNowMinutes() {
+            const parts = Object.fromEntries(
+                new Intl.DateTimeFormat('en-GB', {
+                    timeZone: 'Europe/Berlin', hourCycle: 'h23',
+                    year: 'numeric', month: '2-digit', day: '2-digit',
+                    hour: '2-digit', minute: '2-digit',
+                }).formatToParts(new Date()).map(p => [p.type, p.value]));
+            return Date.UTC(+parts.year, parts.month - 1, +parts.day,
+                +parts.hour, +parts.minute) / 60000;
+        }
+
+        function clock(minutes) {
+            const d = new Date(minutes * 60000);
+            return String(d.getUTCHours()).padStart(2, '0') + ':' +
+                String(d.getUTCMinutes()).padStart(2, '0');
+        }
+
+        function el(tag, className, text) {
+            const node = document.createElement(tag);
+            if (className) node.className = className;
+            if (text !== undefined && text !== null) node.textContent = text;
+            return node;
+        }
+
+        function findNode(tree, modeKey, lineKey, stationId) {
+            const mode = (tree?.modes || []).find(m => m.mode === modeKey);
+            const line = mode?.lines.find(l => l.id === lineKey);
+            return line?.stations.find(s => s.id === stationId) || null;
+        }
+
+        function fill(select, items, keep) {
+            const previous = keep ?? select.value;
+            select.replaceChildren(...items.map(([value, label]) => {
+                const option = el('option', null, label);
+                option.value = value;
+                return option;
+            }));
+            if (items.some(([value]) => value === previous)) select.value = previous;
+        }
+
+        function fillModes() {
+            fill(sel.mode, (plan?.modes || []).map(m => [m.mode, MODE_LABELS[m.mode] || m.mode]));
+            fillLines();
+        }
+
+        function fillLines() {
+            const mode = (plan?.modes || []).find(m => m.mode === sel.mode.value);
+            fill(sel.line, (mode?.lines || []).map(l => [l.id, l.name]));
+            fillStations();
+        }
+
+        function fillStations() {
+            const mode = (plan?.modes || []).find(m => m.mode === sel.mode.value);
+            const line = mode?.lines.find(l => l.id === sel.line.value);
+            const stations = [...(line?.stations || [])]
+                .sort((a, b) => a.name.localeCompare(b.name, 'de'));
+            fill(sel.station, stations.map(s => [s.id, s.name]));
+            loadGtfs().then(render);
+        }
+
+        function selectedLineName() {
+            const mode = (plan?.modes || []).find(m => m.mode === sel.mode.value);
+            return mode?.lines.find(l => l.id === sel.line.value)?.name || '';
+        }
+
+        // GTFS departures of the selected line and station (name match)
+        function gtfsKey() {
+            return selectedLineName() + '|' + (sel.station.selectedOptions[0]?.textContent || '');
+        }
+
+        async function loadGtfs() {
+            const line = selectedLineName();
+            const station = sel.station.selectedOptions[0]?.textContent || '';
+            const key = gtfsKey();
+            if (gtfs?.key === key) return;
+            gtfs = null;
+            gtfsError = '';
+            if (!line || !station) return;
+            try {
+                const response = await fetch(URL_GTFS + '?' + new URLSearchParams({ line, station }));
+                if (!response.ok) throw new Error('GTFS: ' + response.status);
+                const data = await response.json();
+                if (gtfsKey() === key) {
+                    gtfs = { key, anchor: anchorMinutes(data.anchor), departures: data.departures };
+                }
+            } catch (error) {
+                if (gtfsKey() === key) gtfsError = String(error);
+            }
+        }
+
+        // A row has exactly one planned departure time. A live departure joins
+        // a plan departure only with the same planned minute and the same
+        // planned platform (an unknown platform does not conflict); otherwise
+        // it starts a row of its own. Among equals the same direction id wins.
+        function pair(planDeps, liveDeps) {
+            const free = new Set(liveDeps.keys());
+            const livePlatform = l => l.planned_platform ?? l.platform;
+            const compatible = (p, l) => l.at === p.at &&
+                (!p.platform || !livePlatform(l) || p.platform === livePlatform(l));
+            const rows = planDeps.map(p => {
+                let best = null;
+                for (const i of free) {
+                    const l = liveDeps[i];
+                    if (!compatible(p, l)) continue;
+                    if (best === null || (l.direction_id === p.direction_id &&
+                        liveDeps[best].direction_id !== p.direction_id)) best = i;
+                }
+                if (best !== null) free.delete(best);
+                return { plan: p, live: best === null ? null : liveDeps[best] };
+            });
+            for (const i of free) rows.push({ plan: null, live: liveDeps[i] });
+            return rows.sort((a, b) => (a.plan?.at ?? a.live.at) - (b.plan?.at ?? b.live.at));
+        }
+
+        function directionKey(text) {
+            return (text || '').toLowerCase().replace(/\(.*?\)/g, '').replace(/[^a-zäöüß0-9]/g, '');
+        }
+
+        function sameDirection(a, b) {
+            const x = directionKey(a), y = directionKey(b);
+            return !!x && !!y && (x.startsWith(y) || y.startsWith(x));
+        }
+
+        // Add the GTFS departure with the same planned minute to every row
+        // (same direction preferred; its platform is spelled differently and
+        // does not count). Remaining GTFS departures get rows of their own.
+        function attachGtfs(rows, gtfsDeps) {
+            const free = new Set(gtfsDeps.keys());
+            for (const row of rows) {
+                const anchor = row.plan ?? row.live;
+                let best = null;
+                for (const i of free) {
+                    const g = gtfsDeps[i];
+                    if (g.at !== anchor.at) continue;
+                    if (best === null || (sameDirection(g.direction, anchor.direction) &&
+                        !sameDirection(gtfsDeps[best].direction, anchor.direction))) best = i;
+                }
+                if (best !== null) free.delete(best);
+                row.gtfs = best === null ? null : gtfsDeps[best];
+            }
+            for (const i of free) rows.push({ plan: null, live: null, gtfs: gtfsDeps[i] });
+            return rows.sort((a, b) => rowTime(a) - rowTime(b));
+        }
+
+        function rowTime(row) {
+            return (row.plan ?? row.live ?? row.gtfs).at;
+        }
+
+        function delayCell(live) {
+            const cell = el('td');
+            if (!live || live.delay === null || live.delay === undefined) {
+                cell.className = 'muted';
+                cell.textContent = live ? 'keine Angabe' : '';
+                return cell;
+            }
+            const minutes = Math.round(live.delay / 60);
+            const kind = minutes > 0 ? 'late' : minutes < 0 ? 'early' : 'on-time';
+            const span = el('span', 'delay ' + kind,
+                minutes === 0 ? 'pünktlich' : (minutes > 0 ? '+' : '') + minutes + ' min');
+            cell.append(span);
+            return cell;
+        }
+
+        function render() {
+            const body = document.getElementById('rows');
+            const station = findNode(plan, sel.mode.value, sel.line.value, sel.station.value);
+            const liveStation = findNode(live, sel.mode.value, sel.line.value, sel.station.value);
+            const planAnchor = anchorMinutes(plan?.anchor);
+            const liveAnchor = anchorMinutes(live?.anchor);
+            body.replaceChildren();
+            if (!station || planAnchor === null) {
+                document.getElementById('count-line').textContent = '';
+                return;
+            }
+            const now = berlinNowMinutes();
+            const from = now - Number(sel.past.value);
+            const to = now + Number(sel.range.value);
+            const inRange = d => d.at >= from && d.at <= to;
+            const planDeps = station.departures
+                .map(d => ({ ...d, at: planAnchor + d.offset })).filter(inRange);
+            const liveDeps = (liveStation?.departures || [])
+                .map(d => ({ ...d, at: (liveAnchor ?? planAnchor) + d.offset })).filter(inRange);
+            const gtfsDeps = (gtfs?.departures || [])
+                .map(d => ({ ...d, at: gtfs.anchor + d.offset })).filter(inRange);
+            const rows = attachGtfs(pair(planDeps, liveDeps), gtfsDeps);
+            const windowEnd = liveAnchor === null ? null
+                : liveAnchor + (LIVE_WINDOW_MIN[sel.mode.value] ?? 20);
+
+            for (const { plan: p, live: l, gtfs: g } of rows) {
+                const at = rowTime({ plan: p, live: l, gtfs: g });
+                const tr = el('tr', at < now ? 'past' : '');
+                const time = el('td', 'time', clock(at));
+                if (g && !p && !l) time.append(' ', el('span', 'tag', 'nur GTFS'));
+                else if (l && !p) time.append(' ', el('span', 'tag', 'nur live'));
+                else if (p && !g && gtfs) time.append(' ', el('span', 'tag', 'nicht in GTFS'));
+                tr.append(time);
+                const gtfsDirection = el('td', 'live-start', g ? g.direction : '');
+                tr.append(gtfsDirection);
+                tr.append(el('td', null, g ? g.platform || '' : ''));
+                tr.append(el('td', 'muted', g ? g.trip_id || '' : ''));
+                tr.append(el('td', 'live-start', p ? p.direction : ''));
+                const livePlanned = l ? l.planned_platform ?? l.platform : null;
+                tr.append(el('td', null, (p ? p.platform : livePlanned) || ''));
+                tr.append(el('td', 'muted', p ? p.service_id ?? '' : ''));
+                const delay = delayCell(l);
+                delay.classList.add('live-start');
+                if (!l && p && windowEnd !== null && p.at > windowEnd) {
+                    delay.className = 'muted live-start';
+                    delay.textContent = 'außerhalb Livefenster';
+                } else if (!l && p && at >= now) {
+                    delay.className = 'muted live-start';
+                    delay.textContent = 'keine Live-Daten';
+                }
+                tr.append(delay);
+                const changed = l && l.realtime_platform && l.realtime_platform !== livePlanned;
+                tr.append(el('td', changed ? 'changed' : '', l ? l.realtime_platform || '' : ''));
+                tr.append(el('td', l && p && l.direction !== p.direction ? 'changed' : '',
+                    l ? l.direction : ''));
+                tr.append(el('td', 'muted', l ? l.service_id ?? '' : ''));
+                body.append(tr);
+            }
+            if (!rows.length) {
+                const tr = el('tr');
+                const td = el('td', 'empty', 'Keine Abfahrten im gewählten Zeitraum.');
+                td.colSpan = 11;
+                tr.append(td);
+                body.append(tr);
+            }
+            const matched = rows.filter(r => r.plan && r.live).length;
+            const gtfsMatched = rows.filter(r => r.plan && r.gtfs).length;
+            document.getElementById('count-line').textContent =
+                `${gtfsDeps.length} GTFS-, ${planDeps.length} Plan-, ${liveDeps.length} Live-Abfahrten; ` +
+                `Plan zu Live zugeordnet: ${matched}, Plan zu GTFS: ${gtfsMatched}` +
+                (gtfsError ? ` · ${gtfsError}` : '');
+        }
+
+        function renderMeta() {
+            const parts = [];
+            if (plan) parts.push('Plan: Stand ' + new Date(plan.fetched_at * 1000).toLocaleTimeString('de-DE', { timeZone: 'Europe/Berlin' }));
+            if (live) parts.push('Live: Stand ' + new Date(live.fetched_at * 1000).toLocaleTimeString('de-DE', { timeZone: 'Europe/Berlin' }));
+            document.getElementById('meta').textContent = parts.join(' · ');
+        }
+
+        async function load(url) {
+            const response = await fetch(url);
+            if (!response.ok) throw new Error(url + ': ' + response.status);
+            return response.json();
+        }
+
+        async function refreshLive() {
+            try {
+                live = await load(URL_LIVE);
+                renderMeta();
+                render();
+            } catch (error) {
+                document.getElementById('meta').textContent = String(error);
+            }
+        }
+
+        async function start() {
+            try {
+                [plan, live] = await Promise.all([load(URL_PLAN), load(URL_LIVE)]);
+            } catch (error) {
+                document.getElementById('meta').textContent = String(error);
+                return;
+            }
+            renderMeta();
+            const saved = new URLSearchParams(location.search);
+            fillModes();
+            for (const [key, select] of [['mode', sel.mode], ['line', sel.line], ['station', sel.station]]) {
+                if (saved.get(key)) {
+                    select.value = saved.get(key);
+                    if (key === 'mode') fillLines();
+                    if (key === 'line') fillStations();
+                }
+            }
+            render();
+            setInterval(refreshLive, LIVE_REFRESH_MS);
+            setInterval(render, 60000);
+        }
+
+        function remember() {
+            const params = new URLSearchParams({
+                mode: sel.mode.value, line: sel.line.value, station: sel.station.value,
+            });
+            history.replaceState(null, '', '?' + params);
+        }
+
+        sel.mode.addEventListener('change', () => { fillLines(); remember(); });
+        sel.line.addEventListener('change', () => { fillStations(); remember(); });
+        sel.station.addEventListener('change', () => { loadGtfs().then(render); remember(); });
+        sel.past.addEventListener('change', render);
+        sel.range.addEventListener('change', render);
+        start();
+    </script>
+</body>
+
+</html>

@@ -30,6 +30,10 @@ def test_rebuild_reference_stores_both_layers():
             "hvv_map.gtfs_fetcher.build_stops_geojson",
             return_value={"type": "FeatureCollection", "features": ["stops"]},
         ),
+        patch(
+            "hvv_map.gtfs_fetcher.build_departures_tree",
+            return_value={"anchor": "2026-10-21 00:00", "modes": []},
+        ),
     ):
         gtfs_fetcher._rebuild_reference(redis_client, fake_schedule)
 
@@ -62,6 +66,10 @@ def test_fetch_once_stores_all_three_layers(tmp_path, monkeypatch):
         patch(
             "hvv_map.gtfs_fetcher.build_stops_geojson",
             return_value={"type": "FeatureCollection", "features": []},
+        ),
+        patch(
+            "hvv_map.gtfs_fetcher.build_departures_tree",
+            return_value={"anchor": "2026-10-21 00:00", "modes": []},
         ),
     ):
         gtfs_fetcher.fetch_once()
