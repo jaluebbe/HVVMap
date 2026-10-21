@@ -428,3 +428,43 @@ def test_static_cache_headers(client, tmp_path):
         in client.get("/static/maplibre-gl/lib.js").headers["cache-control"]
     )
     assert "max-age=604800" in client.get("/fonts/f.pbf").headers["cache-control"]
+
+
+def test_gtfs_departures_are_filtered_by_line_and_station(client):
+    tree = {
+        "anchor": "2026-10-21 00:00",
+        "modes": [
+            {
+                "mode": "U",
+                "lines": [
+                    {
+                        "name": "U1",
+                        "id": "U1",
+                        "stations": [
+                            {
+                                "id": "Farmsen",
+                                "name": "Farmsen",
+                                "departures": [
+                                    {"offset": 20, "time": "00:20"},
+                                    {"offset": 10, "time": "00:10"},
+                                ],
+                            }
+                        ],
+                    }
+                ],
+            }
+        ],
+    }
+    get_redis_client().set(
+        "hvv:gtfs:departures", json.dumps({"fetched_at": 1, "data": tree})
+    )
+
+    body = client.get(
+        "/api/hvv/gtfs/departures.json", params={"line": "U1", "station": "Farmsen"}
+    ).json()
+    empty = client.get(
+        "/api/hvv/gtfs/departures.json", params={"line": "U2", "station": "Farmsen"}
+    ).json()
+
+    assert [d["offset"] for d in body["departures"]] == [10, 20]
+    assert body["anchor"] == "2026-10-21 00:00" and empty["departures"] == []

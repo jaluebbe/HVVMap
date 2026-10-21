@@ -434,6 +434,34 @@ def get_gtfs_positions():
     return _read_cached_json("hvv:gtfs:positions")
 
 
+_gtfs_departures_cache: dict = {}  # fetched_at -> {(line, station): departures}
+
+
+@app.get("/api/hvv/gtfs/departures.json", tags=["hvv_gtfs"])
+def get_gtfs_departures(line: str, station: str):
+    """Scheduled departures of today at one station and line from the static
+    GTFS feed (static/dev_station_departures.html)."""
+    payload = _read_cached_payload("hvv:gtfs:departures")
+    stamp = payload.get("fetched_at")
+    if stamp not in _gtfs_departures_cache:
+        index = {}
+        for mode in payload["data"]["modes"]:
+            for line_node in mode["lines"]:
+                for station_node in line_node["stations"]:
+                    key = (line_node["name"], station_node["name"])
+                    index.setdefault(key, []).extend(station_node["departures"])
+        _gtfs_departures_cache.clear()
+        _gtfs_departures_cache[stamp] = index
+    return {
+        "fetched_at": stamp,
+        "anchor": payload["data"]["anchor"],
+        "departures": sorted(
+            _gtfs_departures_cache[stamp].get((line, station), []),
+            key=lambda d: d["offset"],
+        ),
+    }
+
+
 @app.get("/api/hvv/gtfs/lines.geojson", tags=["hvv_gtfs"])
 def get_gtfs_lines(request: Request):
     return _gtfs_lines_cache.response(request)

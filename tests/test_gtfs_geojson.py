@@ -3,6 +3,7 @@ from datetime import date, datetime
 
 from hvv_map.gtfs_geojson import (
     BERLIN_TZ,
+    build_departures_tree,
     build_lines_geojson,
     build_positions_geojson,
     build_stops_geojson,
@@ -426,3 +427,34 @@ def test_straight_run_stays_when_the_real_track_is_elsewhere():
     lines = build_lines_geojson(schedule, reference_date=date(2025, 6, 2))["features"]
 
     assert sorted(f["properties"]["straight"] for f in lines) == [False, True]
+
+
+def test_departures_tree_lists_each_stop_but_the_last_with_its_headsign():
+    tree = build_departures_tree(_make_schedule(), date(2025, 6, 2))
+
+    assert tree["anchor"] == "2025-06-02 00:00"
+    [mode] = tree["modes"]
+    [line] = mode["lines"]
+    assert (mode["mode"], line["name"]) == ("U", "U1")
+    [station] = line["stations"]  # Beta is the last stop: no departure
+    assert station["name"] == "Alpha"
+    assert station["departures"] == [
+        {
+            "offset": 480,
+            "time": "08:00",
+            "next_day": False,
+            "direction": "Beta",
+            "platform": None,
+        }
+    ]
+
+
+def test_departures_tree_takes_trips_past_midnight_from_the_day_before():
+    schedule = _make_schedule(
+        trip_stop_times={"T1": [(1, "A", 87000, 87000), (2, "B", 87600, 87600)]}
+    )  # 24:10 -> 24:20 of the service day
+
+    tree = build_departures_tree(schedule, date(2025, 6, 2))
+
+    departures = tree["modes"][0]["lines"][0]["stations"][0]["departures"]
+    assert [(d["time"], d["offset"]) for d in departures][0] == ("00:10", 10)

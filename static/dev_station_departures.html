@@ -4,7 +4,7 @@
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width,initial-scale=1.0">
-    <title>HVV Abfahrten - Plan gegen Live</title>
+    <title>HVV Abfahrten - GTFS, GTI-Plan, GTI-Live</title>
     <style>
         :root {
             --ink: #1a2733;
@@ -83,7 +83,7 @@
 
         main {
             padding: 12px 16px 32px;
-            max-width: 1100px;
+            max-width: 1400px;
             margin: 0 auto;
         }
 
@@ -213,7 +213,7 @@
 
 <body>
     <header>
-        <h1>Abfahrten: Plan gegen Live</h1>
+        <h1>Abfahrten: GTFS, GTI-Plan und GTI-Live</h1>
         <div class="meta" id="meta">Lade ...</div>
         <div class="toolbar">
             <label>Verkehrsträger
@@ -241,11 +241,15 @@
             <table>
                 <thead>
                     <tr>
-                        <th colspan="3">Plan</th>
-                        <th colspan="4" class="group live-start">Live</th>
+                        <th colspan="3">GTFS</th>
+                        <th colspan="3" class="group live-start">GTI Plan</th>
+                        <th colspan="4" class="group live-start">GTI Live</th>
                     </tr>
                     <tr>
                         <th>Abfahrt</th>
+                        <th>Richtung</th>
+                        <th>Gleis</th>
+                        <th class="live-start">Abfahrt</th>
                         <th>Richtung</th>
                         <th>Gleis</th>
                         <th class="live-start">Abfahrt</th>
@@ -262,6 +266,7 @@
     <script>
         const URL_PLAN = '/api/hvv/live/departures-by-station.json';
         const URL_LIVE = '/api/hvv/live/departures-live.json';
+        const URL_GTFS = '/api/hvv/gtfs/departures.json';
         const LIVE_REFRESH_MS = 30000;
         const PAST_MINUTES = 10; // departures this long ago stay visible
         const MODE_LABELS = {
@@ -273,6 +278,8 @@
 
         let plan = null;
         let live = null;
+        let gtfs = null;       // {key, anchor, departures} of the selected line and station
+        let gtfsError = '';
         const sel = {
             mode: document.getElementById('mode'),
             line: document.getElementById('line'),
@@ -343,7 +350,37 @@
             const stations = [...(line?.stations || [])]
                 .sort((a, b) => a.name.localeCompare(b.name, 'de'));
             fill(sel.station, stations.map(s => [s.id, s.name]));
-            render();
+            loadGtfs().then(render);
+        }
+
+        function selectedLineName() {
+            const mode = (plan?.modes || []).find(m => m.mode === sel.mode.value);
+            return mode?.lines.find(l => l.id === sel.line.value)?.name || '';
+        }
+
+        // GTFS departures of the selected line and station (name match)
+        function gtfsKey() {
+            return selectedLineName() + '|' + (sel.station.selectedOptions[0]?.textContent || '');
+        }
+
+        async function loadGtfs() {
+            const line = selectedLineName();
+            const station = sel.station.selectedOptions[0]?.textContent || '';
+            const key = gtfsKey();
+            if (gtfs?.key === key) return;
+            gtfs = null;
+            gtfsError = '';
+            if (!line || !station) return;
+            try {
+                const response = await fetch(URL_GTFS + '?' + new URLSearchParams({ line, station }));
+                if (!response.ok) throw new Error('GTFS: ' + response.status);
+                const data = await response.json();
+                if (gtfsKey() === key) {
+                    gtfs = { key, anchor: anchorMinutes(data.anchor), departures: data.departures };
+                }
+            } catch (error) {
+                if (gtfsKey() === key) gtfsError = String(error);
+            }
         }
 
         // Pair every plan departure with at most one live departure: same
@@ -371,6 +408,47 @@
             });
             for (const i of free) rows.push({ plan: null, live: liveDeps[i] });
             return rows.sort((a, b) => (a.plan?.at ?? a.live.at) - (b.plan?.at ?? b.live.at));
+        }
+
+        function directionKey(text) {
+            return (text || '').toLowerCase().replace(/\(.*?\)/g, '').replace(/[^a-zäöüß0-9]/g, '');
+        }
+
+        function sameDirection(a, b) {
+            const x = directionKey(a), y = directionKey(b);
+            return !!x && !!y && (x.startsWith(y) || y.startsWith(x));
+        }
+
+        // Add the matching GTFS departure to every row: same minute and
+        // direction first, then same minute, then one minute off. Remaining
+        // GTFS departures are shown on their own.
+        function attachGtfs(rows, gtfsDeps) {
+            const free = new Set(gtfsDeps.keys());
+            const take = (row, tolerance, needDirection) => {
+                const anchor = row.plan ?? row.live;
+                let best = null;
+                for (const i of free) {
+                    const g = gtfsDeps[i];
+                    const gap = Math.abs(g.at - anchor.at);
+                    if (gap > tolerance) continue;
+                    if (needDirection && !sameDirection(g.direction, anchor.direction)) continue;
+                    if (best === null || gap < Math.abs(gtfsDeps[best].at - anchor.at)) best = i;
+                }
+                if (best !== null) free.delete(best);
+                return best;
+            };
+            for (const row of rows) {
+                let i = take(row, 0, true);
+                if (i === null) i = take(row, 0, false);
+                if (i === null) i = take(row, 1, true);
+                row.gtfs = i === null ? null : gtfsDeps[i];
+            }
+            for (const i of free) rows.push({ plan: null, live: null, gtfs: gtfsDeps[i] });
+            return rows.sort((a, b) => rowTime(a) - rowTime(b));
+        }
+
+        function rowTime(row) {
+            return (row.plan ?? row.live ?? row.gtfs).at;
         }
 
         function delayCell(live) {
@@ -402,20 +480,30 @@
             const now = berlinNowMinutes();
             const from = now - PAST_MINUTES;
             const to = now + Number(sel.range.value);
+            const inRange = d => d.at >= from && d.at <= to;
             const planDeps = station.departures
-                .map(d => ({ ...d, at: planAnchor + d.offset }))
-                .filter(d => d.at >= from && d.at <= to);
+                .map(d => ({ ...d, at: planAnchor + d.offset })).filter(inRange);
             const liveDeps = (liveStation?.departures || [])
-                .map(d => ({ ...d, at: (liveAnchor ?? planAnchor) + d.offset }))
-                .filter(d => d.at >= from && d.at <= to);
-            const rows = pair(planDeps, liveDeps);
+                .map(d => ({ ...d, at: (liveAnchor ?? planAnchor) + d.offset })).filter(inRange);
+            const gtfsDeps = (gtfs?.departures || [])
+                .map(d => ({ ...d, at: gtfs.anchor + d.offset })).filter(inRange);
+            const rows = attachGtfs(pair(planDeps, liveDeps), gtfsDeps);
             const windowEnd = liveAnchor === null ? null
                 : liveAnchor + (LIVE_WINDOW_MIN[sel.mode.value] ?? 20);
 
-            for (const { plan: p, live: l } of rows) {
-                const at = (p ?? l).at;
+            for (const { plan: p, live: l, gtfs: g } of rows) {
+                const at = rowTime({ plan: p, live: l, gtfs: g });
                 const tr = el('tr', at < now ? 'past' : '');
-                tr.append(el('td', 'time', p ? clock(p.at) : ''));
+                const gtfsTime = el('td', 'time', g ? clock(g.at) : '');
+                if (g && !p && !l) gtfsTime.append(' ', el('span', 'tag', 'nur GTFS'));
+                tr.append(gtfsTime);
+                tr.append(el('td', null, g ? g.direction : ''));
+                tr.append(el('td', null, g ? g.platform || '' : ''));
+                const planTime = el('td', 'time live-start', p ? clock(p.at) : '');
+                if (!p && g) planTime.className = 'muted live-start';
+                if (!p && g) planTime.textContent = '';
+                if (p && !g && gtfs) planTime.append(' ', el('span', 'tag', 'nicht in GTFS'));
+                tr.append(planTime);
                 tr.append(el('td', null, p ? p.direction : ''));
                 tr.append(el('td', null, p ? p.platform || '' : ''));
                 const liveTime = el('td', 'time live-start');
@@ -444,14 +532,16 @@
             if (!rows.length) {
                 const tr = el('tr');
                 const td = el('td', 'empty', 'Keine Abfahrten im gewählten Zeitraum.');
-                td.colSpan = 7;
+                td.colSpan = 10;
                 tr.append(td);
                 body.append(tr);
             }
             const matched = rows.filter(r => r.plan && r.live).length;
+            const gtfsMatched = rows.filter(r => r.plan && r.gtfs).length;
             document.getElementById('count-line').textContent =
-                `${planDeps.length} Plan-Abfahrten, ${liveDeps.length} Live-Abfahrten, ` +
-                `${matched} zugeordnet`;
+                `${gtfsDeps.length} GTFS-, ${planDeps.length} Plan-, ${liveDeps.length} Live-Abfahrten; ` +
+                `Plan zu Live zugeordnet: ${matched}, Plan zu GTFS: ${gtfsMatched}` +
+                (gtfsError ? ` · ${gtfsError}` : '');
         }
 
         function renderMeta() {
@@ -508,7 +598,7 @@
 
         sel.mode.addEventListener('change', () => { fillLines(); remember(); });
         sel.line.addEventListener('change', () => { fillStations(); remember(); });
-        sel.station.addEventListener('change', () => { render(); remember(); });
+        sel.station.addEventListener('change', () => { loadGtfs().then(render); remember(); });
         sel.range.addEventListener('change', render);
         start();
     </script>
