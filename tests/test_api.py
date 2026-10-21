@@ -468,3 +468,34 @@ def test_gtfs_departures_are_filtered_by_line_and_station(client):
 
     assert [d["offset"] for d in body["departures"]] == [10, 20]
     assert body["anchor"] == "2026-10-21 00:00" and empty["departures"] == []
+
+
+def test_known_courses_returns_the_newest_course_per_live_service_id(
+    client, monkeypatch
+):
+    stops = [{"name": "A", "dep": "2026-10-21T19:56", "arr": None}]
+    fake = _FakeRedis(
+        {
+            "hvv:trips:courses": {
+                "fetched_at": 1,
+                "data": {
+                    "old": {"fetched_at": 10, "service_id": "7", "stops": stops},
+                    "new": {
+                        "fetched_at": 20,
+                        "service_id": "7",
+                        "stops": stops,
+                        "vehicles": [{"number": "417"}, {"id": "9"}],
+                    },
+                    "failed": {"fetched_at": 30, "service_id": "8", "stops": None},
+                    "other": {"fetched_at": 30, "service_id": "9", "stops": stops},
+                },
+            }
+        }
+    )
+    monkeypatch.setattr(api_module, "_redis_client", fake)
+
+    data = client.get("/api/hvv/live/courses.json?service_ids=7,8").json()
+
+    assert list(data["courses"]) == ["7"]
+    assert data["courses"]["7"]["fetched_at"] == 20
+    assert data["courses"]["7"]["vehicles"] == ["417", "9"]
