@@ -353,7 +353,9 @@
         // it starts a row of its own. Among equals the same direction id wins.
         // Exception S1 (wing trains): a remaining pair within one minute
         // matches if platform (known) and destination are identical; the row
-        // then carries the live planned time.
+        // then carries the live planned time. A matched S1 plan departure also
+        // takes a second live departure with the same known platform within
+        // one minute: the plan cells span both rows.
         function pair(planDeps, liveDeps, line) {
             const free = new Set(liveDeps.keys());
             const livePlatform = l => l.planned_platform ?? l.platform;
@@ -381,9 +383,27 @@
                 const i = take(row.plan, nearS1);
                 if (i !== null) row.live = liveDeps[i];
             }
-            for (const i of free) rows.push({ plan: null, live: liveDeps[i] });
-            for (const row of rows) row.at = (row.live ?? row.plan).at;
-            return rows.sort((a, b) => a.at - b.at);
+            const groups = rows.map(row => {
+                row.at = (row.live ?? row.plan).at;
+                const group = [row];
+                const platform = row.plan?.platform;
+                if (line === 'S1' && row.live && platform) {
+                    let extra = null;
+                    for (const i of free) {
+                        const l = liveDeps[i];
+                        if (livePlatform(l) !== platform || Math.abs(l.at - row.plan.at) > 1) continue;
+                        if (extra === null || l.at === row.plan.at) extra = i;
+                    }
+                    if (extra !== null) {
+                        free.delete(extra);
+                        row.span = 2;
+                        group.push({ plan: row.plan, live: liveDeps[extra], at: liveDeps[extra].at, cont: true });
+                    }
+                }
+                return group;
+            });
+            for (const i of free) groups.push([{ plan: null, live: liveDeps[i], at: liveDeps[i].at }]);
+            return groups.sort((a, b) => a[0].at - b[0].at).flat();
         }
 
         function delayCell(live) {
@@ -426,7 +446,7 @@
             const windowEnd = liveAnchor === null ? null
                 : liveAnchor + (LIVE_WINDOW_MIN[sel.mode.value] ?? 20);
 
-            for (const { plan: p, live: l, at } of rows) {
+            for (const { plan: p, live: l, at, span, cont } of rows) {
                 const tr = el('tr', at < now ? 'past' : '');
                 const time = el('td', 'time', clock(at));
                 if (l && !p) time.append(' ', el('span', 'tag', 'nur live'));
@@ -434,10 +454,16 @@
                     time.append(' ', el('span', 'muted', '(' + clock(p.at) + ')'));
                 }
                 tr.append(time);
-                tr.append(el('td', 'live-start', p ? p.direction : ''));
                 const livePlanned = l ? l.planned_platform ?? l.platform : null;
-                tr.append(el('td', null, (p ? p.platform : livePlanned) || ''));
-                tr.append(el('td', 'muted', p ? p.service_id ?? '' : ''));
+                if (!cont) {
+                    const planCells = [
+                        el('td', 'live-start', p ? p.direction : ''),
+                        el('td', null, (p ? p.platform : livePlanned) || ''),
+                        el('td', 'muted', p ? p.service_id ?? '' : ''),
+                    ];
+                    if (span) planCells.forEach(c => { c.rowSpan = span; });
+                    tr.append(...planCells);
+                }
                 const delay = delayCell(l);
                 delay.classList.add('live-start');
                 if (!l && p && windowEnd !== null && p.at > windowEnd) {
@@ -462,7 +488,7 @@
                 tr.append(td);
                 body.append(tr);
             }
-            const matched = rows.filter(r => r.plan && r.live).length;
+            const matched = rows.filter(r => r.plan && r.live && !r.cont).length;
             document.getElementById('count-line').textContent =
                 `${planDeps.length} Plan-, ${liveDeps.length} Live-Abfahrten; ` +
                 `Plan zu Live zugeordnet: ${matched}`;
