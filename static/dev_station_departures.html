@@ -182,6 +182,11 @@
             font-weight: 600;
         }
 
+        .extended {
+            color: var(--late);
+            font-weight: 700;
+        }
+
         .empty {
             padding: 24px;
             color: var(--muted);
@@ -364,8 +369,16 @@
         // matches if platform (known) and destination are identical; the row
         // then carries the live planned time. A matched S1 plan departure also
         // takes a second live departure with the same known platform and the
-        // same minute whose destination contains the plan destination: the
-        // plan cells span both rows.
+        // same minute as its live partner whose destination contains the plan
+        // destination (or is Wedel for a plan Blankenese): the plan cells span
+        // both rows.
+        // Live destination covers the plan destination: it contains it, or the
+        // train runs on from Blankenese to Wedel.
+        function extendsDestination(planned, live) {
+            return (live || '').includes(planned) ||
+                (planned === 'Blankenese' && live === 'Wedel');
+        }
+
         function pair(planDeps, liveDeps, line) {
             const free = new Set(liveDeps.keys());
             const livePlatform = l => l.planned_platform ?? l.platform;
@@ -401,8 +414,8 @@
                     let extra = null;
                     for (const i of free) {
                         const l = liveDeps[i];
-                        if (livePlatform(l) !== platform || l.at !== row.plan.at ||
-                            !(l.direction || '').includes(row.plan.direction)) continue;
+                        if (livePlatform(l) !== platform || l.at !== row.live.at ||
+                            !(extendsDestination(row.plan.direction, l.direction))) continue;
                         extra = i;
                         break;
                     }
@@ -488,7 +501,8 @@
                 tr.append(delay);
                 const changed = l && l.realtime_platform && l.realtime_platform !== livePlanned;
                 tr.append(el('td', changed ? 'changed' : '', l ? l.realtime_platform || '' : ''));
-                tr.append(el('td', l && p && l.direction !== p.direction ? 'changed' : '',
+                const wedel = cont && p.direction === 'Blankenese' && l.direction === 'Wedel';
+                tr.append(el('td', wedel ? 'extended' : l && p && l.direction !== p.direction ? 'changed' : '',
                     l ? l.direction : ''));
                 tr.append(el('td', 'muted', l ? l.service_id ?? '' : ''));
                 tr.append(el('td', null, l ? l.vehicle_numbers || '' : ''));
