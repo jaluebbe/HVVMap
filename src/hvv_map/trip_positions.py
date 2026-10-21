@@ -21,11 +21,11 @@ from hvv_map.stations import StationInfo, by_id, load_stations
 from hvv_map.trip_courses import REDIS_COURSES_KEY
 from hvv_map.trip_position import AT_STOP, BETWEEN, Position, locate, stops_from_row
 from hvv_map.trips import (
-    COMBINED_DESTINATION,
     REDIS_VEHICLES_KEY,
     STATUS_CANCELLED,
     STATUS_MISSING,
     build_trip_table,
+    destination_from_courses,
     remember_live_ids,
     remember_live_trips,
     remember_missing,
@@ -149,27 +149,23 @@ def _is_shared(alias: dict, position: Position) -> bool:
 
 
 def _label_destination(row: dict, now: datetime, ferry: bool) -> str:
-    """While a coupled train runs as one, a wing part's announced destination
-    that contains the trip's own wins (e.g. "Poppenbüttel / Hamburg Airport"
-    over "Hamburg Airport") if the courses reach all of its destinations."""
-    own = row["destination"] or ""
+    """While a coupled train runs as one, the announced destinations of both
+    parts that their courses contain (e.g. "Poppenbüttel / Hamburg Airport");
+    if none is left, the courses' last stops."""
+    if not row.get("course_id") or row.get("course_failed"):
+        return row["destination"]
     for alias in row["alias_courses"]:
-        announced = alias.get("destination_announced") or ""
-        if not own or own not in announced or announced == own:
-            continue
-        # every announced destination must lie on one of the two courses
-        names = {s["station"] for s in row["stops"]} | {
-            s["name"] for s in alias["stops"]
-        }
-        if not all(part in names for part in announced.split(COMBINED_DESTINATION)):
-            continue
         position = locate(_alias_stops(alias), now, ferry)
         if (
             position
             and position.state in (AT_STOP, BETWEEN)
             and _is_shared(alias, position)
         ):
-            return announced
+            own = [{"name": s["station"]} for s in row["stops"]]
+            return destination_from_courses(
+                [alias.get("destination_announced"), row.get("destination_announced")],
+                [own, alias["stops"]],
+            )
     return row["destination"]
 
 

@@ -421,19 +421,30 @@ COURSE_FIT_MINUTES = 10  # a course belongs to a trip if its times are this clos
 COURSE_DESTINATION_LINES = {"S1"}
 
 
+def destination_from_courses(
+    announced: list[str | None], stop_lists: list[list[dict]]
+) -> str | None:
+    """The announced destinations (split at " / ") that one of the courses
+    contains, in order; if none is left, the courses' last stops."""
+    names = {stop["name"] for stops in stop_lists for stop in stops}
+    parts = [
+        part for text in announced if text for part in text.split(COMBINED_DESTINATION)
+    ]
+    kept = list(dict.fromkeys(part for part in parts if part in names))
+    if not kept:
+        kept = list(dict.fromkeys(stops[-1]["name"] for stops in stop_lists))
+    return COMBINED_DESTINATION.join(kept)
+
+
 def course_destination(
     announced: str | None, course: dict | None, line: str
 ) -> str | None:
-    """The announced destination, or on COURSE_DESTINATION_LINES the course's
-    last stop if the course does not contain one of the announced
-    destinations."""
+    """On COURSE_DESTINATION_LINES the announced destinations the course
+    contains, else the course's last stop (see destination_from_courses)."""
     stops = (course or {}).get("stops")
     if line not in COURSE_DESTINATION_LINES or not stops or not announced:
         return announced
-    names = {stop["name"] for stop in stops}
-    if all(part in names for part in announced.split(COMBINED_DESTINATION)):
-        return announced
-    return stops[-1]["name"]
+    return destination_from_courses([announced], [stops])
 
 
 def _course_fits(trip: dict, course: dict) -> bool:
@@ -482,7 +493,9 @@ def _alias_courses(
         result.append(
             {
                 "service_id": alias["service_id"],
-                "destination": course_destination(alias["destination"], course, trip["line"]),
+                "destination": course_destination(
+                    alias["destination"], course, trip["line"]
+                ),
                 "destination_announced": alias["destination"],
                 "shared_until": shared,
                 "shared_from": joined,

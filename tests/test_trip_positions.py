@@ -134,37 +134,41 @@ def test_split_train_shows_the_other_branch_after_the_split():
     assert other["geometry"]["coordinates"][0] == 2.0  # halfway between B(1) and D(3)
 
 
-def test_coupled_train_shows_the_wing_destination_that_contains_its_own():
-    alias = {**_split_alias(), "destination_announced": "C / D"}
+def _coupled(own_announced, wing_announced):
+    alias = {**_split_alias(), "destination_announced": wing_announced}
+    return _row(
+        alias_courses=[alias],
+        course_id="1",
+        destination=own_announced,
+        destination_announced=own_announced,
+    )
 
-    [feature] = _positions(_row(alias_courses=[alias]))
 
-    assert feature["properties"]["label"] == "C / D"
+def _label(row, now=NOW):
+    features = _positions(row, now)
+    return {f["properties"]["journeyID"]: f["properties"]["label"] for f in features}
+
+
+def test_coupled_train_shows_the_destinations_both_courses_contain():
+    assert _label(_coupled("C", "D / C")) == {"1": "D / C"}
 
 
 def test_coupled_train_keeps_its_own_destination_after_the_split():
-    alias = {**_split_alias(), "destination_announced": "C / D"}
-
-    features = _positions(_row(alias_courses=[alias]), datetime(2026, 10, 17, 9, 7))
-
-    labels = {f["properties"]["journeyID"]: f["properties"]["label"] for f in features}
-    assert labels == {"1": "D", "999": "Other"}
+    labels = _label(_coupled("C", "D / C"), datetime(2026, 10, 17, 9, 7))
+    assert labels == {"1": "C", "999": "Other"}
 
 
-def test_combined_destination_beyond_both_courses_does_not_win():
-    alias = {**_split_alias(), "destination_announced": "D / Wedel"}
-
-    [feature] = _positions(_row(alias_courses=[alias]))
-
-    assert feature["properties"]["label"] == "D"
+def test_announced_destination_missing_from_both_courses_is_dropped():
+    assert _label(_coupled("C", "Wedel")) == {"1": "C"}
 
 
-def test_wing_destination_without_the_own_one_does_not_win():
-    alias = {**_split_alias(), "destination_announced": "Wedel"}
+def test_without_any_announced_destination_in_the_courses_their_ends_are_shown():
+    assert _label(_coupled("Wedel", "Wedel")) == {"1": "C / D"}
 
-    [feature] = _positions(_row(alias_courses=[alias]))
 
-    assert feature["properties"]["label"] == "D"
+def test_without_an_own_course_the_label_stays():
+    row = {**_coupled("C", "D / C"), "course_id": None}
+    assert _label(row) == {"1": "C"}
 
 
 class _FakeRedis:
