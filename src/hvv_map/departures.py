@@ -50,6 +50,7 @@ ANCHOR_STATIONS_MAIN = {
     "Aumühle", "Stephansplatz (Oper/CCH)", "Ohlsdorf", "Wandsbek Markt",
     "Saarlandstraße", "dodenhof",
     "Rübenkamp (City Nord)",  # last stop before the S1 Airport/Poppenbüttel split
+    "Kornweg (Klein Borstel)",  # Poppenbüttel branch: late destination changes
 } - PSEUDO_STATIONS  # fmt: skip
 MAIN_SERVICE_TYPES = ["SBAHN", "UBAHN", "AKN", "FAEHRE"]
 
