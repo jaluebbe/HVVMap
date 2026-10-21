@@ -1,0 +1,784 @@
+<!DOCTYPE html>
+<html lang="de">
+
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width,initial-scale=1.0">
+    <title>HVV Fahrten aus Abfahrten</title>
+    <style>
+        :root {
+            --ink: #1a2733;
+            --muted: #5b6b78;
+            --line: #d8dee3;
+            --bg: #f4f6f8;
+            --card: #ffffff;
+            --accent: #1e64a0;
+            --warn: #b3541e;
+            --ok: #2b7a4b;
+            --late: #b3261e;
+            --dim: #98a4ad;
+        }
+
+        * {
+            box-sizing: border-box;
+        }
+
+        body {
+            margin: 0;
+            font-family: -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            background: var(--bg);
+            color: var(--ink);
+        }
+
+        header {
+            position: sticky;
+            top: 0;
+            z-index: 5;
+            background: var(--card);
+            border-bottom: 1px solid var(--line);
+            padding: 12px 16px;
+        }
+
+        header h1 {
+            margin: 0 0 2px;
+            font-size: 1.05rem;
+            font-weight: 600;
+        }
+
+        header .meta {
+            font-size: 0.78rem;
+            color: var(--muted);
+        }
+
+        .toolbar {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px 12px;
+            align-items: end;
+            margin-top: 10px;
+        }
+
+        .toolbar label {
+            display: flex;
+            flex-direction: column;
+            gap: 2px;
+            font-size: 0.72rem;
+            color: var(--muted);
+        }
+
+        .toolbar select,
+        .toolbar input {
+            min-width: 130px;
+            padding: 6px 8px;
+            border: 1px solid var(--line);
+            border-radius: 6px;
+            font-size: 0.85rem;
+            background: var(--card);
+            color: var(--ink);
+        }
+
+        main {
+            padding: 12px 16px 32px;
+            max-width: 1700px;
+            margin: 0 auto;
+        }
+
+        .count-line {
+            font-size: 0.8rem;
+            color: var(--muted);
+            margin-bottom: 8px;
+        }
+
+        .table-wrap {
+            overflow-x: auto;
+            background: var(--card);
+            border: 1px solid var(--line);
+            border-radius: 8px;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 0.85rem;
+            font-variant-numeric: tabular-nums;
+        }
+
+        th,
+        td {
+            padding: 6px 10px;
+            text-align: left;
+            border-bottom: 1px solid var(--line);
+            white-space: nowrap;
+        }
+
+        th {
+            position: sticky;
+            top: 0;
+            background: #eef2f5;
+            font-size: 0.72rem;
+            font-weight: 600;
+            color: var(--muted);
+            text-transform: uppercase;
+            letter-spacing: 0.03em;
+        }
+
+        th.group {
+            text-align: center;
+            border-left: 1px solid var(--line);
+        }
+
+        td.live-start,
+        th.live-start {
+            border-left: 1px solid var(--line);
+        }
+
+        tr:last-child td {
+            border-bottom: 0;
+        }
+
+        tr.past td {
+            color: var(--dim);
+        }
+
+        .time {
+            font-weight: 600;
+        }
+
+        .delay {
+            font-weight: 600;
+        }
+
+        .delay.on-time {
+            color: var(--ok);
+        }
+
+        .delay.late {
+            color: var(--late);
+        }
+
+        .delay.early {
+            color: var(--accent);
+        }
+
+        .muted {
+            color: var(--dim);
+        }
+
+        .tag {
+            display: inline-block;
+            padding: 0 6px;
+            border-radius: 8px;
+            font-size: 0.7rem;
+            background: #fbe9dc;
+            color: var(--warn);
+        }
+
+        .changed {
+            color: var(--warn);
+            font-weight: 600;
+        }
+
+        .trip-toggle {
+            font: inherit;
+            color: inherit;
+            background: none;
+            border: 0;
+            padding: 0;
+            cursor: pointer;
+            text-decoration: underline dotted;
+            font-weight: 600;
+        }
+
+        .mismatch {
+            color: var(--late);
+            font-weight: 700;
+        }
+
+        .stops tr.mismatch td {
+            color: var(--late);
+            font-weight: 600;
+        }
+
+        .stops td {
+            background: rgba(127, 127, 127, 0.08);
+            padding: 6px 12px 10px 36px;
+        }
+
+        .stops table {
+            width: auto;
+            font-size: 0.9em;
+        }
+
+        .stops th,
+        .stops td {
+            padding: 2px 10px;
+        }
+
+        .stops tr.part-a td {
+            background: rgba(30, 100, 160, 0.16);
+        }
+
+        .stops tr.part-b td {
+            background: rgba(179, 84, 30, 0.18);
+        }
+
+        .stops tr.branch td {
+            font-size: 0.85em;
+            color: var(--muted);
+            padding-top: 6px;
+        }
+
+        .stops tr.next td {
+            font-weight: 700;
+        }
+
+        .empty {
+            padding: 24px;
+            color: var(--muted);
+            text-align: center;
+        }
+
+        @media (max-width: 600px) {
+            th,
+            td {
+                padding: 5px 6px;
+            }
+
+            .toolbar select {
+                min-width: 0;
+                width: 100%;
+            }
+
+            .toolbar label {
+                flex: 1 1 44%;
+            }
+        }
+    </style>
+</head>
+
+<body>
+    <header>
+        <h1>Fahrten aus Abfahrten: Plan gegen Live</h1>
+        <div class="meta" id="meta">Lade ...</div>
+        <div class="toolbar">
+            <label>Verkehrsträger
+                <select id="mode"></select>
+            </label>
+            <label>Linie
+                <select id="line"></select>
+            </label>
+            <label>Rückblick
+                <select id="past">
+                    <option value="10" selected>10 Minuten</option>
+                    <option value="60">1 Stunde</option>
+                    <option value="180">3 Stunden</option>
+                    <option value="1440">Ganzer Tag</option>
+                </select>
+            </label>
+            <label>Zeitraum
+                <select id="range">
+                    <option value="60">1 Stunde</option>
+                    <option value="120" selected>2 Stunden</option>
+                    <option value="360">6 Stunden</option>
+                    <option value="1440">Ganzer Tag</option>
+                </select>
+            </label>
+        </div>
+    </header>
+    <main>
+        <div class="count-line" id="count-line"></div>
+        <div class="count-line">Rot: ein angekündigtes Ziel oder ein Anker kommt im departureCourse nicht vor. Vorgemerkt: die Karte
+            soll in diesem Fall das Ziel aus dem Kurs verwenden.</div>
+        <div class="table-wrap">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Start</th>
+                        <th>Ziel</th>
+                        <th>Ziel laut Kurs</th>
+                        <th>Plan-ServiceId</th>
+                        <th>Live</th>
+                        <th>Verspätung</th>
+                        <th>Live-ServiceId</th>
+                        <th>Fahrzeuge</th>
+                    </tr>
+                </thead>
+                <tbody id="rows"></tbody>
+            </table>
+        </div>
+    </main>
+
+    <script src="departure_pairing.js"></script>
+    <script>
+        const URL_PLAN = '/api/hvv/live/departures-by-station.json';
+        const URL_LIVE = '/api/hvv/live/departures-live.json';
+        const URL_COURSES = '/api/hvv/live/courses.json';
+        const LIVE_REFRESH_MS = 30000;
+        const MODE_LABELS = {
+            U: 'U-Bahn', S: 'S-Bahn', AKN: 'AKN', R: 'Regionalzüge',
+            FERRY: 'Fähren', OTHER: 'Sonstige',
+        };
+
+        let plan = null;
+        let live = null;
+        const open = new Set();   // keys of expanded trips
+        let courses = {};         // live serviceId -> known departureCourse
+        let coursesRequested = '';
+        const sel = {
+            mode: document.getElementById('mode'),
+            line: document.getElementById('line'),
+            past: document.getElementById('past'),
+            range: document.getElementById('range'),
+        };
+
+        // "YYYY-MM-DD HH:MM" -> minutes on a common (zone-less) scale
+        function anchorMinutes(text) {
+            const m = /^(\d{4})-(\d\d)-(\d\d) (\d\d):(\d\d)$/.exec(text || '');
+            return m ? Date.UTC(+m[1], m[2] - 1, +m[3], +m[4], +m[5]) / 60000 : null;
+        }
+
+        function berlinNowMinutes() {
+            const parts = Object.fromEntries(
+                new Intl.DateTimeFormat('en-GB', {
+                    timeZone: 'Europe/Berlin', hourCycle: 'h23',
+                    year: 'numeric', month: '2-digit', day: '2-digit',
+                    hour: '2-digit', minute: '2-digit',
+                }).formatToParts(new Date()).map(p => [p.type, p.value]));
+            return Date.UTC(+parts.year, parts.month - 1, +parts.day,
+                +parts.hour, +parts.minute) / 60000;
+        }
+
+        function clock(minutes) {
+            const d = new Date(minutes * 60000);
+            return String(d.getUTCHours()).padStart(2, '0') + ':' +
+                String(d.getUTCMinutes()).padStart(2, '0');
+        }
+
+        function el(tag, className, text) {
+            const node = document.createElement(tag);
+            if (className) node.className = className;
+            if (text !== undefined && text !== null) node.textContent = text;
+            return node;
+        }
+
+        function fill(select, items) {
+            const previous = select.value;
+            select.replaceChildren(...items.map(([value, label]) => {
+                const option = el('option', null, label);
+                option.value = value;
+                return option;
+            }));
+            if (items.some(([value]) => value === previous)) select.value = previous;
+        }
+
+        function fillModes() {
+            fill(sel.mode, (plan?.modes || []).map(m => [m.mode, MODE_LABELS[m.mode] || m.mode]));
+            fillLines();
+        }
+
+        function lineNode(tree) {
+            return (tree?.modes || []).find(m => m.mode === sel.mode.value)
+                ?.lines.find(l => l.id === sel.line.value) || null;
+        }
+
+        function fillLines() {
+            const mode = (plan?.modes || []).find(m => m.mode === sel.mode.value);
+            fill(sel.line, (mode?.lines || []).map(l => [l.id, l.name]));
+            render();
+        }
+
+        // Pair plan and live departures station by station with the shared
+        // rules and chain the plan departures of one serviceId to a trip.
+        // Live departures without a plan departure form live-only trips.
+        function buildTrips() {
+            const planLine = lineNode(plan);
+            const liveLine = lineNode(live);
+            const planAnchor = anchorMinutes(plan?.anchor);
+            const liveAnchor = anchorMinutes(live?.anchor) ?? planAnchor;
+            const liveStations = new Map((liveLine?.stations || []).map(s => [s.id, s]));
+            const trips = new Map();
+            const liveOnly = new Map();
+            const lineName = planLine?.name;
+            for (const station of planLine?.stations || []) {
+                const planDeps = station.departures
+                    .map(d => ({ ...d, at: planAnchor + d.offset }));
+                const liveDeps = (liveStations.get(station.id)?.departures || [])
+                    .map(d => ({ ...d, at: liveAnchor + d.offset }));
+                const stopOf = new Map();
+                for (const row of pair(planDeps, liveDeps, lineName)) {
+                    if (row.plan) {
+                        let stop = stopOf.get(row.plan);
+                        if (!stop) {
+                            stop = { station: station.name, stationId: station.id, at: row.plan.at, plan: row.plan, lives: [] };
+                            stopOf.set(row.plan, stop);
+                            if (!trips.has(row.plan.service_id)) {
+                                trips.set(row.plan.service_id, { id: row.plan.service_id, stops: [] });
+                            }
+                            trips.get(row.plan.service_id).stops.push(stop);
+                        }
+                        if (row.live) stop.lives.push(row.live);
+                    } else if (row.live) {
+                        const id = row.live.service_id;
+                        if (!liveOnly.has(id)) liveOnly.set(id, { id, liveOnly: true, stops: [] });
+                        liveOnly.get(id).stops.push(
+                            { station: station.name, stationId: station.id, at: row.live.at, plan: null, lives: [row.live] });
+                    }
+                }
+            }
+            const all = [...trips.values(), ...liveOnly.values()].flatMap(splitRuns);
+            return { trips: all, lineName };
+        }
+
+        // A serviceId repeats every day: stops further apart than this belong
+        // to different runs of the same id (e.g. the tail after midnight).
+        const RUN_GAP_MIN = 180;
+
+        function splitRuns(trip) {
+            const stops = [...trip.stops].sort((a, b) => a.at - b.at);
+            const runs = [];
+            for (const stop of stops) {
+                const run = runs[runs.length - 1];
+                if (run && stop.at - run[run.length - 1].at <= RUN_GAP_MIN) run.push(stop);
+                else runs.push([stop]);
+            }
+            return runs.map(run => ({ ...trip, stops: run, key: trip.id + '@' + run[0].at }));
+        }
+
+        // A coupled (wing) train: the live data lists two parts at one stop
+        // or a combined destination.
+        function isWing(trip) {
+            return trip.stops.some(s => s.lives.length > 1 ||
+                s.lives.some(l => (l.direction || '').includes(' / ')));
+        }
+
+        function destination(trip) {
+            const last = trip.stops[trip.stops.length - 1];
+            return last.plan ? last.plan.direction : last.lives[0].direction;
+        }
+
+        function delayText(seconds) {
+            if (seconds === null || seconds === undefined) return null;
+            const minutes = Math.round(seconds / 60);
+            const kind = minutes > 0 ? 'late' : minutes < 0 ? 'early' : 'on-time';
+            return el('span', 'delay ' + kind,
+                minutes === 0 ? 'pünktlich' : (minutes > 0 ? '+' : '') + minutes + ' min');
+        }
+
+        const unique = values => [...new Set(values.filter(Boolean))].join(' / ');
+
+        // One planned time per stop: the live planned time, with the plan time
+        // in parentheses where they differ.
+        function plannedCell(stop) {
+            const cell = el('td', 'time', clock(stop.lives[0]?.at ?? stop.at));
+            if (stop.plan && stop.lives.length && stop.lives[0].at !== stop.at) {
+                cell.append(' ', el('span', 'muted', '(' + clock(stop.at) + ')'));
+            }
+            return cell;
+        }
+
+        const courseTime = stop => ((stop.dep || stop.arr) || '').slice(11, 16);
+        const courseDelay = stop => stop.dep_delay ?? stop.arr_delay;
+        const sameCourseStop = (a, b) => a.id === b.id && (a.dep || a.arr) === (b.dep || b.arr);
+
+        // The known courses of a trip's live ids. Two courses of a wing train
+        // share a head and/or a tail; what lies between is one branch each.
+        function courseParts(trip) {
+            const ids = [...new Set(trip.stops.flatMap(s => s.lives.map(l => String(l.service_id))))]
+                .filter(id => courses[id]);
+            if (!ids.length) return null;
+            const [a, b] = ids.map(id => courses[id].stops);
+            if (!b) return { head: a, branches: [], tail: [], ids };
+            const limit = Math.min(a.length, b.length);
+            let head = 0;
+            while (head < limit && sameCourseStop(a[head], b[head])) head++;
+            let tail = 0;
+            while (tail < limit - head && sameCourseStop(a[a.length - 1 - tail], b[b.length - 1 - tail])) tail++;
+            const cut = (list, id) => ({ id, stops: list.slice(head, list.length - tail) });
+            const branches = [cut(a, ids[0]), cut(b, ids[1])].filter(x => x.stops.length);
+            return {
+                head: a.slice(0, head), branches, tail: a.slice(a.length - tail), ids,
+            };
+        }
+
+        function courseRow(stop, anchors, ids, className) {
+            const anchor = anchors.get(stop.id);
+            const lives = (anchor?.lives || []).filter(l => !ids || ids.includes(String(l.service_id)));
+            const tr = el('tr', className);
+            tr.append(el('td', anchor ? 'time' : '', (anchor ? '● ' : '') + (stop.name || '')));
+            if (anchor && anchor.lives.length) {
+                tr.append(plannedCell(anchor));
+            } else {
+                tr.append(el('td', anchor ? 'time' : '', courseTime(stop)));
+            }
+            const delay = el('td');
+            const text = delayText(lives[0]?.delay ?? courseDelay(stop));
+            if (text) delay.append(text);
+            tr.append(delay);
+            tr.append(el('td', null, anchor ? (anchor.plan ? anchor.plan.platform || ''
+                : unique(lives.map(l => l.planned_platform ?? l.platform))) : ''),
+                el('td', null, unique(lives.map(l => l.realtime_platform)) || stop.platform || ''),
+                el('td', null, lives.map(l => l.direction).join(' / ')),
+                el('td', 'muted', lives.map(l => l.service_id).join(' / ')),
+                el('td', null, unique(lives.map(l => l.vehicle_numbers))));
+            return tr;
+        }
+
+        const STOP_TITLES = ['Halt', 'Geplant', 'Verspätung', 'Gleis geplant',
+            'Gleis Echtzeit', 'Live-Ziel', 'Live-ServiceId', 'Fahrzeuge'];
+
+        // Course stops of a trip; anchor stops (from the departures) are
+        // marked and carry the departure data.
+        function courseTable(trip, parts) {
+            const table = el('table');
+            const head = el('tr');
+            for (const title of STOP_TITLES) head.append(el('th', null, title));
+            table.append(head);
+            const anchors = new Map(trip.stops.map(s => [s.stationId, s]));
+            for (const stop of parts.head) table.append(courseRow(stop, anchors, null, ''));
+            parts.branches.forEach((branch, index) => {
+                const className = index ? 'part-b' : 'part-a';
+                const label = el('tr', 'branch ' + className);
+                const td = el('td', null, '→ ' + branch.stops[branch.stops.length - 1].name +
+                    ' (Live-ServiceId ' + branch.id + ')');
+                td.colSpan = STOP_TITLES.length;
+                label.append(td);
+                table.append(label);
+                for (const stop of branch.stops) table.append(courseRow(stop, anchors, [branch.id], className));
+            });
+            for (const stop of parts.tail) table.append(courseRow(stop, anchors, null, ''));
+            // anchor stops the course does not contain
+            const inCourse = new Set([...parts.head, ...parts.tail,
+                ...parts.branches.flatMap(b => b.stops)].map(stop => stop.id));
+            const extra = trip.stops.filter(stop => !inCourse.has(stop.stationId));
+            if (extra.length) {
+                const label = el('tr', 'branch mismatch');
+                const td = el('td', null, 'Anker, die der Kurs nicht enthält');
+                td.colSpan = STOP_TITLES.length;
+                label.append(td);
+                table.append(label);
+                for (const stop of extra) {
+                    table.append(courseRow({ id: stop.stationId, name: stop.station, platform: null },
+                        anchors, null, 'mismatch'));
+                }
+            }
+            return table;
+        }
+
+        function stopTable(trip, now) {
+            const parts = courseParts(trip);
+            if (parts) return courseTable(trip, parts);
+            const table = el('table');
+            const head = el('tr');
+            for (const title of STOP_TITLES) head.append(el('th', null, title));
+            table.append(head);
+            const next = trip.stops.find(s => s.at >= now);
+            for (const stop of trip.stops) {
+                const tr = el('tr', stop === next ? 'next' : '');
+                const lives = stop.lives;
+                tr.append(el('td', null, stop.station), plannedCell(stop));
+                const delay = el('td');
+                const first = lives[0] ? delayText(lives[0].delay) : null;
+                if (first) delay.append(first);
+                tr.append(delay);
+                tr.append(el('td', null, stop.plan ? stop.plan.platform || ''
+                    : unique(lives.map(l => l.planned_platform ?? l.platform))),
+                    el('td', null, unique(lives.map(l => l.realtime_platform))),
+                    el('td', null, lives.map(l => l.direction).join(' / ')),
+                    el('td', 'muted', lives.map(l => l.service_id).join(' / ')),
+                    el('td', null, unique(lives.map(l => l.vehicle_numbers))));
+                table.append(tr);
+            }
+            return table;
+        }
+
+        async function fetchCourses(ids) {
+            if (!ids.length) return;
+            try {
+                const found = {};
+                for (let i = 0; i < ids.length; i += 60) {
+                    const response = await fetch(URL_COURSES + '?' + new URLSearchParams(
+                        { service_ids: ids.slice(i, i + 60).join(',') }));
+                    if (!response.ok) return;
+                    Object.assign(found, (await response.json()).courses);
+                }
+                if (JSON.stringify(found) !== JSON.stringify(courses)) {
+                    courses = found;
+                    render();
+                }
+            } catch (error) {
+                // courses are optional
+            }
+        }
+
+        // Anchor stops of a trip that none of its known courses contains.
+        function anchorsOutsideCourse(trip, group) {
+            const ids = [...new Set(group.lives.map(l => String(l.service_id)))].filter(id => courses[id]);
+            if (!ids.length) return [];
+            const inCourse = new Set(ids.flatMap(id => courses[id].stops.map(stop => stop.id)));
+            return trip.stops.filter(stop => !inCourse.has(stop.stationId));
+        }
+
+        // End stops of the known courses of a trip and the announced
+        // destinations that do not occur in any of them.
+        function courseDestinations(group) {
+            const ids = [...new Set(group.lives.map(l => String(l.service_id)))].filter(id => courses[id]);
+            if (!ids.length) return null;
+            const names = new Set(ids.flatMap(id => courses[id].stops.map(stop => stop.name)));
+            const ends = [...new Set(ids.map(id => {
+                const stops = courses[id].stops;
+                return stops[stops.length - 1].name;
+            }))];
+            const announced = new Set(group.lives.flatMap(l => (l.direction || '').split(' / ')));
+            return { ends, missing: [...announced].filter(name => !names.has(name)) };
+        }
+
+        function render() {
+            const body = document.getElementById('rows');
+            body.replaceChildren();
+            const planAnchor = anchorMinutes(plan?.anchor);
+            if (!lineNode(plan) || planAnchor === null) {
+                document.getElementById('count-line').textContent = '';
+                return;
+            }
+            const now = berlinNowMinutes();
+            const from = now - Number(sel.past.value);
+            const to = now + Number(sel.range.value);
+            const { trips, lineName } = buildTrips();
+            const groups = trips.map(trip => {
+                const lives = trip.stops.flatMap(s => s.lives);
+                return { trip, key: trip.key, lives, start: trip.stops[0].at };
+            }).filter(g => g.trip.stops.some(s => s.at >= from && s.at <= to))
+                .sort((a, b) => a.start - b.start);
+
+            for (const group of groups) {
+                const { trip } = group;
+                const first = trip.stops[0];
+                const liveIds = [...new Set(group.lives.map(l => String(l.service_id)))];
+                const tr = el('tr', group.start < now - 5 ? 'past' : '');
+                const start = el('td', 'time', clock(group.start) + ' ');
+                const toggle = el('button', 'trip-toggle', (open.has(group.key) ? '▾ ' : '▸ ') + first.station);
+                toggle.type = 'button';
+                toggle.addEventListener('click', () => {
+                    if (open.has(group.key)) open.delete(group.key); else open.add(group.key);
+                    render();
+                });
+                start.append(toggle);
+                if (isWing(trip)) start.append(' ', el('span', 'tag', 'Flügelzug'));
+                if (trip.liveOnly) start.append(' ', el('span', 'tag', 'nur live'));
+                tr.append(start);
+                const destinations = courseDestinations(group);
+                const liveDestinations = [...new Set(group.lives.map(l => l.direction))]
+                    .filter(d => d !== destination(trip));
+                tr.append(el('td', null, destination(trip) +
+                    (isWing(trip) && liveDestinations.length
+                        ? ' (live: ' + liveDestinations.join(' | ') + ')' : '')));
+                const courseCell = el('td', destinations?.missing.length ? 'mismatch' : '',
+                    destinations ? destinations.ends.join(' / ') : '');
+                if (destinations?.missing.length) {
+                    courseCell.title = 'Angekündigt, aber nicht im Kurs: ' + destinations.missing.join(', ');
+                    courseCell.append(' ', el('span', 'tag', 'Karte: Kurs-Ziel'));
+                }
+                const outside = anchorsOutsideCourse(trip, group);
+                if (outside.length) {
+                    const tag = el('span', 'tag', 'Anker nicht im Kurs');
+                    tag.title = outside.map(stop => stop.station).join(', ');
+                    courseCell.append(' ', tag);
+                }
+                tr.append(courseCell);
+                tr.append(el('td', 'muted', trip.liveOnly ? '' : trip.id));
+                const matchedStops = trip.stops.filter(s => s.plan && s.lives.length).length;
+                const planStops = trip.stops.filter(s => s.plan).length;
+                tr.append(el('td', matchedStops ? '' : 'muted',
+                    planStops ? matchedStops + ' / ' + planStops + ' Halte' : liveIds.length ? 'nur live' : ''));
+                const delay = el('td');
+                const upcoming = trip.stops.filter(s => s.lives.length && s.lives[0].delay != null)
+                    .sort((a, b) => a.at - b.at);
+                const shown = upcoming.find(s => s.at >= now - 1) ?? upcoming[upcoming.length - 1];
+                const text = shown ? delayText(shown.lives[0].delay) : null;
+                if (text) delay.append(text, ' ', el('span', 'muted', shown.station));
+                tr.append(delay);
+                tr.append(el('td', 'muted', liveIds.join(' / ')));
+                tr.append(el('td', null, unique(group.lives.map(l => l.vehicle_numbers))));
+                body.append(tr);
+                if (open.has(group.key)) {
+                    const detail = el('tr', 'stops');
+                    const td = el('td');
+                    td.colSpan = 8;
+                    td.append(stopTable(trip, now));
+                    detail.append(td);
+                    body.append(detail);
+                }
+            }
+            if (!groups.length) {
+                const tr = el('tr');
+                const td = el('td', 'empty', 'Keine Fahrten im gewählten Zeitraum.');
+                td.colSpan = 8;
+                tr.append(td);
+                body.append(tr);
+            }
+            const ids = [...new Set(groups.flatMap(g => g.lives.map(l => String(l.service_id))))].sort();
+            if (ids.join(',') !== coursesRequested) {
+                coursesRequested = ids.join(',');
+                fetchCourses(ids);
+            }
+            const liveCount = groups.filter(g => g.lives.length).length;
+            document.getElementById('count-line').textContent =
+                `${groups.length} Fahrten, davon ${liveCount} mit Live-Daten`;
+        }
+
+        function renderMeta() {
+            const parts = [];
+            const time = t => new Date(t * 1000).toLocaleTimeString('de-DE', { timeZone: 'Europe/Berlin' });
+            if (plan) parts.push('Plan: Stand ' + time(plan.fetched_at));
+            if (live) parts.push('Live: Stand ' + time(live.fetched_at));
+            document.getElementById('meta').textContent = parts.join(' · ');
+        }
+
+        async function load(url) {
+            const response = await fetch(url);
+            if (!response.ok) throw new Error(url + ': ' + response.status);
+            return response.json();
+        }
+
+        async function refreshLive() {
+            try {
+                live = await load(URL_LIVE);
+                coursesRequested = '';
+                renderMeta();
+                render();
+            } catch (error) {
+                document.getElementById('meta').textContent = String(error);
+            }
+        }
+
+        async function start() {
+            try {
+                [plan, live] = await Promise.all([load(URL_PLAN), load(URL_LIVE)]);
+            } catch (error) {
+                document.getElementById('meta').textContent = String(error);
+                return;
+            }
+            renderMeta();
+            const saved = new URLSearchParams(location.search);
+            fillModes();
+            if (saved.get('mode')) { sel.mode.value = saved.get('mode'); fillLines(); }
+            if (saved.get('line')) { sel.line.value = saved.get('line'); render(); }
+            setInterval(refreshLive, LIVE_REFRESH_MS);
+            setInterval(render, 60000);
+        }
+
+        function remember() {
+            history.replaceState(null, '', '?' + new URLSearchParams({
+                mode: sel.mode.value, line: sel.line.value,
+            }));
+        }
+
+        sel.mode.addEventListener('change', () => { fillLines(); remember(); });
+        sel.line.addEventListener('change', () => { render(); remember(); });
+        sel.past.addEventListener('change', render);
+        sel.range.addEventListener('change', render);
+        start();
+    </script>
+</body>
+
+</html>
