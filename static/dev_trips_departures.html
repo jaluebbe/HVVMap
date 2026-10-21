@@ -189,6 +189,11 @@
             font-weight: 600;
         }
 
+        .mismatch {
+            color: var(--late);
+            font-weight: 700;
+        }
+
         .stops td {
             background: rgba(127, 127, 127, 0.08);
             padding: 6px 12px 10px 36px;
@@ -277,12 +282,15 @@
     </header>
     <main>
         <div class="count-line" id="count-line"></div>
+        <div class="count-line">Rot: ein angekündigtes Ziel kommt im departureCourse nicht vor. Vorgemerkt: die Karte
+            soll in diesem Fall das Ziel aus dem Kurs verwenden.</div>
         <div class="table-wrap">
             <table>
                 <thead>
                     <tr>
                         <th>Start</th>
                         <th>Ziel</th>
+                        <th>Ziel laut Kurs</th>
                         <th>Plan-ServiceId</th>
                         <th>Live</th>
                         <th>Verspätung</th>
@@ -566,16 +574,34 @@
         async function fetchCourses(ids) {
             if (!ids.length) return;
             try {
-                const response = await fetch(URL_COURSES + '?' + new URLSearchParams({ service_ids: ids.join(',') }));
-                if (!response.ok) return;
-                const data = (await response.json()).courses;
-                if (JSON.stringify(data) !== JSON.stringify(courses)) {
-                    courses = data;
+                const found = {};
+                for (let i = 0; i < ids.length; i += 60) {
+                    const response = await fetch(URL_COURSES + '?' + new URLSearchParams(
+                        { service_ids: ids.slice(i, i + 60).join(',') }));
+                    if (!response.ok) return;
+                    Object.assign(found, (await response.json()).courses);
+                }
+                if (JSON.stringify(found) !== JSON.stringify(courses)) {
+                    courses = found;
                     render();
                 }
             } catch (error) {
                 // courses are optional
             }
+        }
+
+        // End stops of the known courses of a trip and the announced
+        // destinations that do not occur in any of them.
+        function courseDestinations(group) {
+            const ids = [...new Set(group.lives.map(l => String(l.service_id)))].filter(id => courses[id]);
+            if (!ids.length) return null;
+            const names = new Set(ids.flatMap(id => courses[id].stops.map(stop => stop.name)));
+            const ends = [...new Set(ids.map(id => {
+                const stops = courses[id].stops;
+                return stops[stops.length - 1].name;
+            }))];
+            const announced = new Set(group.lives.flatMap(l => (l.direction || '').split(' / ')));
+            return { ends, missing: [...announced].filter(name => !names.has(name)) };
         }
 
         function render() {
@@ -612,11 +638,19 @@
                 if (isWing(trip)) start.append(' ', el('span', 'tag', 'Flügelzug'));
                 if (trip.liveOnly) start.append(' ', el('span', 'tag', 'nur live'));
                 tr.append(start);
+                const destinations = courseDestinations(group);
                 const liveDestinations = [...new Set(group.lives.map(l => l.direction))]
                     .filter(d => d !== destination(trip));
                 tr.append(el('td', null, destination(trip) +
                     (isWing(trip) && liveDestinations.length
                         ? ' (live: ' + liveDestinations.join(' | ') + ')' : '')));
+                const courseCell = el('td', destinations?.missing.length ? 'mismatch' : '',
+                    destinations ? destinations.ends.join(' / ') : '');
+                if (destinations?.missing.length) {
+                    courseCell.title = 'Angekündigt, aber nicht im Kurs: ' + destinations.missing.join(', ');
+                    courseCell.append(' ', el('span', 'tag', 'Karte: Kurs-Ziel'));
+                }
+                tr.append(courseCell);
                 tr.append(el('td', 'muted', trip.liveOnly ? '' : trip.id));
                 const matchedStops = trip.stops.filter(s => s.plan && s.lives.length).length;
                 const planStops = trip.stops.filter(s => s.plan).length;
@@ -635,7 +669,7 @@
                 if (open.has(group.key)) {
                     const detail = el('tr', 'stops');
                     const td = el('td');
-                    td.colSpan = 7;
+                    td.colSpan = 8;
                     td.append(stopTable(trip, now));
                     detail.append(td);
                     body.append(detail);
@@ -644,12 +678,11 @@
             if (!groups.length) {
                 const tr = el('tr');
                 const td = el('td', 'empty', 'Keine Fahrten im gewählten Zeitraum.');
-                td.colSpan = 7;
+                td.colSpan = 8;
                 tr.append(td);
                 body.append(tr);
             }
-            const ids = [...new Set(groups.filter(g => open.has(g.key))
-                .flatMap(g => g.lives.map(l => String(l.service_id))))].sort();
+            const ids = [...new Set(groups.flatMap(g => g.lives.map(l => String(l.service_id))))].sort();
             if (ids.join(',') !== coursesRequested) {
                 coursesRequested = ids.join(',');
                 fetchCourses(ids);
