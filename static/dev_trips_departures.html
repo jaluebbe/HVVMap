@@ -541,6 +541,21 @@
                 for (const stop of branch.stops) table.append(courseRow(stop, anchors, [branch.id], className));
             });
             for (const stop of parts.tail) table.append(courseRow(stop, anchors, null, ''));
+            // anchor departures at stops the course does not contain
+            const inCourse = new Set([...parts.head, ...parts.tail,
+                ...parts.branches.flatMap(b => b.stops)].map(stop => stop.id));
+            const extra = trip.stops.filter(stop => !inCourse.has(stop.stationId) && stop.lives.length);
+            if (extra.length) {
+                const label = el('tr', 'branch');
+                const td = el('td', 'mismatch', 'Abfahrten an Halten, die der Kurs nicht enthält');
+                td.colSpan = STOP_TITLES.length;
+                label.append(td);
+                table.append(label);
+                for (const stop of extra) {
+                    const row = courseRow({ id: stop.stationId, name: stop.station, platform: null }, anchors, null, '');
+                    table.append(row);
+                }
+            }
             return table;
         }
 
