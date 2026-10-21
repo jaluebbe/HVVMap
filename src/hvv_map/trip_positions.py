@@ -21,6 +21,7 @@ from hvv_map.stations import StationInfo, by_id, load_stations
 from hvv_map.trip_courses import REDIS_COURSES_KEY
 from hvv_map.trip_position import AT_STOP, BETWEEN, Position, locate, stops_from_row
 from hvv_map.trips import (
+    COMBINED_DESTINATION,
     REDIS_VEHICLES_KEY,
     STATUS_CANCELLED,
     STATUS_MISSING,
@@ -150,11 +151,17 @@ def _is_shared(alias: dict, position: Position) -> bool:
 def _label_destination(row: dict, now: datetime, ferry: bool) -> str:
     """While a coupled train runs as one, a wing part's announced destination
     that contains the trip's own wins (e.g. "Poppenbüttel / Hamburg Airport"
-    over "Hamburg Airport")."""
+    over "Hamburg Airport") if the courses reach all of its destinations."""
     own = row["destination"] or ""
     for alias in row["alias_courses"]:
         announced = alias.get("destination_announced") or ""
         if not own or own not in announced or announced == own:
+            continue
+        # every announced destination must lie on one of the two courses
+        names = {s["station"] for s in row["stops"]} | {
+            s["name"] for s in alias["stops"]
+        }
+        if not all(part in names for part in announced.split(COMBINED_DESTINATION)):
             continue
         position = locate(_alias_stops(alias), now, ferry)
         if (
