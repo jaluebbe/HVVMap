@@ -423,11 +423,23 @@
                 minutes === 0 ? 'pünktlich' : (minutes > 0 ? '+' : '') + minutes + ' min');
         }
 
+        const unique = values => [...new Set(values.filter(Boolean))].join(' / ');
+
+        // One planned time per stop: the live planned time, with the plan time
+        // in parentheses where they differ.
+        function plannedCell(stop) {
+            const cell = el('td', 'time', clock(stop.lives[0]?.at ?? stop.at));
+            if (stop.plan && stop.lives.length && stop.lives[0].at !== stop.at) {
+                cell.append(' ', el('span', 'muted', '(' + clock(stop.at) + ')'));
+            }
+            return cell;
+        }
+
         function stopTable(trip, now) {
             const table = el('table');
             const head = el('tr');
-            for (const title of ['Halt', 'Plan', 'Live geplant', 'Verspätung', 'Gleis geplant',
-                'Gleis Echtzeit', 'Live-Ziel', 'Live-ServiceId']) {
+            for (const title of ['Halt', 'Geplant', 'Verspätung', 'Gleis geplant',
+                'Gleis Echtzeit', 'Live-Ziel', 'Live-ServiceId', 'Fahrzeuge']) {
                 head.append(el('th', null, title));
             }
             table.append(head);
@@ -435,18 +447,17 @@
             for (const stop of trip.stops) {
                 const tr = el('tr', stop === next ? 'next' : '');
                 const lives = stop.lives;
-                const livePlanned = lives.length ? lives[0].at : null;
-                tr.append(el('td', null, stop.station),
-                    el('td', null, stop.plan ? clock(stop.at) : ''),
-                    el('td', 'muted', livePlanned !== null && livePlanned !== stop.at ? clock(livePlanned) : ''));
+                tr.append(el('td', null, stop.station), plannedCell(stop));
                 const delay = el('td');
                 const first = lives[0] ? delayText(lives[0].delay) : null;
                 if (first) delay.append(first);
                 tr.append(delay);
-                tr.append(el('td', null, stop.plan ? stop.plan.platform || '' : (lives[0]?.planned_platform ?? lives[0]?.platform ?? '')),
-                    el('td', null, lives.map(l => l.realtime_platform || '').filter(Boolean).join(' / ')),
+                tr.append(el('td', null, stop.plan ? stop.plan.platform || ''
+                    : unique(lives.map(l => l.planned_platform ?? l.platform))),
+                    el('td', null, unique(lives.map(l => l.realtime_platform))),
                     el('td', null, lives.map(l => l.direction).join(' / ')),
-                    el('td', 'muted', lives.map(l => l.service_id).join(' / ')));
+                    el('td', 'muted', lives.map(l => l.service_id).join(' / ')),
+                    el('td', null, unique(lives.map(l => l.vehicle_numbers))));
                 table.append(tr);
             }
             return table;
