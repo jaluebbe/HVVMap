@@ -420,8 +420,7 @@
                 tr.append(el('td', null, p ? p.platform || '' : ''));
                 const liveTime = el('td', 'time live-start');
                 if (l) {
-                    const shown = l.at + Math.round((l.delay || 0) / 60);
-                    liveTime.textContent = clock(shown);
+                    liveTime.textContent = clock(l.at);
                     if (!p) liveTime.append(' ', el('span', 'tag', 'nur live'));
                 } else if (p && windowEnd !== null && p.at > windowEnd) {
                     liveTime.className = 'muted live-start';
