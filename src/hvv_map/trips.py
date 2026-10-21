@@ -842,12 +842,25 @@ def build_trip_table(
             if not entry["extra"] and str(entry["service_id"]) in by_service:
                 live_only.append({**_public(entry), "reason": "Plan-ID ohne Paarung"})
 
-    # Live departures without a plan partner become trips of their own.
+    # Live departures without a plan partner become trips of their own,
+    # unless their serviceId now belongs to a plan trip (also as wing part).
+    paired = {
+        str(service_id)
+        for trip in trips
+        for stop in trip["stops"]
+        if stop["match"]
+        for service_id in [stop["match"]["service_id"]]
+        + [a["service_id"] for a in stop["match"]["aliases"]]
+    }
+    for key, entry in memory.items():
+        if key.startswith(LIVE_IDS_PREFIX):
+            paired |= set(entry["ids"]) | {a["service_id"] for a in entry["aliases"]}
     live_trips = _merge_live_trips(live_found, memory)
     live_trips = [
         t
         for t in live_trips
-        if trip_end(t, _trip_course(t, [t["service_id"]], courses)[1])
+        if t["service_id"] not in paired
+        and trip_end(t, _trip_course(t, [t["service_id"]], courses)[1])
         + timedelta(minutes=LIVE_TRIP_KEEP_MINUTES)
         >= live_anchor
     ]

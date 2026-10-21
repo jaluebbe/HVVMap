@@ -899,3 +899,33 @@ def test_anchor_outside_the_course_is_left_out_and_reported():
     assert [s["station_id"] for s in row["stops"]] == ["A", "X"]
     assert row["anchors_outside_course"] == ["B"]
     assert row["destination"] == "Ziel"  # course destination only on the S1
+
+
+def test_live_trip_of_a_wing_part_paired_later_is_dropped():
+    from hvv_map.trips import remember_live_trips
+
+    plan = _s1_plan()
+    plan["1"]["stops"].append(
+        dict(plan["1"]["stops"][0], timeOffset=310, station={"id": "B", "name": "B"})
+    )
+    first = {
+        "anchor": LIVE_ANCHOR,
+        "departures": [
+            _s1_live(2, 7397, "Hamburg Airport (Flughafen)"),
+            _s1_live(2, 2046, "Poppenbüttel / Hamburg Airport (Flughafen)", "Gleis 2"),
+        ],
+    }
+    memory: dict = {}
+    remember_live_trips(memory, build_trip_table(plan, PLAN_ANCHOR, first), 1.0)
+    assert "trip:livetrip:2046@2026-10-17" in memory
+
+    later_deps = [
+        _s1_live(10, 7397, "Hamburg Airport (Flughafen)"),
+        _s1_live(10, 2046, "Poppenbüttel / Hamburg Airport (Flughafen)"),
+    ]
+    for dep in later_deps:
+        dep["station"] = {"id": "B", "name": "B"}
+    later = {"anchor": LIVE_ANCHOR, "departures": later_deps}
+    table = build_trip_table(plan, PLAN_ANCHOR, later, None, memory)
+
+    assert not any(t["live_only"] for t in table["trips"])
