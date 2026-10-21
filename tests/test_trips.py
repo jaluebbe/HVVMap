@@ -898,4 +898,4 @@ def test_anchor_outside_the_course_is_left_out_and_reported():
 
     assert [s["station_id"] for s in row["stops"]] == ["A", "X"]
     assert row["anchors_outside_course"] == ["B"]
-    assert (row["destination_announced"], row["destination"]) == ("Ziel", "x")
+    assert row["destination"] == "Ziel"  # course destination only on the S1

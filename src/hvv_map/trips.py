@@ -416,13 +416,19 @@ def _course_failed(course: dict | None) -> bool:
 
 COMBINED_DESTINATION = " / "  # a coupled train lists both destinations
 COURSE_FIT_MINUTES = 10  # a course belongs to a trip if its times are this close
+# Lines whose announced destination may be missing from the course; elsewhere
+# announcements and course stop names differ in spelling only.
+COURSE_DESTINATION_LINES = {"S1"}
 
 
-def course_destination(announced: str | None, course: dict | None) -> str | None:
-    """The announced destination, or the course's last stop if the course
-    does not contain one of the announced destinations."""
+def course_destination(
+    announced: str | None, course: dict | None, line: str
+) -> str | None:
+    """The announced destination, or on COURSE_DESTINATION_LINES the course's
+    last stop if the course does not contain one of the announced
+    destinations."""
     stops = (course or {}).get("stops")
-    if not stops or not announced:
+    if line not in COURSE_DESTINATION_LINES or not stops or not announced:
         return announced
     names = {stop["name"] for stop in stops}
     if all(part in names for part in announced.split(COMBINED_DESTINATION)):
@@ -476,7 +482,7 @@ def _alias_courses(
         result.append(
             {
                 "service_id": alias["service_id"],
-                "destination": course_destination(alias["destination"], course),
+                "destination": course_destination(alias["destination"], course, trip["line"]),
                 "destination_announced": alias["destination"],
                 "shared_until": shared,
                 "shared_from": joined,
@@ -899,7 +905,7 @@ def build_trip_table(
                 "line_id": (trip["line_obj"] or {}).get("id", ""),
                 "mode": _mode_label(trip["line_obj"]),
                 "direction_id": trip["direction_id"],
-                "destination": course_destination(announced, course),
+                "destination": course_destination(announced, course, trip["line"]),
                 "destination_announced": announced,
                 "status": status,
                 "start_time": trip["stops"][0]["planned"].strftime("%H:%M"),
