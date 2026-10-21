@@ -81,6 +81,8 @@ def test_station_tree_prefers_realtime_platform():
     departures = [_dep("U1", "U", "A", 5, platform="1", realtimePlatform="2")]
     stop = build_station_tree(departures, ANCHOR)["modes"][0]["lines"][0]["stations"][0]
     assert stop["departures"][0]["platform"] == "2"
+    assert stop["departures"][0]["planned_platform"] == "1"
+    assert stop["departures"][0]["realtime_platform"] == "2"
 
 
 def test_station_tree_puts_unmapped_lines_into_other_mode_last():

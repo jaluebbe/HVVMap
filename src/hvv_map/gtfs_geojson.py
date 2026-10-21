@@ -613,6 +613,7 @@ def build_departures_tree(
                         "next_day": offset >= 1440,
                         "direction": direction,
                         "platform": stop.get("platform_code") or None,
+                        "trip_id": trip["trip_id"],
                     }
                 )
     modes = []

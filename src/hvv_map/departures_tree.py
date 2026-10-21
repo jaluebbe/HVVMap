@@ -143,6 +143,8 @@ def build_station_tree(departures: list[dict], anchor: datetime | None) -> dict:
                 "service_id": dep.get("serviceId"),
                 "direction_id": dep.get("directionId"),
                 "platform": dep.get("realtimePlatform") or dep.get("platform"),
+                "planned_platform": dep.get("platform"),
+                "realtime_platform": dep.get("realtimePlatform"),
                 "delay": dep.get("delay"),
                 "vehicles": vehicles_text(dep.get("vehicles"), _is_ubahn(line)),
                 "model": refined_model(line, dep.get("vehicles")),

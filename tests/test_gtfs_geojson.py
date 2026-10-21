@@ -445,6 +445,7 @@ def test_departures_tree_lists_each_stop_but_the_last_with_its_headsign():
             "next_day": False,
             "direction": "Beta",
             "platform": None,
+            "trip_id": "T1",
         }
     ]
 
