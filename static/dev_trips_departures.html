@@ -204,8 +204,18 @@
             padding: 2px 10px;
         }
 
-        .stops tr.part td {
-            background: none;
+        .stops tr.part-a td {
+            background: rgba(30, 100, 160, 0.16);
+        }
+
+        .stops tr.part-b td {
+            background: rgba(179, 84, 30, 0.18);
+        }
+
+        .stops tr.branch td {
+            font-size: 0.85em;
+            color: var(--muted);
+            padding-top: 6px;
         }
 
         .stops tr.next td {
@@ -288,6 +298,7 @@
     <script>
         const URL_PLAN = '/api/hvv/live/departures-by-station.json';
         const URL_LIVE = '/api/hvv/live/departures-live.json';
+        const URL_COURSES = '/api/hvv/live/courses.json';
         const LIVE_REFRESH_MS = 30000;
         const MODE_LABELS = {
             U: 'U-Bahn', S: 'S-Bahn', AKN: 'AKN', R: 'Regionalzüge',
@@ -297,6 +308,8 @@
         let plan = null;
         let live = null;
         const open = new Set();   // keys of expanded trips
+        let courses = {};         // live serviceId -> known departureCourse
+        let coursesRequested = '';
         const sel = {
             mode: document.getElementById('mode'),
             line: document.getElementById('line'),
@@ -382,7 +395,7 @@
                     if (row.plan) {
                         let stop = stopOf.get(row.plan);
                         if (!stop) {
-                            stop = { station: station.name, at: row.plan.at, plan: row.plan, lives: [] };
+                            stop = { station: station.name, stationId: station.id, at: row.plan.at, plan: row.plan, lives: [] };
                             stopOf.set(row.plan, stop);
                             if (!trips.has(row.plan.service_id)) {
                                 trips.set(row.plan.service_id, { id: row.plan.service_id, stops: [] });
@@ -394,7 +407,7 @@
                         const id = row.live.service_id;
                         if (!liveOnly.has(id)) liveOnly.set(id, { id, liveOnly: true, stops: [] });
                         liveOnly.get(id).stops.push(
-                            { station: station.name, at: row.live.at, plan: null, lives: [row.live] });
+                            { station: station.name, stationId: station.id, at: row.live.at, plan: null, lives: [row.live] });
                     }
                 }
             }
@@ -435,13 +448,85 @@
             return cell;
         }
 
-        function stopTable(trip, now) {
+        const courseTime = stop => ((stop.dep || stop.arr) || '').slice(11, 16);
+        const courseDelay = stop => stop.dep_delay ?? stop.arr_delay;
+        const sameCourseStop = (a, b) => a.id === b.id && (a.dep || a.arr) === (b.dep || b.arr);
+
+        // The known courses of a trip's live ids. Two courses of a wing train
+        // share a head and/or a tail; what lies between is one branch each.
+        function courseParts(trip) {
+            const ids = [...new Set(trip.stops.flatMap(s => s.lives.map(l => String(l.service_id))))]
+                .filter(id => courses[id]);
+            if (!ids.length) return null;
+            const [a, b] = ids.map(id => courses[id].stops);
+            if (!b) return { head: a, branches: [], tail: [], ids };
+            const limit = Math.min(a.length, b.length);
+            let head = 0;
+            while (head < limit && sameCourseStop(a[head], b[head])) head++;
+            let tail = 0;
+            while (tail < limit - head && sameCourseStop(a[a.length - 1 - tail], b[b.length - 1 - tail])) tail++;
+            const cut = (list, id) => ({ id, stops: list.slice(head, list.length - tail) });
+            const branches = [cut(a, ids[0]), cut(b, ids[1])].filter(x => x.stops.length);
+            return {
+                head: a.slice(0, head), branches, tail: a.slice(a.length - tail), ids,
+            };
+        }
+
+        function courseRow(stop, anchors, ids, className) {
+            const anchor = anchors.get(stop.id);
+            const lives = (anchor?.lives || []).filter(l => !ids || ids.includes(String(l.service_id)));
+            const tr = el('tr', className);
+            tr.append(el('td', anchor ? 'time' : '', (anchor ? '● ' : '') + (stop.name || '')));
+            if (anchor && anchor.lives.length) {
+                tr.append(plannedCell(anchor));
+            } else {
+                tr.append(el('td', anchor ? 'time' : '', courseTime(stop)));
+            }
+            const delay = el('td');
+            const text = delayText(lives[0]?.delay ?? courseDelay(stop));
+            if (text) delay.append(text);
+            tr.append(delay);
+            tr.append(el('td', null, anchor ? (anchor.plan ? anchor.plan.platform || ''
+                : unique(lives.map(l => l.planned_platform ?? l.platform))) : ''),
+                el('td', null, unique(lives.map(l => l.realtime_platform)) || stop.platform || ''),
+                el('td', null, lives.map(l => l.direction).join(' / ')),
+                el('td', 'muted', lives.map(l => l.service_id).join(' / ')),
+                el('td', null, unique(lives.map(l => l.vehicle_numbers))));
+            return tr;
+        }
+
+        const STOP_TITLES = ['Halt', 'Geplant', 'Verspätung', 'Gleis geplant',
+            'Gleis Echtzeit', 'Live-Ziel', 'Live-ServiceId', 'Fahrzeuge'];
+
+        // Course stops of a trip; anchor stops (from the departures) are
+        // marked and carry the departure data.
+        function courseTable(trip, parts) {
             const table = el('table');
             const head = el('tr');
-            for (const title of ['Halt', 'Geplant', 'Verspätung', 'Gleis geplant',
-                'Gleis Echtzeit', 'Live-Ziel', 'Live-ServiceId', 'Fahrzeuge']) {
-                head.append(el('th', null, title));
-            }
+            for (const title of STOP_TITLES) head.append(el('th', null, title));
+            table.append(head);
+            const anchors = new Map(trip.stops.map(s => [s.stationId, s]));
+            for (const stop of parts.head) table.append(courseRow(stop, anchors, null, ''));
+            parts.branches.forEach((branch, index) => {
+                const className = index ? 'part-b' : 'part-a';
+                const label = el('tr', 'branch ' + className);
+                const td = el('td', null, '→ ' + branch.stops[branch.stops.length - 1].name +
+                    ' (Live-ServiceId ' + branch.id + ')');
+                td.colSpan = STOP_TITLES.length;
+                label.append(td);
+                table.append(label);
+                for (const stop of branch.stops) table.append(courseRow(stop, anchors, [branch.id], className));
+            });
+            for (const stop of parts.tail) table.append(courseRow(stop, anchors, null, ''));
+            return table;
+        }
+
+        function stopTable(trip, now) {
+            const parts = courseParts(trip);
+            if (parts) return courseTable(trip, parts);
+            const table = el('table');
+            const head = el('tr');
+            for (const title of STOP_TITLES) head.append(el('th', null, title));
             table.append(head);
             const next = trip.stops.find(s => s.at >= now);
             for (const stop of trip.stops) {
@@ -461,6 +546,21 @@
                 table.append(tr);
             }
             return table;
+        }
+
+        async function fetchCourses(ids) {
+            if (!ids.length) return;
+            try {
+                const response = await fetch(URL_COURSES + '?' + new URLSearchParams({ service_ids: ids.join(',') }));
+                if (!response.ok) return;
+                const data = (await response.json()).courses;
+                if (JSON.stringify(data) !== JSON.stringify(courses)) {
+                    courses = data;
+                    render();
+                }
+            } catch (error) {
+                // courses are optional
+            }
         }
 
         function render() {
@@ -532,6 +632,12 @@
                 tr.append(td);
                 body.append(tr);
             }
+            const ids = [...new Set(groups.filter(g => open.has(g.key))
+                .flatMap(g => g.lives.map(l => String(l.service_id))))].sort();
+            if (ids.join(',') !== coursesRequested) {
+                coursesRequested = ids.join(',');
+                fetchCourses(ids);
+            }
             const liveCount = groups.filter(g => g.lives.length).length;
             document.getElementById('count-line').textContent =
                 `${groups.length} Fahrten, davon ${liveCount} mit Live-Daten`;
@@ -554,6 +660,7 @@
         async function refreshLive() {
             try {
                 live = await load(URL_LIVE);
+                coursesRequested = '';
                 renderMeta();
                 render();
             } catch (error) {
