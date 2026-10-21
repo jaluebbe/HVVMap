@@ -225,6 +225,14 @@
             <label class="wide">Haltestelle
                 <select id="station"></select>
             </label>
+            <label>Rückblick
+                <select id="past">
+                    <option value="10" selected>10 Minuten</option>
+                    <option value="60">1 Stunde</option>
+                    <option value="180">3 Stunden</option>
+                    <option value="1440">Ganzer Tag</option>
+                </select>
+            </label>
             <label>Zeitraum
                 <select id="range">
                     <option value="60">1 Stunde</option>
@@ -269,7 +277,6 @@
         const URL_LIVE = '/api/hvv/live/departures-live.json';
         const URL_GTFS = '/api/hvv/gtfs/departures.json';
         const LIVE_REFRESH_MS = 30000;
-        const PAST_MINUTES = 10; // departures this long ago stay visible
         const MODE_LABELS = {
             U: 'U-Bahn', S: 'S-Bahn', AKN: 'AKN', R: 'Regionalzüge',
             FERRY: 'Fähren', OTHER: 'Sonstige',
@@ -285,6 +292,7 @@
             mode: document.getElementById('mode'),
             line: document.getElementById('line'),
             station: document.getElementById('station'),
+            past: document.getElementById('past'),
             range: document.getElementById('range'),
         };
 
@@ -469,7 +477,7 @@
                 return;
             }
             const now = berlinNowMinutes();
-            const from = now - PAST_MINUTES;
+            const from = now - Number(sel.past.value);
             const to = now + Number(sel.range.value);
             const inRange = d => d.at >= from && d.at <= to;
             const planDeps = station.departures
@@ -585,6 +593,7 @@
         sel.mode.addEventListener('change', () => { fillLines(); remember(); });
         sel.line.addEventListener('change', () => { fillStations(); remember(); });
         sel.station.addEventListener('change', () => { loadGtfs().then(render); remember(); });
+        sel.past.addEventListener('change', render);
         sel.range.addEventListener('change', render);
         start();
     </script>
