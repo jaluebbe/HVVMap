@@ -287,6 +287,7 @@
                         <th>Live</th>
                         <th>Verspätung</th>
                         <th>Live-ServiceId</th>
+                        <th>Fahrzeuge</th>
                     </tr>
                 </thead>
                 <tbody id="rows"></tbody>
@@ -615,11 +616,12 @@
                 if (text) delay.append(text, ' ', el('span', 'muted', shown.station));
                 tr.append(delay);
                 tr.append(el('td', 'muted', liveIds.join(' / ')));
+                tr.append(el('td', null, unique(group.lives.map(l => l.vehicle_numbers))));
                 body.append(tr);
                 if (open.has(group.key)) {
                     const detail = el('tr', 'stops');
                     const td = el('td');
-                    td.colSpan = 6;
+                    td.colSpan = 7;
                     td.append(stopTable(trip, now));
                     detail.append(td);
                     body.append(detail);
@@ -628,7 +630,7 @@
             if (!groups.length) {
                 const tr = el('tr');
                 const td = el('td', 'empty', 'Keine Fahrten im gewählten Zeitraum.');
-                td.colSpan = 6;
+                td.colSpan = 7;
                 tr.append(td);
                 body.append(tr);
             }
