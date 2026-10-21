@@ -412,9 +412,23 @@
                     }
                 }
             }
-            const all = [...trips.values(), ...liveOnly.values()];
-            for (const trip of all) trip.stops.sort((a, b) => a.at - b.at);
+            const all = [...trips.values(), ...liveOnly.values()].flatMap(splitRuns);
             return { trips: all, lineName };
+        }
+
+        // A serviceId repeats every day: stops further apart than this belong
+        // to different runs of the same id (e.g. the tail after midnight).
+        const RUN_GAP_MIN = 180;
+
+        function splitRuns(trip) {
+            const stops = [...trip.stops].sort((a, b) => a.at - b.at);
+            const runs = [];
+            for (const stop of stops) {
+                const run = runs[runs.length - 1];
+                if (run && stop.at - run[run.length - 1].at <= RUN_GAP_MIN) run.push(stop);
+                else runs.push([stop]);
+            }
+            return runs.map(run => ({ ...trip, stops: run, key: trip.id + '@' + run[0].at }));
         }
 
         // A coupled (wing) train: the live data lists two parts at one stop
@@ -578,7 +592,7 @@
             const { trips, lineName } = buildTrips();
             const groups = trips.map(trip => {
                 const lives = trip.stops.flatMap(s => s.lives);
-                return { trip, key: trip.id, lives, start: trip.stops[0].at };
+                return { trip, key: trip.key, lives, start: trip.stops[0].at };
             }).filter(g => g.trip.stops.some(s => s.at >= from && s.at <= to))
                 .sort((a, b) => a.start - b.start);
 
