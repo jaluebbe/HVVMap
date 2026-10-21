@@ -2,7 +2,7 @@ import json
 from datetime import datetime
 
 from hvv_map import trip_courses
-from hvv_map.trip_courses import due_trips, parse_course, run_trip_courses
+from hvv_map.trip_courses import parse_course, run_trip_courses
 
 
 def _response():
@@ -53,23 +53,6 @@ def test_course_of_another_run_does_not_fit_the_request():
     assert not trip_courses.course_fits_request(stops, {"time": later})
 
 
-def _trip(service_id, minute):
-    return {
-        "service_id": service_id,
-        "line_obj": {"dlid": "de:hvv:U1:"},
-        "stops": [{"station": "a", "planned": datetime(2026, 10, 17, 9, minute)}],
-    }
-
-
-def test_due_trips_skips_cached_and_out_of_range_trips_soonest_first():
-    now = datetime(2026, 10, 17, 9, 0)
-    trips = [_trip("2", 30), _trip("1", 10), _trip("3", 15), _trip("4", 59)]
-    trips[3]["stops"][0]["planned"] = datetime(2026, 10, 17, 12, 0)
-    cached = {trip_courses.course_key(trips[2]): {"fetched_at": 0, "stops": [{}]}}
-
-    assert [t["service_id"] for t in due_trips(trips, cached, now)] == ["1", "2"]
-
-
 class _Redis:
     def __init__(self, values):
         self.values = values
@@ -90,188 +73,149 @@ class _Client:
         return _response()
 
 
-def test_run_trip_courses_fetches_missing_course_and_stores_it(monkeypatch):
-    monkeypatch.setattr(trip_courses.time, "sleep", lambda _: None)
-    plan = {
-        "7": {
-            "line": {"name": "U1", "dlid": "de:hvv:U1:", "type": {"shortInfo": "U"}},
-            "directionId": 6,
-            "destination": "Z",
-            "stops": [{"timeOffset": 302, "station": {"id": "A", "combinedName": "a"}}],
+LINE = {"name": "U1", "dlid": "de:hvv:U1:", "type": {"shortInfo": "U"}}
+NOW = datetime(2026, 10, 17, 9, 0)
+
+
+def _dep(service_id, station="A", offset=2):
+    return {
+        "line": {**LINE, "direction": "Z"},
+        "station": {"id": station, "combinedName": station.lower(), "name": station},
+        "timeOffset": offset,
+        "directionId": 6,
+        "serviceId": service_id,
+        "platform": "Gleis 1",
+    }
+
+
+def _redis(departures, cached=None):
+    live = {
+        "anchor": {"date": "2026-10-17", "time": "09:00:00"},
+        "departures": departures,
+    }
+    values = {"hvv:departures:live": json.dumps({"data": live})}
+    if cached is not None:
+        values["hvv:trips:courses"] = json.dumps({"data": cached})
+    return _Redis(values)
+
+
+def _stored(redis):
+    return json.loads(redis.values["hvv:trips:courses"])["data"]
+
+
+def _cached(service_id, age=0, station_id="A", request=None):
+    return {
+        f"live:{service_id}": {
+            "fetched_at": trip_courses.time.time() - age,
+            "attempts": 0,
+            "stops": parse_course(_response()),
+            "service_id": str(service_id),
+            "station_id": station_id,
+            "request": request,
+            "vehicles": [],
         }
     }
-    redis = _Redis(
-        {
-            "hvv:departures:by_service": json.dumps({"data": plan}),
-            "hvv:departures:anchor_start": json.dumps(
-                {"data": {"date": "2026-10-17", "time": "04:00:00"}}
-            ),
-        }
-    )
+
+
+def test_course_is_fetched_once_per_live_service_id(monkeypatch):
+    monkeypatch.setattr(trip_courses.time, "sleep", lambda _: None)
+    redis = _redis([_dep(7, "B", 4), _dep(7, "A", 2)])
     client = _Client()
 
-    fetched, failed = run_trip_courses(client, redis, datetime(2026, 10, 17, 9, 0))
+    assert run_trip_courses(client, redis, NOW) == (1, 0)
 
-    assert (fetched, failed) == (1, 0)
     request = client.requests[0][1]
     assert request["serviceId"] == 7 and request["lineId"] == "de:hvv:U1:"
+    assert request["station"]["name"] == "a"
     assert request["time"].startswith("2026-10-17T09:02:00.000+0200")
-    stored = json.loads(redis.values["hvv:trips:courses"])["data"]
-    assert list(stored) == ["7@2026-10-17T09:02"]
-
-    run_trip_courses(client, redis, datetime(2026, 10, 17, 9, 0))
+    stored = _stored(redis)
+    assert list(stored) == ["live:7"] and stored["live:7"]["station_id"] == "A"
+    run_trip_courses(client, redis, NOW)
     assert len(client.requests) == 1  # cached, not fetched again
 
 
-def test_failed_fetch_is_not_retried_immediately_and_not_used(monkeypatch):
+def test_every_live_service_id_gets_its_own_course(monkeypatch):
     monkeypatch.setattr(trip_courses.time, "sleep", lambda _: None)
-    trip = _trip("1", 10)
-    key = trip_courses.course_key(trip)
-    now = datetime(2026, 10, 17, 9, 0)
-    fresh = {key: {"fetched_at": trip_courses.time.time(), "stops": None}}
-    stale = {key: {"fetched_at": trip_courses.time.time() - 3600, "stops": None}}
-
-    assert due_trips([trip], fresh, now) == []
-    assert due_trips([trip], stale, now) == [trip]
-
-
-def test_run_trip_courses_fetches_course_of_extra_live_entry_first(monkeypatch):
-    monkeypatch.setattr(trip_courses.time, "sleep", lambda _: None)
-    line = {"name": "U1", "dlid": "de:hvv:U1:", "type": {"shortInfo": "U"}}
-    plan = {
-        "7": {
-            "line": line,
-            "directionId": 6,
-            "destination": "Z",
-            "stops": [{"timeOffset": 302, "station": {"id": "A", "combinedName": "a"}}],
-        }
-    }
-
-    def departure(service_id):
-        return {
-            "line": {**line, "direction": "Z"},
-            "station": {"id": "A", "combinedName": "a", "name": "a"},
-            "timeOffset": 2,
-            "directionId": 6,
-            "serviceId": service_id,
-            "platform": "Gleis 1",
-        }
-
-    live = {
-        "anchor": {"date": "2026-10-17", "time": "09:00:00"},
-        "departures": [departure(7), departure(999)],
-    }
-    redis = _Redis(
-        {
-            "hvv:departures:by_service": json.dumps({"data": plan}),
-            "hvv:departures:anchor_start": json.dumps(
-                {"data": {"date": "2026-10-17", "time": "04:00:00"}}
-            ),
-            "hvv:departures:live": json.dumps({"data": live}),
-        }
-    )
+    redis = _redis([_dep(7), _dep(999)])
     client = _Client()
 
-    run_trip_courses(client, redis, datetime(2026, 10, 17, 9, 0))
+    run_trip_courses(client, redis, NOW)
 
-    assert [r["serviceId"] for _, r in client.requests] == [999, 7]
-    stored = json.loads(redis.values["hvv:trips:courses"])["data"]
-    assert set(stored) == {"live:999", "7@2026-10-17T09:02"}
+    assert [r["serviceId"] for _, r in client.requests] == [7, 999]
+    assert set(_stored(redis)) == {"live:7", "live:999"}
 
 
-def test_renumbered_trip_asks_for_its_course_by_the_live_service_id(monkeypatch):
+def test_course_without_a_station_the_id_departs_from_is_refetched_there(monkeypatch):
     monkeypatch.setattr(trip_courses.time, "sleep", lambda _: None)
-    line = {"name": "U1", "dlid": "de:hvv:U1:", "type": {"shortInfo": "U"}}
-    plan = {
-        "7": {
-            "line": line,
-            "directionId": 6,
-            "destination": "Z",
-            "stops": [{"timeOffset": 302, "station": {"id": "A", "combinedName": "a"}}],
-        }
-    }
-    departure = {
-        "line": {**line, "direction": "Z"},
-        "station": {"id": "A", "combinedName": "a", "name": "a"},
-        "timeOffset": 2,
-        "directionId": 6,
-        "serviceId": 555,
-        "platform": "Gleis 1",
-    }
-    redis = _Redis(
-        {
-            "hvv:departures:by_service": json.dumps({"data": plan}),
-            "hvv:departures:anchor_start": json.dumps(
-                {"data": {"date": "2026-10-17", "time": "04:00:00"}}
-            ),
-            "hvv:departures:live": json.dumps(
-                {
-                    "data": {
-                        "anchor": {"date": "2026-10-17", "time": "09:00:00"},
-                        "departures": [departure],
-                    }
-                }
-            ),
-        }
-    )
-    client = _Client()
-    now = datetime(2026, 10, 17, 9, 0)
-
-    run_trip_courses(client, redis, now)
-    run_trip_courses(client, redis, now)
-
-    assert [r["serviceId"] for _, r in client.requests] == [555]
-    stored = json.loads(redis.values["hvv:trips:courses"])["data"]
-    assert stored["7@2026-10-17T09:02"]["service_id"] == "555"
-
-
-def test_renumbered_trips_nearest_to_now_are_fetched_first(monkeypatch):
-    monkeypatch.setattr(trip_courses.time, "sleep", lambda _: None)
-    monkeypatch.setattr(trip_courses, "COURSE_MAX_CALLS", 1)
-    line = {"name": "U1", "dlid": "de:hvv:U1:", "type": {"shortInfo": "U"}}
-    plan = {
-        sid: {
-            "line": line,
-            "directionId": 6,
-            "destination": "Z",
-            "stops": [
-                {"timeOffset": offset, "station": {"id": "A", "combinedName": "a"}}
-            ],
-        }
-        for sid, offset in (("1", 330), ("2", 302))  # 09:30 and 09:02
-    }
-    departures = [
-        {
-            "line": {**line, "direction": "Z"},
-            "station": {"id": "A", "combinedName": "a", "name": "a"},
-            "timeOffset": offset,
-            "directionId": 6,
-            "serviceId": live_id,
-            "platform": "Gleis 1",
-        }
-        for live_id, offset in ((501, 30), (502, 2))
-    ]
-    redis = _Redis(
-        {
-            "hvv:departures:by_service": json.dumps({"data": plan}),
-            "hvv:departures:anchor_start": json.dumps(
-                {"data": {"date": "2026-10-17", "time": "04:00:00"}}
-            ),
-            "hvv:departures:live": json.dumps(
-                {
-                    "data": {
-                        "anchor": {"date": "2026-10-17", "time": "09:00:00"},
-                        "departures": departures,
-                    }
-                }
-            ),
-        }
-    )
+    redis = _redis([_dep(7, "A", 2), _dep(7, "X", 5)], _cached(7))
     client = _Client()
 
-    run_trip_courses(client, redis, datetime(2026, 10, 17, 9, 0))
+    run_trip_courses(client, redis, NOW)
+    assert [r["station"]["name"] for _, r in client.requests] == ["x"]
+    assert _stored(redis)["live:7"]["station_id"] == "X"
 
-    assert [r["serviceId"] for _, r in client.requests] == [502]
+    run_trip_courses(client, redis, NOW)  # the answer still lacks X: no loop
+    assert len(client.requests) == 1
+
+
+def test_course_of_another_day_is_refetched(monkeypatch):
+    monkeypatch.setattr(trip_courses.time, "sleep", lambda _: None)
+    redis = _redis([_dep(7, "A", 270)], _cached(7))  # 13:30, course runs 09:02
+    client = _Client()
+
+    run_trip_courses(client, redis, NOW)
+
+    assert [r["serviceId"] for _, r in client.requests] == [7]
+
+
+def test_failed_fetch_is_retried_soon_but_only_a_few_times():
+    now = trip_courses.time.time()
+
+    def due(age, attempts):
+        entry = {"fetched_at": now - age, "stops": None, "attempts": attempts}
+        return trip_courses._retry_due(entry, now)
+
+    assert due(150, 1)  # retry after 2 minutes
+    assert not due(60, 1)
+    assert not due(150, 3)  # then the long pause
+    assert due(700, 3)
+
+
+def test_a_failing_fetch_counts_its_attempts(monkeypatch):
+    monkeypatch.setattr(trip_courses.time, "sleep", lambda _: None)
+    redis = _redis([_dep(555)])
+
+    class _Failing(_Client):
+        def send(self, endpoint, request):
+            super().send(endpoint, request)
+            return {}
+
+    run_trip_courses(_Failing(), redis, NOW)
+    cached = _stored(redis)
+    assert cached["live:555"]["attempts"] == 1
+
+    cached["live:555"]["fetched_at"] -= 200  # past the short pause
+    redis.values["hvv:trips:courses"] = json.dumps({"data": cached})
+    run_trip_courses(_Failing(), redis, NOW)
+    assert _stored(redis)["live:555"]["attempts"] == 2
+
+
+def test_http_error_for_one_id_does_not_abort_the_run(monkeypatch):
+    import requests
+
+    monkeypatch.setattr(trip_courses.time, "sleep", lambda _: None)
+    redis = _redis([_dep(1, "A", 2), _dep(2, "A", 3)])
+
+    class _Failing(_Client):
+        def send(self, endpoint, request):
+            if request["serviceId"] == 1:
+                raise requests.HTTPError("500")
+            return super().send(endpoint, request)
+
+    assert run_trip_courses(_Failing(), redis, NOW) == (1, 1)
+    stored = _stored(redis)
+    assert stored["live:1"]["stops"] is None
+    assert stored["live:2"]["stops"] is not None
 
 
 def test_course_vehicles_are_recorded_as_sightings(monkeypatch):
@@ -280,151 +224,38 @@ def test_course_vehicles_are_recorded_as_sightings(monkeypatch):
     monkeypatch.setattr(
         trip_courses, "record", lambda client, sightings: recorded.extend(sightings)
     )
-    plan = {
-        "7": {
-            "line": {"name": "U1", "dlid": "de:hvv:U1:", "type": {"shortInfo": "U"}},
-            "directionId": 6,
-            "destination": "Z",
-            "stops": [{"timeOffset": 302, "station": {"id": "A", "combinedName": "a"}}],
-        }
-    }
-    redis = _Redis(
-        {
-            "hvv:departures:by_service": json.dumps({"data": plan}),
-            "hvv:departures:anchor_start": json.dumps(
-                {"data": {"date": "2026-10-17", "time": "04:00:00"}}
-            ),
-        }
-    )
 
     class _WithVehicles(_Client):
         def send(self, endpoint, request):
             return {**super().send(endpoint, request), "vehicles": [{"number": "432"}]}
 
-    run_trip_courses(_WithVehicles(), redis, datetime(2026, 10, 17, 9, 0))
+    run_trip_courses(_WithVehicles(), _redis([_dep(7)]), NOW)
 
     assert [(s["vehicle"], s["service_id"]) for s in recorded] == [("432", 7)]
 
 
-def _renumbered_redis():
-    line = {"name": "U1", "dlid": "de:hvv:U1:", "type": {"shortInfo": "U"}}
-    plan = {
-        "7": {
-            "line": line,
-            "directionId": 6,
-            "destination": "Z",
-            "stops": [{"timeOffset": 302, "station": {"id": "A", "combinedName": "a"}}],
-        }
-    }
-    departure = {
-        "line": {**line, "direction": "Z"},
-        "station": {"id": "A", "combinedName": "a", "name": "a"},
-        "timeOffset": 2,
-        "directionId": 6,
-        "serviceId": 555,
-        "platform": "Gleis 1",
-    }
+def test_running_course_is_refreshed_with_its_stored_request_between_anchors():
+    stored_request = {"serviceId": 5, "time": "2026-10-17T09:02:00.000+0200"}
+    cached = _cached(5, age=3600, request=stored_request)
+    now_ts = trip_courses.time.time()
+
+    running = trip_courses.course_jobs(
+        None, cached, datetime(2026, 10, 17, 9, 5), now_ts
+    )
+    later = trip_courses.course_jobs(
+        None, cached, datetime(2026, 10, 17, 10, 0), now_ts
+    )
+
+    assert running == [("live:5", stored_request)]
+    assert later == []
+
+
+def test_missing_courses_come_before_old_ones():
     live = {
         "anchor": {"date": "2026-10-17", "time": "09:00:00"},
-        "departures": [departure],
+        "departures": [_dep(5), _dep(6)],
     }
-    return _Redis(
-        {
-            "hvv:departures:by_service": json.dumps({"data": plan}),
-            "hvv:departures:anchor_start": json.dumps(
-                {"data": {"date": "2026-10-17", "time": "04:00:00"}}
-            ),
-            "hvv:departures:live": json.dumps({"data": live}),
-        }
+    jobs = trip_courses.course_jobs(
+        live, _cached(5, age=3600), NOW, trip_courses.time.time()
     )
-
-
-def test_failed_live_id_fetch_is_retried_soon_but_only_a_few_times():
-    now = trip_courses.time.time()
-
-    def failed(age, attempts):
-        entry = {"fetched_at": now - age, "stops": None, "service_id": "9"}
-        return {**entry, "attempts": attempts}
-
-    current = trip_courses._is_current_by
-    assert not current(failed(150, 1), "9")  # retry after 2 minutes
-    assert current(failed(60, 1), "9")
-    assert current(failed(150, 3), "9")  # then the long pause
-    assert not current(failed(700, 3), "9")
-    assert not current(failed(10, 1), "8")  # fetched with another id
-
-
-def test_a_failing_live_id_fetch_counts_its_attempts(monkeypatch):
-    monkeypatch.setattr(trip_courses.time, "sleep", lambda _: None)
-    redis = _renumbered_redis()
-
-    class _Failing(_Client):
-        def send(self, endpoint, request):
-            super().send(endpoint, request)
-            return {}
-
-    now = datetime(2026, 10, 17, 9, 0)
-    run_trip_courses(_Failing(), redis, now)
-    cached = json.loads(redis.values["hvv:trips:courses"])["data"]
-    assert cached["7@2026-10-17T09:02"]["attempts"] == 1
-
-    cached["7@2026-10-17T09:02"]["fetched_at"] -= 200  # past the short pause
-    redis.values["hvv:trips:courses"] = json.dumps({"data": cached})
-    run_trip_courses(_Failing(), redis, now)
-    cached = json.loads(redis.values["hvv:trips:courses"])["data"]
-    assert cached["7@2026-10-17T09:02"]["attempts"] == 2
-
-
-def test_http_error_for_one_trip_does_not_abort_the_run(monkeypatch):
-    import requests
-
-    monkeypatch.setattr(trip_courses.time, "sleep", lambda _: None)
-    line = {"name": "U1", "dlid": "de:hvv:U1:", "type": {"shortInfo": "U"}}
-    plan = {
-        sid: {
-            "line": line,
-            "directionId": 6,
-            "destination": "Z",
-            "stops": [
-                {"timeOffset": 302 + n, "station": {"id": "A", "combinedName": "a"}}
-            ],
-        }
-        for n, sid in enumerate(("1", "2"))
-    }
-    redis = _Redis(
-        {
-            "hvv:departures:by_service": json.dumps({"data": plan}),
-            "hvv:departures:anchor_start": json.dumps(
-                {"data": {"date": "2026-10-17", "time": "04:00:00"}}
-            ),
-        }
-    )
-
-    class _Failing(_Client):
-        def send(self, endpoint, request):
-            if request["serviceId"] == 1:
-                raise requests.HTTPError("500")
-            return super().send(endpoint, request)
-
-    fetched, failed = run_trip_courses(_Failing(), redis, datetime(2026, 10, 17, 9, 0))
-
-    assert (fetched, failed) == (1, 1)
-    stored = json.loads(redis.values["hvv:trips:courses"])["data"]
-    assert stored["1@2026-10-17T09:02"]["stops"] is None
-    assert stored["2@2026-10-17T09:03"]["stops"] is not None
-
-
-def test_running_trip_course_is_refetched_when_old_but_upcoming_one_is_not():
-    now = datetime(2026, 10, 17, 9, 20)
-    running = _trip("1", 10)
-    running["stops"].append({"station": "b", "planned": datetime(2026, 10, 17, 9, 40)})
-    upcoming = _trip("2", 30)
-    old = trip_courses.time.time() - 3600
-    cached = {
-        trip_courses.course_key(t): {"fetched_at": old, "stops": [{}]}
-        for t in (running, upcoming)
-    }
-
-    assert due_trips([running, upcoming], cached, now) == [running]
-    cached[trip_courses.course_key(running)]["fetched_at"] = trip_courses.time.time()
-    assert due_trips([running, upcoming], cached, now) == []
+    assert [key for key, _ in jobs] == ["live:6", "live:5"]

@@ -53,50 +53,81 @@ def test_live_departure_matches_plan_stop_by_line_station_direction_and_minute()
     assert table["live_only"] == []
 
 
-def test_same_service_id_matches_despite_a_minute_offset():
-    live = {
-        "anchor": LIVE_ANCHOR,
-        "departures": [_live("U1", "A", 3, 6, service_id=1)],
-    }
-    table = build_trip_table(PLAN, PLAN_ANCHOR, live)
-    assert table["trips"][0]["stops"][0]["match"]["quality"] == "ID, ±1 min"
-
-
-def test_without_a_known_service_id_only_the_exact_minute_matches():
+def test_a_minute_off_does_not_match_outside_the_s1():
     live = {"anchor": LIVE_ANCHOR, "departures": [_live("U1", "A", 3, 6)]}
     table = build_trip_table(PLAN, PLAN_ANCHOR, live)
     plan_trip = next(t for t in table["trips"] if not t["live_only"])
     assert plan_trip["status"] == "vermutlich ausgefallen"
-    assert table["summary"]["quality"] == {"nur live": 1}
+    assert table["summary"]["quality"] == {}
+    assert [t["service_id"] for t in table["trips"] if t["live_only"]] == ["900"]
 
 
-def test_coupled_train_matches_the_unique_plan_stop_one_minute_off():
-    departure = _live("U1", "A", 1, 6, service_id=555)
-    departure["line"]["direction"] = "Ziel / Anderes"
-    live = {"anchor": LIVE_ANCHOR, "departures": [departure]}
-
-    table = build_trip_table(PLAN, PLAN_ANCHOR, live)
-
-    trip = next(t for t in table["trips"] if not t["live_only"])
-    assert trip["status"] == "bestätigt"
-    assert trip["stops"][0]["match"]["quality"] == "±1 min, ohne Richtung"
+def _s1_plan(destination="Hamburg Airport (Flughafen)"):
+    entry = _plan_entry("S1", 1, [("A", 302)], destination)
+    entry["line"]["type"] = {"shortInfo": "S"}
+    return {"1": entry}
 
 
-def test_later_stops_of_a_matched_live_service_follow_its_plan_trip():
-    plan = {"1": _plan_entry("U1", 6, [("A", 302), ("B", 306)])}
+def _s1_live(offset, service_id, destination, platform="Gleis 1"):
+    dep = _live("S1", "A", offset, 1, service_id=service_id, platform=platform)
+    dep["line"] = {"name": "S1", "type": {"shortInfo": "S"}, "direction": destination}
+    return dep
+
+
+def test_s1_matches_a_minute_off_with_same_platform_and_destination():
+    live = {
+        "anchor": LIVE_ANCHOR,
+        "departures": [_s1_live(3, 5, "Hamburg Airport (Flughafen)")],
+    }
+    [trip] = build_trip_table(_s1_plan(), PLAN_ANCHOR, live)["trips"]
+    assert trip["stops"][0]["match"]["quality"] == "±1 min"
+
+
+def test_s1_a_minute_off_needs_the_same_platform():
+    live = {
+        "anchor": LIVE_ANCHOR,
+        "departures": [_s1_live(3, 5, "Hamburg Airport (Flughafen)", "Gleis 2")],
+    }
+    table = build_trip_table(_s1_plan(), PLAN_ANCHOR, live)
+    assert table["summary"]["quality"] == {}
+
+
+def test_s1_wing_train_takes_the_second_live_part_as_alias():
     live = {
         "anchor": LIVE_ANCHOR,
         "departures": [
-            _live("U1", "B", 6, 6, service_id=555),  # exact: learns 555 -> 1
-            _live("U1", "A", 4, 6, service_id=555),  # two minutes off
+            _s1_live(2, 7397, "Hamburg Airport (Flughafen)"),
+            _s1_live(2, 2046, "Poppenbüttel / Hamburg Airport (Flughafen)"),
         ],
     }
-
-    table = build_trip_table(plan, PLAN_ANCHOR, live)
-
+    table = build_trip_table(_s1_plan(), PLAN_ANCHOR, live)
     [trip] = table["trips"]
-    qualities = [s["match"]["quality"] for s in trip["stops"]]
-    assert qualities == ["ID, ±2 min (gelernt)", "exakt"]
+    assert trip["live_ids"] == ["2046", "7397"]
+    assert trip["primary_ids"] == ["7397"]
+    assert [a["service_id"] for a in trip["aliases"]] == ["2046"]
+    assert table["summary"]["quality"] == {"exakt": 1, "Flügel": 1}
+    assert table["live_only"] == []
+
+
+def test_s1_wing_part_needs_the_plan_destination_in_its_own():
+    live = {
+        "anchor": LIVE_ANCHOR,
+        "departures": [
+            _s1_live(2, 7397, "Hamburg Airport (Flughafen)"),
+            _s1_live(2, 2046, "Wedel"),
+        ],
+    }
+    table = build_trip_table(_s1_plan(), PLAN_ANCHOR, live)
+    assert [t["service_id"] for t in table["trips"] if t["live_only"]] == ["2046"]
+
+
+def test_conflicting_planned_platform_prevents_a_match():
+    live = {
+        "anchor": LIVE_ANCHOR,
+        "departures": [_live("U1", "A", 2, 6, platform="Gleis 2")],
+    }
+    table = build_trip_table(PLAN, PLAN_ANCHOR, live)
+    assert table["summary"]["quality"] == {}
 
 
 def test_live_only_stops_across_04_00_stay_one_trip():
@@ -114,23 +145,24 @@ def test_live_only_stops_across_04_00_stay_one_trip():
     assert [s["station_id"] for s in trip["stops"]] == ["R", "W"]
 
 
-def test_unique_plan_stop_matches_despite_different_direction_id():
+def test_plan_stop_matches_despite_different_direction_id():
     live = {"anchor": LIVE_ANCHOR, "departures": [_live("U1", "A", 2, 1)]}
     table = build_trip_table(PLAN, PLAN_ANCHOR, live)
     assert table["live_only"] == []
-    quality = table["trips"][0]["stops"][0]["match"]["quality"]
-    assert quality == "exakt, ohne Richtung"
+    assert table["trips"][0]["stops"][0]["match"]["quality"] == "exakt"
 
 
-def test_ambiguous_plan_stops_without_direction_stay_unmatched():
-    plan = {
-        "1": _plan_entry("U1", 6, [("A", 302)]),
-        "2": _plan_entry("U1", 7, [("A", 302)]),
+def test_same_direction_id_wins_among_live_departures_of_the_same_minute():
+    live = {
+        "anchor": LIVE_ANCHOR,
+        "departures": [
+            _live("U1", "A", 2, 7, service_id=1),
+            _live("U1", "A", 2, 6, service_id=2),
+        ],
     }
-    live = {"anchor": LIVE_ANCHOR, "departures": [_live("U1", "A", 2, 1)]}
-    table = build_trip_table(plan, PLAN_ANCHOR, live)
-    assert [e["reason"] for e in table["live_only"]] == ["mehrdeutig"]
-    assert not any(t["live_only"] for t in table["trips"])
+    table = build_trip_table(PLAN, PLAN_ANCHOR, live)
+    plan_trip = next(t for t in table["trips"] if not t["live_only"])
+    assert plan_trip["primary_ids"] == ["2"]
 
 
 def test_plan_trip_inside_the_window_without_live_entry_is_not_seen():
@@ -254,7 +286,7 @@ def test_trip_row_reports_start_and_window_stop_separately():
 
 
 def test_cached_course_supplies_times_for_stations_outside_the_anchor_range():
-    from hvv_map.trips import course_key, _plan_trips
+    from hvv_map.trips import alias_course_key
 
     plan = _routed_plan()
     course = {
@@ -269,7 +301,7 @@ def test_cached_course_supplies_times_for_stations_outside_the_anchor_range():
             for sid, minute in (("Z", 0), ("A", 2), ("B", 5), ("C", 8), ("D", 10))
         ]
     }
-    key = course_key(_plan_trips(plan, PLAN_ANCHOR)[0])
+    key = alias_course_key("900")
     live = {"anchor": LIVE_ANCHOR, "departures": [_live("U1", "A", 2, 6)]}
 
     stops = build_trip_table(plan, PLAN_ANCHOR, live, {key: course})["trips"][0][
@@ -304,10 +336,10 @@ def test_trip_row_reports_the_time_span_of_its_route():
 
 
 def test_failed_course_entry_falls_back_to_interpolation():
-    from hvv_map.trips import _plan_trips, course_key
+    from hvv_map.trips import alias_course_key
 
     plan = _routed_plan()
-    key = course_key(_plan_trips(plan, PLAN_ANCHOR)[0])
+    key = alias_course_key("900")
     live = {"anchor": LIVE_ANCHOR, "departures": [_live("U1", "A", 2, 6)]}
 
     table = build_trip_table(plan, PLAN_ANCHOR, live, {key: {"stops": None}})
@@ -324,18 +356,6 @@ def test_s_bahn_trips_are_matched_too():
         plan, PLAN_ANCHOR, {"anchor": LIVE_ANCHOR, "departures": [dep]}
     )
     assert table["trips"][0]["status"] == "bestätigt"
-
-
-def test_repeated_live_entry_of_a_split_train_counts_as_duplicate_not_unmatched():
-    first = _live("U1", "A", 2, 6, service_id=7, platform="Gleis 1")
-    twin = _live("U1", "A", 2, 6, service_id=999, platform="Gleis 1")
-    plan = {"1": _plan_entry("U1", 6, [("A", 302)])}
-    table = build_trip_table(
-        plan, PLAN_ANCHOR, {"anchor": LIVE_ANCHOR, "departures": [first, twin]}
-    )
-    assert table["live_only"] == []
-    assert table["summary"]["quality"]["Duplikat"] == 1
-    assert table["trips"][0]["live_ids"] == ["7", "999"]
 
 
 def _course(*stops):
@@ -357,14 +377,13 @@ def _course(*stops):
 
 
 def test_split_train_alias_course_reports_where_it_diverges():
-    from hvv_map.trips import _plan_trips, alias_course_key, course_key
+    from hvv_map.trips import alias_course_key
 
-    first = _live("U1", "A", 2, 6, service_id=7, platform="Gleis 1")
-    twin = _live("U1", "A", 2, 6, service_id=999, platform="Gleis 1")
-    plan = {"1": _plan_entry("U1", 6, [("A", 302)])}
-    key = course_key(_plan_trips(plan, PLAN_ANCHOR)[0])
+    first = _s1_live(2, 7, "Hamburg Airport (Flughafen)")
+    twin = _s1_live(2, 999, "Poppenbüttel / Hamburg Airport (Flughafen)")
+    plan = _s1_plan()
     courses = {
-        key: _course(
+        alias_course_key("7"): _course(
             ("A", "a", None, "09:02"),
             ("B", "b", "09:05", "09:06"),
             ("C", "c", "09:09", None),
@@ -384,6 +403,8 @@ def test_split_train_alias_course_reports_where_it_diverges():
     alias = row["alias_courses"][0]
     assert alias["shared_until"] == "b"
     assert [s["name"] for s in alias["stops"]] == ["a", "b", "d"]
+    assert alias["destination"] == "d"
+    assert row["destination"] == "c"  # announced destination not in the course
 
 
 def test_coupled_train_parts_share_the_course_from_the_join_station_on():
@@ -594,9 +615,9 @@ def test_live_vehicles_win_over_the_memory_and_are_not_flagged():
 
 
 def _course_table(vehicles, course_vehicles, memory=None):
-    from hvv_map.trips import _plan_trips, course_key
+    from hvv_map.trips import alias_course_key
 
-    key = course_key(_plan_trips(PLAN, PLAN_ANCHOR)[0])
+    key = alias_course_key("900")
     stop = {"id": "A", "name": "a", "dep": "2026-10-17T09:02", "dep_delay": 0}
     courses = {key: {"fetched_at": 1, "stops": [stop], "vehicles": course_vehicles}}
     deps = [_live("U1", "A", 2, 6, vehicles=vehicles)]
@@ -628,9 +649,9 @@ def test_live_vehicles_win_over_the_course_and_the_course_over_the_memory():
 
 
 def test_a_course_without_stops_is_flagged_as_failed():
-    from hvv_map.trips import _plan_trips, course_key
+    from hvv_map.trips import alias_course_key
 
-    key = course_key(_plan_trips(PLAN, PLAN_ANCHOR)[0])
+    key = alias_course_key("900")
     live = {"anchor": LIVE_ANCHOR, "departures": [_live("U1", "A", 2, 6)]}
 
     def row(courses):
@@ -655,7 +676,7 @@ def test_remembering_is_idempotent_and_forgets_old_trips():
 
 
 def test_trip_stays_listed_after_its_last_anchor_while_the_course_continues():
-    from hvv_map.trips import course_key, _plan_trips
+    from hvv_map.trips import LIVE_IDS_PREFIX, alias_course_key, course_key, _plan_trips
 
     plan = {"1": _plan_entry("U1", 6, [("A", 290), ("B", 295)])}
     course = {
@@ -670,11 +691,26 @@ def test_trip_stays_listed_after_its_last_anchor_while_the_course_continues():
             for sid, t in (("A", "08:50"), ("B", "08:55"), ("C", "09:30"))
         ]
     }
-    key = course_key(_plan_trips(plan, PLAN_ANCHOR)[0])
+    key = LIVE_IDS_PREFIX + course_key(_plan_trips(plan, PLAN_ANCHOR)[0])
+    memory = {key: {"ids": ["900"], "aliases": [], "destination": "C", "seen_at": 1}}
+    courses = {alias_course_key("900"): course}
     live = {"anchor": LIVE_ANCHOR, "departures": []}
-    assert build_trip_table(plan, PLAN_ANCHOR, live)["trips"] == []
-    trips = build_trip_table(plan, PLAN_ANCHOR, live, {key: course})["trips"]
-    assert [t["status"] for t in trips] == ["zwischen Ankern"]
+    assert build_trip_table(plan, PLAN_ANCHOR, live, courses)["trips"] == []
+    [trip] = build_trip_table(plan, PLAN_ANCHOR, live, courses, memory)["trips"]
+    assert trip["status"] == "zwischen Ankern"
+    assert trip["course_id"] == "900"
+
+
+def test_live_ids_are_remembered_for_trips_between_anchors():
+    from hvv_map.trips import remember_live_ids
+
+    live = {"anchor": LIVE_ANCHOR, "departures": [_live("U1", "A", 2, 6)]}
+    table = build_trip_table(PLAN, PLAN_ANCHOR, live)
+    memory: dict = {}
+    assert remember_live_ids(memory, table, 1.0)
+    assert not remember_live_ids(memory, table, 2.0)
+    [entry] = memory.values()
+    assert entry["ids"] == ["900"] and entry["destination"] == "Ziel"
 
 
 def test_live_departure_without_plan_becomes_a_trip_with_a_stable_course_key():
@@ -715,7 +751,7 @@ def test_live_only_trip_is_kept_from_memory_until_its_end():
     assert build_trip_table({}, PLAN_ANCHOR, gone, None, memory)["trips"] == []
 
 
-def test_live_only_trips_of_known_plan_services_are_not_duplicated():
+def test_unpaired_departure_with_a_plan_service_id_is_reported():
     plan = {"77": _plan_entry("U1", 6, [("A", 330)])}
     live = {
         "anchor": LIVE_ANCHOR,
@@ -724,25 +760,8 @@ def test_live_only_trips_of_known_plan_services_are_not_duplicated():
 
     table = build_trip_table(plan, PLAN_ANCHOR, live)
 
-    assert not any(t["live_only"] for t in table["trips"])
-    assert [e["reason"] for e in table["live_only"]] == ["ohne Plan-Treffer"]
-
-
-def test_remembered_live_trip_is_dropped_once_the_plan_has_the_service():
-    from hvv_map.trips import remember_live_trips
-
-    first = {
-        "anchor": LIVE_ANCHOR,
-        "departures": [_live("S7", "R", 2, 1, service_id=77)],
-    }
-    memory: dict = {}
-    remember_live_trips(memory, build_trip_table({}, PLAN_ANCHOR, first), 1.0)
-    plan = {"77": _plan_entry("S7", 1, [("R", 302), ("W", 304)])}
-    later = {"anchor": LIVE_ANCHOR, "departures": []}
-
-    table = build_trip_table(plan, PLAN_ANCHOR, later, None, memory)
-
-    assert not any(t["live_only"] for t in table["trips"])
+    assert [t["service_id"] for t in table["trips"] if t["live_only"]] == ["77"]
+    assert [e["reason"] for e in table["live_only"]] == ["Plan-ID ohne Paarung"]
 
 
 def _missing_plan():
@@ -840,14 +859,16 @@ def test_regional_trip_is_expected_within_twenty_minutes_but_a_subway_within_fiv
 
 
 def test_alias_course_with_a_failed_main_course_fetch_does_not_crash():
-    from hvv_map.trips import _plan_trips, alias_course_key, course_key
+    from hvv_map.trips import alias_course_key
 
-    first = _live("U1", "A", 2, 6, service_id=7, platform="Gleis 1")
-    twin = _live("U1", "A", 2, 6, service_id=999, platform="Gleis 1")
-    plan = {"1": _plan_entry("U1", 6, [("A", 302)])}
-    key = course_key(_plan_trips(plan, PLAN_ANCHOR)[0])
+    first = _s1_live(2, 7, "Hamburg Airport (Flughafen)")
+    twin = _s1_live(2, 999, "Poppenbüttel / Hamburg Airport (Flughafen)")
+    plan = _s1_plan()
     courses = {
-        key: {"fetched_at": 1, "stops": None},  # departureCourse failed
+        alias_course_key("7"): {
+            "fetched_at": 1,
+            "stops": None,
+        },  # departureCourse failed
         alias_course_key("999"): _course(
             ("A", "a", None, "09:02"), ("B", "b", "09:05", None)
         ),
@@ -862,17 +883,19 @@ def test_alias_course_with_a_failed_main_course_fetch_does_not_crash():
     assert alias["shared_from"] is None
 
 
-def test_a_departure_heading_to_a_station_the_trip_already_left_does_not_match():
-    plan = {"1": _plan_entry("U1", 6, [("A", 302), ("B", 306), ("C", 310)])}
-    back = _live("U1", "B", 6, 6, service_id=777)
-    back["line"]["direction"] = "A"  # opposite direction, same minute and id
-    ahead = _live("U1", "B", 6, 6, service_id=555)
-    ahead["line"]["direction"] = "C"
-    live = {"anchor": LIVE_ANCHOR, "departures": [back, ahead]}
+def test_anchor_outside_the_course_is_left_out_and_reported():
+    from hvv_map.trips import alias_course_key
 
-    table = build_trip_table(plan, PLAN_ANCHOR, live)
+    plan = {"1": _plan_entry("U1", 6, [("A", 302), ("B", 306)], "B")}
+    live = {"anchor": LIVE_ANCHOR, "departures": [_live("U1", "A", 2, 6)]}
+    courses = {
+        alias_course_key("900"): _course(
+            ("A", "a", None, "09:02"), ("X", "x", "09:04", None)
+        )
+    }
 
-    plan_trip = next(t for t in table["trips"] if not t["live_only"])
-    own_trip = next(t for t in table["trips"] if t["live_only"])
-    assert plan_trip["live_ids"] == ["555"]
-    assert own_trip["service_id"] == "777"
+    row = build_trip_table(plan, PLAN_ANCHOR, live, courses)["trips"][0]
+
+    assert [s["station_id"] for s in row["stops"]] == ["A", "X"]
+    assert row["anchors_outside_course"] == ["B"]
+    assert (row["destination_announced"], row["destination"]) == ("Ziel", "x")
