@@ -194,6 +194,11 @@
             font-weight: 700;
         }
 
+        .stops tr.mismatch td {
+            color: var(--late);
+            font-weight: 600;
+        }
+
         .stops td {
             background: rgba(127, 127, 127, 0.08);
             padding: 6px 12px 10px 36px;
@@ -282,7 +287,7 @@
     </header>
     <main>
         <div class="count-line" id="count-line"></div>
-        <div class="count-line">Rot: ein angekündigtes Ziel kommt im departureCourse nicht vor. Vorgemerkt: die Karte
+        <div class="count-line">Rot: ein angekündigtes Ziel oder ein Anker kommt im departureCourse nicht vor. Vorgemerkt: die Karte
             soll in diesem Fall das Ziel aus dem Kurs verwenden.</div>
         <div class="table-wrap">
             <table>
@@ -541,19 +546,19 @@
                 for (const stop of branch.stops) table.append(courseRow(stop, anchors, [branch.id], className));
             });
             for (const stop of parts.tail) table.append(courseRow(stop, anchors, null, ''));
-            // anchor departures at stops the course does not contain
+            // anchor stops the course does not contain
             const inCourse = new Set([...parts.head, ...parts.tail,
                 ...parts.branches.flatMap(b => b.stops)].map(stop => stop.id));
-            const extra = trip.stops.filter(stop => !inCourse.has(stop.stationId) && stop.lives.length);
+            const extra = trip.stops.filter(stop => !inCourse.has(stop.stationId));
             if (extra.length) {
-                const label = el('tr', 'branch');
-                const td = el('td', 'mismatch', 'Abfahrten an Halten, die der Kurs nicht enthält');
+                const label = el('tr', 'branch mismatch');
+                const td = el('td', null, 'Anker, die der Kurs nicht enthält');
                 td.colSpan = STOP_TITLES.length;
                 label.append(td);
                 table.append(label);
                 for (const stop of extra) {
-                    const row = courseRow({ id: stop.stationId, name: stop.station, platform: null }, anchors, null, '');
-                    table.append(row);
+                    table.append(courseRow({ id: stop.stationId, name: stop.station, platform: null },
+                        anchors, null, 'mismatch'));
                 }
             }
             return table;
@@ -603,6 +608,14 @@
             } catch (error) {
                 // courses are optional
             }
+        }
+
+        // Anchor stops of a trip that none of its known courses contains.
+        function anchorsOutsideCourse(trip, group) {
+            const ids = [...new Set(group.lives.map(l => String(l.service_id)))].filter(id => courses[id]);
+            if (!ids.length) return [];
+            const inCourse = new Set(ids.flatMap(id => courses[id].stops.map(stop => stop.id)));
+            return trip.stops.filter(stop => !inCourse.has(stop.stationId));
         }
 
         // End stops of the known courses of a trip and the announced
@@ -664,6 +677,12 @@
                 if (destinations?.missing.length) {
                     courseCell.title = 'Angekündigt, aber nicht im Kurs: ' + destinations.missing.join(', ');
                     courseCell.append(' ', el('span', 'tag', 'Karte: Kurs-Ziel'));
+                }
+                const outside = anchorsOutsideCourse(trip, group);
+                if (outside.length) {
+                    const tag = el('span', 'tag', 'Anker nicht im Kurs');
+                    tag.title = outside.map(stop => stop.station).join(', ');
+                    courseCell.append(' ', tag);
                 }
                 tr.append(courseCell);
                 tr.append(el('td', 'muted', trip.liveOnly ? '' : trip.id));
