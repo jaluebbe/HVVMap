@@ -169,6 +169,43 @@ def _label_destination(row: dict, now: datetime, ferry: bool) -> str:
     return row["destination"]
 
 
+def _drawn_by_others(trips: list[dict], now: datetime) -> tuple[set, set]:
+    """(rows to skip, wing ids not to draw): one train part is drawn once.
+    A trip without a current live departure whose course belongs to another
+    trip's live id is skipped. A trip whose live id is another trip's wing
+    part is skipped while the coupled train runs as one; after the split it
+    draws that part instead of the other trip's wing."""
+    wings = {
+        alias["service_id"]: (row, alias)
+        for row in trips
+        for alias in row["alias_courses"]
+    }
+    primaries = {sid: row for row in trips for sid in row.get("primary_ids") or []}
+    skip, hidden = set(), set()
+    for row in trips:
+        ids = row.get("primary_ids") or []
+        if not ids:
+            course_id = row.get("course_id")
+            other = primaries.get(course_id) or (wings.get(course_id) or (None,))[0]
+            if other is not None and other is not row:
+                skip.add(id(row))
+            continue
+        for service_id in ids:
+            owner, alias = wings.get(service_id) or (None, None)
+            if owner is None or owner is row:
+                continue
+            position = locate(_alias_stops(alias), now, owner["mode"] == "FERRY")
+            if (
+                position
+                and position.state in (AT_STOP, BETWEEN)
+                and _is_shared(alias, position)
+            ):
+                skip.add(id(row))
+            else:
+                hidden.add(service_id)
+    return skip, hidden
+
+
 def build_positions(
     table: dict,
     now: datetime,
@@ -181,8 +218,9 @@ def build_positions(
     `cache` keeps segment tracks between calls on the same data."""
     cache = {} if cache is None else cache
     features = []
+    skip, hidden = _drawn_by_others(table["trips"], now)
     for row in table["trips"]:
-        if row["status"] in (STATUS_CANCELLED, STATUS_MISSING):
+        if row["status"] in (STATUS_CANCELLED, STATUS_MISSING) or id(row) in skip:
             continue
         ferry = row["mode"] == "FERRY"
         stops = stops_from_row(row)
@@ -198,6 +236,8 @@ def build_positions(
                     _feature(row, destination, position, point, delay, straight)
                 )
         for alias in row["alias_courses"]:
+            if alias["service_id"] in hidden:
+                continue
             position = locate(_alias_stops(alias), now, ferry)
             if (
                 not position

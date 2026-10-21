@@ -171,6 +171,46 @@ def test_without_an_own_course_the_label_stays():
     assert _label(row) == {"1": "C"}
 
 
+def _wing_part(**extra):
+    """A trip of its own for the wing part 999 (e.g. a plan trip from the
+    split station on), running on the alias course's stops."""
+    return _row(
+        id="2",
+        primary_ids=["999"],
+        destination="Other",
+        stops=[
+            _stop("A", None, "09:00"),
+            _stop("B", "09:04", "09:05"),
+            _stop("D", "09:09", None),
+        ],
+        **extra,
+    )
+
+
+def _ids(rows, now=NOW):
+    table = {"trips": rows}
+    return sorted(
+        f["properties"]["journeyID"]
+        for f in build_positions(table, now, STATIONS)["features"]
+    )
+
+
+def test_trip_of_a_wing_part_is_not_drawn_while_the_train_runs_as_one():
+    main = _row(primary_ids=["1"], alias_courses=[_split_alias()])
+    assert _ids([main, _wing_part()]) == ["1"]
+
+
+def test_trip_of_a_wing_part_draws_the_branch_after_the_split():
+    main = _row(primary_ids=["1"], alias_courses=[_split_alias()])
+    assert _ids([main, _wing_part()], datetime(2026, 10, 17, 9, 7)) == ["1", "2"]
+
+
+def test_trip_without_live_departure_on_another_trips_course_is_not_drawn():
+    main = _row(primary_ids=["1"], alias_courses=[_split_alias()])
+    remembered = _row(id="3", primary_ids=[], course_id="999")
+    assert _ids([main, remembered]) == ["1"]
+
+
 class _FakeRedis:
     def __init__(self, values=None):
         self.values = dict(values or {})
