@@ -134,6 +134,31 @@ def test_split_train_shows_the_other_branch_after_the_split():
     assert other["geometry"]["coordinates"][0] == 2.0  # halfway between B(1) and D(3)
 
 
+def test_coupled_train_shows_the_wing_destination_that_contains_its_own():
+    alias = {**_split_alias(), "destination_announced": "Other / D"}
+
+    [feature] = _positions(_row(alias_courses=[alias]))
+
+    assert feature["properties"]["label"] == "Other / D"
+
+
+def test_coupled_train_keeps_its_own_destination_after_the_split():
+    alias = {**_split_alias(), "destination_announced": "Other / D"}
+
+    features = _positions(_row(alias_courses=[alias]), datetime(2026, 10, 17, 9, 7))
+
+    labels = {f["properties"]["journeyID"]: f["properties"]["label"] for f in features}
+    assert labels == {"1": "D", "999": "Other"}
+
+
+def test_wing_destination_without_the_own_one_does_not_win():
+    alias = {**_split_alias(), "destination_announced": "Wedel"}
+
+    [feature] = _positions(_row(alias_courses=[alias]))
+
+    assert feature["properties"]["label"] == "D"
+
+
 class _FakeRedis:
     def __init__(self, values=None):
         self.values = dict(values or {})

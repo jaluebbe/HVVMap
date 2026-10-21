@@ -147,6 +147,25 @@ def _is_shared(alias: dict, position: Position) -> bool:
     return all(shared(i) for i in ends)
 
 
+def _label_destination(row: dict, now: datetime, ferry: bool) -> str:
+    """While a coupled train runs as one, a wing part's announced destination
+    that contains the trip's own wins (e.g. "Poppenbüttel / Hamburg Airport"
+    over "Hamburg Airport")."""
+    own = row["destination"] or ""
+    for alias in row["alias_courses"]:
+        announced = alias.get("destination_announced") or ""
+        if not own or own not in announced or announced == own:
+            continue
+        position = locate(_alias_stops(alias), now, ferry)
+        if (
+            position
+            and position.state in (AT_STOP, BETWEEN)
+            and _is_shared(alias, position)
+        ):
+            return announced
+    return row["destination"]
+
+
 def build_positions(
     table: dict,
     now: datetime,
@@ -171,8 +190,9 @@ def build_positions(
             if placed:
                 point, straight = placed
                 delay = row["stops"][position.index]["delay"]
+                destination = _label_destination(row, now, ferry)
                 features.append(
-                    _feature(row, row["destination"], position, point, delay, straight)
+                    _feature(row, destination, position, point, delay, straight)
                 )
         for alias in row["alias_courses"]:
             position = locate(_alias_stops(alias), now, ferry)
