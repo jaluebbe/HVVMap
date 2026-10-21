@@ -49,6 +49,7 @@ ANCHOR_STATIONS_MAIN = {
     "Hamburg Airport (Flughafen)", "Elbphilharmonie", "Wedel", "Blankenese",
     "Aumühle", "Stephansplatz (Oper/CCH)", "Ohlsdorf", "Wandsbek Markt",
     "Saarlandstraße", "dodenhof",
+    "Rübenkamp (City Nord)",  # last stop before the S1 Airport/Poppenbüttel split
 } - PSEUDO_STATIONS  # fmt: skip
 MAIN_SERVICE_TYPES = ["SBAHN", "UBAHN", "AKN", "FAEHRE"]
 
