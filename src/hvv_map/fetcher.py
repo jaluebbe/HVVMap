@@ -41,6 +41,7 @@ ANNOUNCEMENTS_INTERVAL = 600.0  # seconds between getAnnouncements calls (10 min
 STATIONS_INTERVAL = 6 * 3600.0  # seconds between listStations calls (6 h)
 SUBLINES_CACHE_INTERVAL = 3600.0  # seconds between hvv:sublines updates (1h)
 LIVE_DEPARTURES_INTERVAL = 240.0  # seconds between live departure snapshots (4 min)
+LIVE_RETRY_SECONDS = 30.0  # retry of a live snapshot that could not be stored
 TRIP_COURSES_INTERVAL = 120.0  # seconds between trip course fetches (2 min)
 GTI_SHAPES_INTERVAL = 1800.0  # seconds between subline/track updates (30 min)
 DAILY_DEPARTURES_INTERVAL = 3600.0  # seconds between daily snapshot checks (1h)
@@ -80,14 +81,14 @@ def fetch_stations_catalog() -> None:
     store_stations(redis_client, fetch_stations(gti))
 
 
-def fetch_live_departures_snapshot() -> None:
+def fetch_live_departures_snapshot() -> bool:
+    """True if a snapshot was stored."""
     data = run_live_snapshot(gti, redis_client)
-    if data["failed_requests"]:
-        print(
-            "[hvvmap-fetcher] live departures: "
-            f"{data['failed_requests']} failed requests",
-            flush=True,
-        )
+    for error in data["errors"]:
+        print(f"[hvvmap-fetcher] live departures: {error}", flush=True)
+    if not data["complete"]:
+        print("[hvvmap-fetcher] live departures: kept the old snapshot", flush=True)
+    return data["complete"]
 
 
 def fetch_trip_courses() -> None:
@@ -153,7 +154,11 @@ def main() -> None:
                 fetch_daily_departures()
             elif cycle_start - last_live_departures >= LIVE_DEPARTURES_INTERVAL:
                 last_live_departures = cycle_start
-                fetch_live_departures_snapshot()
+                if not fetch_live_departures_snapshot():
+                    # retry soon instead of after the full interval
+                    last_live_departures -= (
+                        LIVE_DEPARTURES_INTERVAL - LIVE_RETRY_SECONDS
+                    )
             elif cycle_start - last_trip_courses >= TRIP_COURSES_INTERVAL:
                 last_trip_courses = cycle_start
                 fetch_trip_courses()
