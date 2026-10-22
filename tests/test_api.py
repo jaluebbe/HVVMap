@@ -7,6 +7,7 @@ import redis
 from fastapi.testclient import TestClient
 
 import hvv_map.api as api_module
+from hvv_map.course_log import log_calls
 from hvv_map.redis_client import get_redis_client
 
 
@@ -437,3 +438,53 @@ def test_known_courses_returns_the_newest_course_per_live_service_id(
     assert list(data["courses"]) == ["7"]
     assert data["courses"]["7"]["fetched_at"] == 20
     assert data["courses"]["7"]["vehicles"] == ["417", "9"]
+
+
+def test_course_log_returns_the_newest_calls_first(client):
+    redis_client = get_redis_client()
+    redis_client.delete("hvv:courses:log")
+    log_calls(
+        redis_client,
+        [{"kind": "track", "at": 1}, {"kind": "trip", "at": 2}],
+    )
+
+    calls = client.get("/api/hvv/live/course-log.json").json()["calls"]
+
+    assert [c["at"] for c in calls] == [2, 1]
+    redis_client.delete("hvv:courses:log")
+
+
+def test_course_cache_counts_live_ids_by_course_state(client, monkeypatch):
+    line = {"name": "U1", "type": {"shortInfo": "U"}}
+    deps = [
+        {"line": line, "serviceId": sid, "timeOffset": 1, "station": {}}
+        for sid in (1, 2, 3)
+    ]
+    stops = [{"id": "A", "dep": "2026-10-22T09:00"}]
+    now = api_module.time.time()
+    fake = _FakeRedis(
+        {
+            "hvv:trips:courses": {
+                "fetched_at": 1,
+                "data": {
+                    "live:1": {"fetched_at": now - 60, "stops": stops},
+                    "live:2": {"fetched_at": now - 600, "stops": None},
+                },
+            },
+            "hvv:departures:live": {"fetched_at": 5, "data": {"departures": deps}},
+        }
+    )
+    monkeypatch.setattr(api_module, "_redis_client", fake)
+
+    data = client.get("/api/hvv/live/course-cache.json").json()
+
+    assert data["live_fetched_at"] == 5
+    [row] = data["lines"]
+    assert (row["line"], row["live"], row["ok"], row["failed"], row["missing"]) == (
+        "U1",
+        3,
+        1,
+        1,
+        1,
+    )
+    assert data["total"]["stale"] == 0 and 55 <= data["total"]["age"]["median"] <= 65

@@ -4,7 +4,9 @@ live snapshot (hvv:departures:live)."""
 
 import json
 import sys
+import time
 
+from hvv_map.course_log import KIND_MANUAL, call_entry, log_calls
 from hvv_map.departures_live import REDIS_LIVE_KEY
 from hvv_map.gti_client import GtiClient
 from hvv_map.redis_client import get_redis_client
@@ -45,20 +47,34 @@ def main() -> None:
     args = [a for a in sys.argv[1:] if not a.startswith("--")]
     if not args:
         raise SystemExit(main.__doc__)
-    raw = get_redis_client().get(REDIS_LIVE_KEY)
+    redis_client = get_redis_client()
+    raw = redis_client.get(REDIS_LIVE_KEY)
     request = course_request(
         json.loads(raw)["data"], int(args[0]), args[1] if len(args) > 1 else None
     )
     if request is None:
         raise SystemExit(f"serviceId {args[0]} not in the live snapshot")
     request["showPath"] = "--path" in sys.argv
+    started = time.time()
     response = GtiClient().send("departureCourse", request)
+    stops = parse_course(response)
+    log_calls(
+        redis_client,
+        [
+            call_entry(
+                KIND_MANUAL,
+                request,
+                "ok" if stops else "no course",
+                started,
+                stops=len(stops or []),
+            )
+        ],
+    )
     if "--path" in sys.argv:
         print(format_tracks(response))
         return
     if "--json" in sys.argv:
         print(json.dumps(response, ensure_ascii=False, indent=1))
         return
-    stops = parse_course(response)
     print(f"{request['station']['name']} {request['time']} {request['lineId']}")
     print(format_course(stops) if stops else f"no course: {response}")

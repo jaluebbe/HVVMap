@@ -63,6 +63,13 @@ class _Redis:
     def set(self, key, value, ex=None):
         self.values[key] = value
 
+    def lpush(self, key, *values):
+        self.lists = getattr(self, "lists", {})
+        self.lists[key] = list(reversed(values)) + self.lists.get(key, [])
+
+    def ltrim(self, key, start, end):
+        self.lists[key] = self.lists[key][start : end + 1]
+
 
 class _Client:
     def __init__(self):
@@ -254,7 +261,7 @@ def test_running_course_is_refreshed_with_its_stored_request_between_anchors():
         None, cached, datetime(2026, 10, 17, 11, 0), now_ts
     )
 
-    assert running == [("live:5", {"serviceId": 5})]
+    assert running == [("live:5", {"serviceId": 5}, "between")]
     assert later == []
 
 
@@ -266,7 +273,10 @@ def test_missing_courses_come_before_old_ones():
     jobs = trip_courses.course_jobs(
         live, _cached(5, age=3600), NOW, trip_courses.time.time()
     )
-    assert [key for key, _ in jobs] == ["live:6", "live:5"]
+    assert [(key, reason) for key, _, reason in jobs] == [
+        ("live:6", "new"),
+        ("live:5", "age"),
+    ]
 
 
 def _between(service_id, age, delay=0, last="2026-10-17T10:00"):
@@ -303,7 +313,12 @@ def test_refresh_prefers_trips_between_anchors_then_delayed_ones():
     }
     cached["live:5"]["stops"][0]["id"] = "A"
     jobs = trip_courses.course_jobs(live, cached, now, trip_courses.time.time())
-    assert [key for key, _ in jobs] == ["live:8", "live:7", "live:6", "live:5"]
+    assert [(key, reason) for key, _, reason in jobs] == [
+        ("live:8", "between"),
+        ("live:7", "between"),
+        ("live:6", "between"),
+        ("live:5", "age"),
+    ]
 
 
 def test_course_ending_soon_is_not_refreshed():
@@ -312,3 +327,40 @@ def test_course_ending_soon_is_not_refreshed():
         None, _between(6, 600), now, trip_courses.time.time()
     )
     assert jobs == []
+
+
+def test_course_calls_are_logged_with_reason_and_result(monkeypatch):
+    monkeypatch.setattr(trip_courses.time, "sleep", lambda _: None)
+    redis = _redis([_dep(7)])
+
+    run_trip_courses(_Client(), redis, NOW)
+
+    [entry] = [json.loads(raw) for raw in redis.lists["hvv:courses:log"]]
+    assert (entry["kind"], entry["reason"], entry["result"]) == ("trip", "new", "ok")
+    assert (entry["line"], entry["service_id"], entry["station"]) == ("U1", "7", "a")
+    assert entry["stops"] > 0 and entry["delay_change"] is None
+
+
+def test_delay_change_compares_shared_stops():
+    old = [{"id": "A", "dep": "09:00", "dep_delay": 60}, {"id": "B", "arr": "09:05"}]
+    new = [
+        {"id": "A", "dep": "09:00", "dep_delay": 240},
+        {"id": "C", "dep": "09:10", "dep_delay": 900},
+    ]
+    assert trip_courses.delay_change(old, new) == 180
+    assert trip_courses.delay_change(None, new) is None
+
+
+def test_cache_summary_counts_live_ids_and_trips_between_anchors():
+    from hvv_map.course_cache import cache_summary
+
+    now = datetime(2026, 10, 17, 9, 10)
+    live = {"departures": [{**_dep(5), "cancelled": True}, _dep(6), _dep(7)]}
+    cached = {**_cached(6, age=600), **_between(8, 60)}
+
+    summary = cache_summary(cached, live, now, trip_courses.time.time())
+
+    assert summary["total"]["live"] == 2  # cancelled 5 left out
+    assert (summary["total"]["ok"], summary["total"]["missing"]) == (1, 1)
+    assert summary["total"]["stale"] == 1
+    assert summary["between"]["count"] == 1

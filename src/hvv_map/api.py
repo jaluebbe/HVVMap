@@ -13,6 +13,7 @@ import json
 import mimetypes
 import sqlite3
 import threading
+import time
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Request, Response
@@ -21,6 +22,8 @@ from fastapi.responses import FileResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 
 from hvv_map.announcement_categories import classify_category
+from hvv_map.course_cache import cache_summary
+from hvv_map.course_log import COURSE_LOG_MAX, read_calls
 from hvv_map.departures_tree import build_station_tree, parse_anchor
 from hvv_map.gti_shapes import DEFAULT_DB_PATH as GTI_SHAPES_DB_PATH
 from hvv_map.gti_shapes import apply_derived_sublines, read_course_log
@@ -335,6 +338,27 @@ def get_trips():
         plan, _read_anchor(), live_payload["data"], courses, memory, berlin_now()
     )
     return {"fetched_at": live_payload.get("fetched_at"), **table}
+
+
+@app.get("/api/hvv/live/course-log.json", tags=["hvv_live"])
+def get_course_log(limit: int = COURSE_LOG_MAX):
+    """The latest departureCourse calls of all kinds (trip courses, subline
+    tracks, CLI), newest first, for static/dev_courses.html."""
+    return {"calls": read_calls(_redis_client, max(1, min(limit, COURSE_LOG_MAX)))}
+
+
+@app.get("/api/hvv/live/course-cache.json", tags=["hvv_live"])
+def get_course_cache():
+    """Coverage and age of the trip course cache for the live serviceIds,
+    for static/dev_courses.html."""
+    raw = _redis_client.get(REDIS_TRIP_COURSES_KEY)
+    cached = json.loads(raw)["data"] if raw else {}
+    raw_live = _redis_client.get(REDIS_LIVE_KEY)
+    live = json.loads(raw_live) if raw_live else {}
+    return {
+        "live_fetched_at": live.get("fetched_at"),
+        **cache_summary(cached, live.get("data"), berlin_now(), time.time()),
+    }
 
 
 MAX_COURSE_IDS = 100

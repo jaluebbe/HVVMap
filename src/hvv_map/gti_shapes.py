@@ -31,6 +31,7 @@ from datetime import datetime, timedelta
 from typing import TYPE_CHECKING
 from zoneinfo import ZoneInfo
 
+from hvv_map.course_log import KIND_TRACK, call_entry, log_calls
 from hvv_map.geometry import haversine
 from hvv_map.stations import load_stations
 
@@ -273,8 +274,27 @@ def log_course(
     info: dict,
     result: str,
     segments: int,
+    redis_client=None,
+    reason: str | None = None,
 ) -> None:
-    """One row per departureCourse attempt (result "ok" or the error kind)."""
+    """One row per departureCourse attempt (result "ok" or the error kind);
+    calls actually made also go to the Redis course log."""
+    if redis_client is not None and info.get("request"):
+        log_calls(
+            redis_client,
+            [
+                call_entry(
+                    KIND_TRACK,
+                    info["request"],
+                    "ok" if result == "ok" else info.get("error") or "no course",
+                    info["started"],
+                    stops=len(info["legs"]) + 1 if info.get("legs") else 0,
+                    reason=reason,
+                    line=line_name,
+                    ms=info.get("ms"),
+                )
+            ],
+        )
     conn.execute(
         "INSERT INTO course_log (run_id, called_at, subline_key, line_name, "
         "service_id, station, dep_time, result, segments, delays_json, meta_json) "
@@ -551,11 +571,17 @@ def _query_course(
     }
     import requests  # lazy: the api image does not install it
 
+    info["request"] = request
+    info["started"] = time.time()
     try:
         response = client.send("departureCourse", request)
     except requests.RequestException as error:
+        info["ms"] = int((time.time() - info["started"]) * 1000)
+        status = getattr(getattr(error, "response", None), "status_code", None)
+        info["error"] = f"HTTP {status}" if status else type(error).__name__
         time.sleep(1)
         return None, "api", f"request={request!r} error={error}", info
+    info["ms"] = int((time.time() - info["started"]) * 1000)
     time.sleep(1)  # 1 req/s rate limit across all GTI endpoints
     info["legs"] = _course_legs(response)
     info["meta"] = _course_meta(response)
@@ -607,6 +633,8 @@ def update_gti_shapes(
                 info,
                 "ok" if extracted else error,
                 len(extracted[0]) if extracted else 0,
+                redis_client,
+                "new subline" if not resolved else "missing hops",
             )
             if extracted is None:
                 continue
@@ -692,6 +720,7 @@ def derive_unresolved_sublines(
     by_service: dict,
     anchor_start: datetime,
     conn: sqlite3.Connection,
+    redis_client=None,
 ) -> dict:
     """One departureCourse per variant (see variant_key) of the services that
     need one, for stations and track. At most DERIVED_MAX_PER_RUN calls;
@@ -720,6 +749,8 @@ def derive_unresolved_sublines(
             info,
             "ok" if extracted else error,
             len(extracted[0]) if extracted else 0,
+            redis_client,
+            "variant",
         )
         if extracted is None:
             summary["failed"] += 1
@@ -766,7 +797,9 @@ def run_update(
     if anchor_start is None:
         return summary, None
     by_service = _load_by_service(redis_client)
-    derived = derive_unresolved_sublines(client, by_service, anchor_start, conn)
+    derived = derive_unresolved_sublines(
+        client, by_service, anchor_start, conn, redis_client
+    )
     stations = {s.id: s for s in load_stations(redis_client)}
     derived["clipped"] = store_clipped_tracks(conn, by_service, stations)
     derived["gtfs"] = fill_from_gtfs(conn, by_service, stations)

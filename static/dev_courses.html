@@ -154,6 +154,48 @@
             padding: 24px;
             color: var(--muted);
         }
+
+        .muted {
+            color: var(--muted);
+        }
+
+        .stats {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            margin-bottom: 14px;
+        }
+
+        .stat {
+            background: var(--card);
+            border: 1px solid var(--line);
+            border-radius: 6px;
+            padding: 8px 12px;
+            min-width: 150px;
+        }
+
+        .stat b {
+            display: block;
+            font-size: 1.15rem;
+        }
+
+        .stat span {
+            color: var(--muted);
+            font-size: 0.78rem;
+        }
+
+        h2 {
+            font-size: 0.95rem;
+            margin: 18px 0 8px;
+        }
+
+        h2:first-child {
+            margin-top: 0;
+        }
+
+        [hidden] {
+            display: none !important;
+        }
     </style>
 </head>
 
@@ -163,11 +205,22 @@
         <div class="meta" id="meta">lädt …</div>
         <div class="toolbar">
             <span class="tabs">
-                <button data-view="calls" class="active">Abrufe</button>
-                <button data-view="runs">Läufe</button>
+                <button data-view="overview" class="active">Übersicht</button>
+                <button data-view="log">Abrufe</button>
+                <button data-view="calls">Strecken-Historie</button>
+                <button data-view="runs">Strecken-Läufe</button>
             </span>
-            <input type="search" id="search" placeholder="Linie, Station …">
-            <select id="result">
+            <input type="search" id="search" placeholder="Linie, Station, ID …">
+            <select id="kind" data-for="log">
+                <option value="">alle Arten</option>
+                <option value="trip">Fahrten</option>
+                <option value="track">Strecken</option>
+                <option value="manual">manuell</option>
+            </select>
+            <select id="reason" data-for="log">
+                <option value="">alle Gründe</option>
+            </select>
+            <select id="result" data-for="log calls">
                 <option value="">alle Ergebnisse</option>
                 <option value="ok">nur ok</option>
                 <option value="bad">nur Fehler</option>
@@ -179,12 +232,53 @@
 
     <script>
         const ENDPOINT = "/api/hvv/gtilive/courses.json?limit=2000";
-        let data = { calls: [], runs: [] };
-        let view = "calls";
+        const URL_LOG = "/api/hvv/live/course-log.json";
+        const URL_CACHE = "/api/hvv/live/course-cache.json";
+        const REFRESH_MS = 60000;
+        const TRIP_CALLS_PER_10_MIN = 150;  // trip_courses: 30 calls every 2 min
+        let data = { calls: [], runs: [] };   // subline track history (SQLite)
+        let log = [];                         // all departureCourse calls (Redis)
+        let cache = null;                     // trip course cache summary
+        let view = "overview";
+        let historyLoaded = false;
+
+        const KIND_LABELS = { trip: "Fahrt", track: "Strecke", manual: "manuell" };
+        const REASON_LABELS = {
+            new: "neu", other_run: "anderer Lauf", retry: "Wiederholung",
+            station: "Station fehlt", between: "zwischen Ankern", regional: "Regionalzug",
+            delayed: "verspätet", age: "Alter", "new subline": "neue Subline",
+            "missing hops": "fehlende Abschnitte", variant: "Variante",
+        };
+        const MODE_LABELS = {
+            U: "U-Bahn", S: "S-Bahn", AKN: "AKN", R: "Regionalzüge", FERRY: "Fähren",
+        };
 
         const content = document.getElementById("content");
         const search = document.getElementById("search");
         const resultFilter = document.getElementById("result");
+        const kindFilter = document.getElementById("kind");
+        const reasonFilter = document.getElementById("reason");
+
+        const minutes = seconds => seconds === null || seconds === undefined
+            ? "–" : (seconds / 60).toFixed(1).replace(".", ",") + " min";
+        const percent = (part, whole) => whole ? Math.round(100 * part / whole) + " %" : "–";
+
+        function stat(value, label) {
+            const box = document.createElement("div");
+            box.className = "stat";
+            const b = document.createElement("b");
+            b.textContent = value;
+            const span = document.createElement("span");
+            span.textContent = label;
+            box.append(b, span);
+            return box;
+        }
+
+        function heading(text) {
+            const h = document.createElement("h2");
+            h.textContent = text;
+            return h;
+        }
 
         function stamp(seconds) {
             return seconds
@@ -410,33 +504,181 @@
             return [t, data.runs.length];
         }
 
+        // Calls of the last `seconds` from the Redis log.
+        const recent = seconds => log.filter(c => c.at >= Date.now() / 1000 - seconds);
+
+        function renderOverview() {
+            const box = document.createElement("div");
+            if (cache) {
+                const t = cache.total;
+                box.append(heading("Course-Bestand der Fahrten (Live-serviceIds)"));
+                const stats = document.createElement("div");
+                stats.className = "stats";
+                stats.append(
+                    stat(t.live, "Live-serviceIds"),
+                    stat(`${t.ok} (${percent(t.ok, t.live)})`, "mit Course"),
+                    stat(t.missing, "ohne Course"),
+                    stat(t.failed, "fehlgeschlagen"),
+                    stat(t.stale, `älter als ${cache.refresh_seconds / 60} min`),
+                    stat(`${minutes(t.age.median)} / ${minutes(t.age.p90)}`, "Alter Median / 90 %"),
+                    stat(`${cache.between.count} · ${minutes(cache.between.age.median)}`,
+                        "zwischen Ankern · Alter Median"),
+                );
+                box.append(stats);
+            }
+            const hour = recent(3600);
+            const trips = hour.filter(c => c.kind === "trip");
+            const tenMinutes = recent(600).filter(c => c.kind === "trip").length;
+            box.append(heading("Abrufe der letzten Stunde"));
+            const calls = document.createElement("div");
+            calls.className = "stats";
+            const failed = hour.filter(c => c.result !== "ok").length;
+            const ms = hour.map(c => c.ms).filter(x => x != null);
+            calls.append(
+                stat(trips.length, "Fahrten"),
+                stat(hour.filter(c => c.kind === "track").length, "Strecken"),
+                stat(hour.filter(c => c.kind === "manual").length, "manuell"),
+                stat(`${failed} (${percent(failed, hour.length)})`, "Fehler"),
+                stat(`${tenMinutes} / ${TRIP_CALLS_PER_10_MIN}`, "Fahrten-Budget, 10 min"),
+                stat(ms.length ? Math.round(ms.reduce((a, b) => a + b, 0) / ms.length) + " ms" : "–",
+                    "Antwortzeit Mittel"),
+            );
+            box.append(calls);
+            const reasons = {};
+            for (const c of trips) reasons[c.reason] = (reasons[c.reason] || 0) + 1;
+            const changed = trips.filter(c => c.delay_change !== null && c.delay_change !== undefined);
+            const moved = changed.filter(c => c.delay_change >= 120).length;
+            const reasonLine = document.createElement("div");
+            reasonLine.className = "muted";
+            reasonLine.textContent = "Gründe: " + (Object.entries(reasons)
+                .sort((a, b) => b[1] - a[1])
+                .map(([r, n]) => `${REASON_LABELS[r] || r} ${n}`).join(" · ") || "–") +
+                ` · Verspätung um ≥ 2 min geändert: ${moved} von ${changed.length} erneuten Abrufen`;
+            box.append(reasonLine);
+
+            if (cache) {
+                box.append(heading("Je Linie"));
+                const t = table(["Linie", "Verkehrsmittel", "Live-IDs", "mit Course", "ohne",
+                    "fehlgeschl.", "veraltet", "Alter Median", "90 %", "max"], [2, 3, 4, 5, 6, 7, 8, 9]);
+                for (const row of cache.lines) {
+                    const tr = document.createElement("tr");
+                    cell(tr, row.line);
+                    cell(tr, MODE_LABELS[row.mode] || row.mode);
+                    cell(tr, String(row.live), "num");
+                    cell(tr, String(row.ok), "num");
+                    cell(tr, String(row.missing), row.missing ? "num bad" : "num");
+                    cell(tr, String(row.failed), row.failed ? "num bad" : "num");
+                    cell(tr, String(row.stale), "num");
+                    cell(tr, minutes(row.age.median), "num");
+                    cell(tr, minutes(row.age.p90), "num");
+                    cell(tr, minutes(row.age.max), "num");
+                    t.appendChild(tr);
+                }
+                box.append(t);
+            }
+            return [box, 1];
+        }
+
+        function renderLog() {
+            const t = table(["Zeit", "Art", "Grund", "Linie", "serviceId", "Station",
+                "angefragt", "Ergebnis", "Halte", "Verspätung Δ", "Dauer"], [8, 9, 10]);
+            let shown = 0;
+            for (const c of log) {
+                if (kindFilter.value && c.kind !== kindFilter.value) continue;
+                if (reasonFilter.value && c.reason !== reasonFilter.value) continue;
+                const f = resultFilter.value;
+                if (f && f !== "vehicle" && (f === "ok") !== (c.result === "ok")) continue;
+                if (!matches([c.line, c.station, c.service_id].join(" "))) continue;
+                if (++shown > 1000) break;
+                const row = document.createElement("tr");
+                cell(row, stamp(c.at));
+                cell(row, KIND_LABELS[c.kind] || c.kind);
+                cell(row, REASON_LABELS[c.reason] || c.reason || "–");
+                cell(row, c.line || "–");
+                cell(row, c.service_id);
+                cell(row, c.station || "–");
+                cell(row, c.time ? c.time.slice(11, 16) : "–");
+                cell(row, c.result, c.result === "ok" ? "ok" : "bad");
+                cell(row, String(c.stops), "num");
+                cell(row, c.delay_change === null || c.delay_change === undefined
+                    ? "–" : minutes(c.delay_change), "num");
+                cell(row, c.ms + " ms", "num");
+                t.appendChild(row);
+            }
+            return [t, shown];
+        }
+
+        function fillReasons() {
+            const present = [...new Set(log.map(c => c.reason).filter(Boolean))].sort();
+            const previous = reasonFilter.value;
+            reasonFilter.replaceChildren(new Option("alle Gründe", ""),
+                ...present.map(r => new Option(REASON_LABELS[r] || r, r)));
+            if (present.includes(previous)) reasonFilter.value = previous;
+        }
+
         function render() {
-            const [node, shown] = { calls: renderCalls, runs: renderRuns }[view]();
+            for (const control of document.querySelectorAll("[data-for]")) {
+                control.hidden = !control.dataset.for.split(" ").includes(view);
+            }
+            search.hidden = view === "overview" || view === "runs";
+            const renderers = { overview: renderOverview, log: renderLog, calls: renderCalls, runs: renderRuns };
+            const [node, shown] = renderers[view]();
             content.replaceChildren(shown ? node : Object.assign(
                 document.createElement("div"), { className: "empty", textContent: "Keine Einträge." }));
         }
 
-        document.querySelectorAll(".tabs button").forEach(b => b.addEventListener("click", () => {
+        function renderMeta() {
+            const oldest = log.length ? stamp(log[log.length - 1].at) : "–";
+            const parts = [`${log.length} Abrufe im Protokoll seit ${oldest}`];
+            if (cache?.live_fetched_at) parts.push(`Live-Stand ${stamp(cache.live_fetched_at)}`);
+            if (historyLoaded) parts.push(`Strecken-Historie: ${data.calls.length} Abrufe, ${data.runs.length} Läufe`);
+            document.getElementById("meta").textContent = parts.join(" · ");
+        }
+
+        async function loadJson(url) {
+            const response = await fetch(url, { cache: "no-store" });
+            if (!response.ok) throw new Error(`${url}: HTTP ${response.status}`);
+            return response.json();
+        }
+
+        async function refresh() {
+            try {
+                const [logData, cacheData] = await Promise.all([loadJson(URL_LOG), loadJson(URL_CACHE)]);
+                log = logData.calls;
+                cache = cacheData;
+                fillReasons();
+                renderMeta();
+            } catch (error) {
+                document.getElementById("meta").textContent = `Fehler beim Laden: ${error.message}`;
+            }
+            if (view === "overview" || view === "log") render();
+        }
+
+        async function loadHistory() {
+            if (historyLoaded) return;
+            try {
+                data = await loadJson(ENDPOINT);
+                historyLoaded = true;
+                renderMeta();
+            } catch (error) {
+                document.getElementById("meta").textContent = `Fehler beim Laden: ${error.message}`;
+            }
+        }
+
+        document.querySelectorAll(".tabs button").forEach(b => b.addEventListener("click", async () => {
             view = b.dataset.view;
             document.querySelectorAll(".tabs button").forEach(x => x.classList.toggle("active", x === b));
+            if (view === "calls" || view === "runs") await loadHistory();
             render();
         }));
         search.addEventListener("input", render);
         resultFilter.addEventListener("change", render);
+        kindFilter.addEventListener("change", render);
+        reasonFilter.addEventListener("change", render);
 
-        (async function load() {
-            try {
-                const response = await fetch(ENDPOINT);
-                if (!response.ok) throw new Error(`HTTP ${response.status}`);
-                data = await response.json();
-                const ok = data.calls.filter(c => c.result === "ok").length;
-                document.getElementById("meta").textContent =
-                    `${data.calls.length} Abrufe geladen (${ok} ok), ${data.runs.length} Läufe`;
-            } catch (error) {
-                document.getElementById("meta").textContent = `Fehler beim Laden: ${error.message}`;
-            }
-            render();
-        })();
+        render();
+        refresh();
+        setInterval(refresh, REFRESH_MS);
     </script>
 </body>
 
