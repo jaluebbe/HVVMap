@@ -233,6 +233,10 @@
             font-weight: 700;
         }
 
+        .stops tr.chosen td {
+            background: rgba(30, 100, 160, 0.1);
+        }
+
         .empty {
             padding: 24px;
             color: var(--muted);
@@ -268,6 +272,9 @@
             <label>Linie
                 <select id="line"></select>
             </label>
+            <label>Haltestelle
+                <select id="station"></select>
+            </label>
             <label>Rückblick
                 <select id="past">
                     <option value="10" selected>10 Minuten</option>
@@ -294,7 +301,7 @@
             <table>
                 <thead>
                     <tr>
-                        <th>Start</th>
+                        <th id="start-title">Start</th>
                         <th>Ziel</th>
                         <th>Ziel laut Kurs</th>
                         <th>Plan-ServiceId</th>
@@ -328,6 +335,7 @@
         const sel = {
             mode: document.getElementById('mode'),
             line: document.getElementById('line'),
+            station: document.getElementById('station'),
             past: document.getElementById('past'),
             range: document.getElementById('range'),
         };
@@ -385,8 +393,21 @@
         function fillLines() {
             const mode = (plan?.modes || []).find(m => m.mode === sel.mode.value);
             fill(sel.line, (mode?.lines || []).map(l => [l.id, l.name]));
+            fillStations();
+        }
+
+        function fillStations() {
+            const names = new Map();
+            for (const tree of [plan, live]) {
+                for (const s of lineNode(tree)?.stations || []) names.set(s.id, s.name);
+            }
+            fill(sel.station, [['', 'alle'], ...[...names].sort((a, b) => a[1].localeCompare(b[1], 'de'))]);
             render();
         }
+
+        // The stop of a trip at the chosen station, else its first stop.
+        const shownStop = trip => (sel.station.value
+            && trip.stops.find(s => s.stationId === sel.station.value)) || trip.stops[0];
 
         // Pair plan and live departures station by station with the shared
         // rules and chain the plan departures of one serviceId to a trip.
@@ -507,7 +528,8 @@
         function courseRow(stop, anchors, ids, className) {
             const anchor = anchors.get(stop.id);
             const lives = (anchor?.lives || []).filter(l => !ids || ids.includes(String(l.service_id)));
-            const tr = el('tr', className);
+            const chosen = stop.id === sel.station.value ? ' chosen' : '';
+            const tr = el('tr', className + chosen);
             tr.append(el('td', anchor ? 'time' : '', (anchor ? '● ' : '') + (stop.name || '')));
             if (anchor && anchor.lives.length) {
                 tr.append(plannedCell(anchor));
@@ -577,7 +599,8 @@
             table.append(head);
             const next = trip.stops.find(s => s.at >= now);
             for (const stop of trip.stops) {
-                const tr = el('tr', stop === next ? 'next' : '');
+                const tr = el('tr', (stop === next ? 'next' : '') +
+                    (stop.stationId === sel.station.value ? ' chosen' : ''));
                 const lives = stop.lives;
                 tr.append(el('td', null, stop.station), plannedCell(stop));
                 const delay = el('td');
@@ -648,19 +671,25 @@
             const from = now - Number(sel.past.value);
             const to = now + Number(sel.range.value);
             const { trips, lineName } = buildTrips();
-            const groups = trips.map(trip => {
-                const lives = trip.stops.flatMap(s => s.lives);
-                return { trip, key: trip.key, lives, start: trip.stops[0].at };
-            }).filter(g => g.trip.stops.some(s => s.at >= from && s.at <= to))
+            const station = sel.station.value;
+            document.getElementById('start-title').textContent = station ? 'Abfahrt' : 'Start';
+            const groups = trips.filter(trip => !station || trip.stops.some(s => s.stationId === station))
+                .map(trip => {
+                    const lives = trip.stops.flatMap(s => s.lives);
+                    return { trip, key: trip.key, lives, start: shownStop(trip).at };
+                }).filter(g => station
+                    ? g.start >= from && g.start <= to
+                    : g.trip.stops.some(s => s.at >= from && s.at <= to))
                 .sort((a, b) => a.start - b.start);
 
             for (const group of groups) {
                 const { trip } = group;
-                const first = trip.stops[0];
+                const first = shownStop(trip);
                 const liveIds = [...new Set(group.lives.map(l => String(l.service_id)))];
                 const tr = el('tr', group.start < now - 5 ? 'past' : '');
-                const start = el('td', 'time', clock(group.start) + ' ');
-                const toggle = el('button', 'trip-toggle', (open.has(group.key) ? '▾ ' : '▸ ') + first.station);
+                const start = el('td', 'time', clock(station ? first.lives[0]?.at ?? first.at : group.start) + ' ');
+                const toggle = el('button', 'trip-toggle', (open.has(group.key) ? '▾ ' : '▸ ') +
+                    (station ? 'von ' + trip.stops[0].station : first.station));
                 toggle.type = 'button';
                 toggle.addEventListener('click', () => {
                     if (open.has(group.key)) open.delete(group.key); else open.add(group.key);
@@ -697,9 +726,11 @@
                 const delay = el('td');
                 const upcoming = trip.stops.filter(s => s.lives.length && (s.lives[0].delay != null || s.lives[0].cancelled))
                     .sort((a, b) => a.at - b.at);
-                const shown = upcoming.find(s => s.at >= now - 1) ?? upcoming[upcoming.length - 1];
+                const shown = station ? upcoming.find(s => s === first)
+                    : upcoming.find(s => s.at >= now - 1) ?? upcoming[upcoming.length - 1];
                 const text = shown ? liveDelay(shown.lives[0]) : null;
-                if (text) delay.append(text, ' ', el('span', 'muted', shown.station));
+                if (text) delay.append(text, ' ', el('span', 'muted', station
+                    ? unique(shown.lives.map(l => l.realtime_platform ?? l.platform)) : shown.station));
                 tr.append(delay);
                 tr.append(el('td', 'muted', liveIds.join(' / ')));
                 tr.append(el('td', null, unique(group.lives.map(l => l.vehicle_numbers))));
@@ -766,19 +797,21 @@
             const saved = new URLSearchParams(location.search);
             fillModes();
             if (saved.get('mode')) { sel.mode.value = saved.get('mode'); fillLines(); }
-            if (saved.get('line')) { sel.line.value = saved.get('line'); render(); }
+            if (saved.get('line')) { sel.line.value = saved.get('line'); fillStations(); }
+            if (saved.get('station')) { sel.station.value = saved.get('station'); render(); }
             setInterval(refreshLive, LIVE_REFRESH_MS);
             setInterval(render, 60000);
         }
 
         function remember() {
             history.replaceState(null, '', '?' + new URLSearchParams({
-                mode: sel.mode.value, line: sel.line.value,
+                mode: sel.mode.value, line: sel.line.value, station: sel.station.value,
             }));
         }
 
         sel.mode.addEventListener('change', () => { fillLines(); remember(); });
-        sel.line.addEventListener('change', () => { render(); remember(); });
+        sel.line.addEventListener('change', () => { fillStations(); remember(); });
+        sel.station.addEventListener('change', () => { render(); remember(); });
         sel.past.addEventListener('change', render);
         sel.range.addEventListener('change', render);
         start();

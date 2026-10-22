@@ -3,7 +3,6 @@ from datetime import datetime
 from hvv_map.departures_tree import (
     OTHER_MODE,
     build_station_tree,
-    build_trip_tree,
     parse_anchor,
     refined_model,
     ubahn_series,
@@ -92,51 +91,6 @@ def test_station_tree_puts_unmapped_lines_into_other_mode_last():
     assert modes == ["U", OTHER_MODE]
 
 
-def _service(name, short_info, stops, subline=None):
-    return {
-        "line": {
-            "id": f"id-{name}",
-            "name": name,
-            "origin": stops[0][0],
-            "type": {"shortInfo": short_info},
-        },
-        "directionId": 1,
-        "destination": stops[-1][0],
-        "subline": subline,
-        "stops": [
-            {"timeOffset": offset, "station": {"id": s, "combinedName": s}}
-            for s, offset in stops
-        ],
-    }
-
-
-def test_trip_tree_counts_resolved_sublines_per_line():
-    by_service = {
-        "1": _service("RE8", "RE", [("Hbf", 10), ("Strand", 70)], [{"id": "x"}] * 2),
-        "2": _service("RE8", "RE", [("Hbf", 20), ("Strand", 80)]),
-    }
-    line = build_trip_tree(by_service, ANCHOR)["modes"][0]["lines"][0]
-    assert (line["trip_count"], line["resolved_count"]) == (2, 1)
-    assert [t["subline_stop_count"] for t in line["trips"]] == [2, None]
-
-
-def test_trip_tree_trip_details():
-    by_service = {"7": _service("U1", "U", [("A", 5), ("B", 9)])}
-    trip = build_trip_tree(by_service, ANCHOR)["modes"][0]["lines"][0]["trips"][0]
-    assert trip["service_id"] == "7"
-    assert (trip["origin"], trip["destination"], trip["stop_count"]) == ("A", "B", 2)
-    assert [s["time"] for s in trip["stops"]] == ["04:05", "04:09"]
-
-
-def test_trip_tree_orders_trips_by_first_stop():
-    by_service = {
-        "late": _service("U1", "U", [("A", 50), ("B", 55)]),
-        "early": _service("U1", "U", [("A", 5), ("B", 9)]),
-    }
-    trips = build_trip_tree(by_service, ANCHOR)["modes"][0]["lines"][0]["trips"]
-    assert [t["service_id"] for t in trips] == ["early", "late"]
-
-
 def test_vehicles_text_formats_number_and_falls_back_to_id():
     assert vehicles_text([{"id": "9001", "number": "4711"}, {"id": "7"}]) == (
         "4711, (id 7)"
@@ -145,33 +99,18 @@ def test_vehicles_text_formats_number_and_falls_back_to_id():
     assert vehicles_text([{}]) == ""
 
 
-def test_station_and_trip_tree_carry_vehicles():
+def test_station_tree_carries_vehicles():
     vehicles = [{"id": "9001", "number": "4711"}]
     dep = _dep("U1", "U", "Ochsenzoll", 2, vehicles=vehicles)
     station = build_station_tree([dep], ANCHOR)["modes"][0]["lines"][0]["stations"][0]
     assert station["departures"][0]["vehicles"] == "4711"
 
-    by_service = {
-        "1": {
-            "line": dep["line"],
-            "stops": [
-                {"timeOffset": 2, "station": dep["station"], "vehicles": vehicles}
-            ],
-        }
-    }
-    trip = build_trip_tree(by_service, ANCHOR)["modes"][0]["lines"][0]["trips"][0]
-    assert trip["stops"][0]["vehicles"] == "4711"
 
-
-def test_station_and_trip_tree_carry_line_model():
+def test_station_tree_carries_line_model():
     dep = _dep("U1", "U", "Ochsenzoll", 2)
     dep["line"]["type"]["model"] = "DT5"
     station = build_station_tree([dep], ANCHOR)["modes"][0]["lines"][0]["stations"][0]
     assert station["departures"][0]["model"] == "DT5"
-
-    by_service = {"1": {"line": dep["line"], "stops": []}}
-    trip = build_trip_tree(by_service, ANCHOR)["modes"][0]["lines"][0]["trips"][0]
-    assert trip["model"] == "DT5"
 
 
 def test_station_tree_carries_delay():

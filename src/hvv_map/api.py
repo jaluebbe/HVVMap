@@ -21,7 +21,7 @@ from fastapi.responses import FileResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 
 from hvv_map.announcement_categories import classify_category
-from hvv_map.departures_tree import build_station_tree, build_trip_tree, parse_anchor
+from hvv_map.departures_tree import build_station_tree, parse_anchor
 from hvv_map.gti_shapes import DEFAULT_DB_PATH as GTI_SHAPES_DB_PATH
 from hvv_map.gti_shapes import apply_derived_sublines, read_course_log
 from hvv_map.gtilive_debug import build_debug_geojson
@@ -286,9 +286,8 @@ def get_live_sublines():
     return result
 
 
-# --- Departures debug trees (static/dev_departures.html) --------------------
-# Snapshot of the daily departureList run (departures.py), grouped for
-# browsing - not linked from any map page.
+# --- Departures trees (static/dev_trips_departures.html) --------------------
+# Daily plan snapshot (departures.py) and realtime snapshot, grouped by station.
 
 
 def _read_anchor():
@@ -344,7 +343,7 @@ MAX_COURSE_IDS = 100
 @app.get("/api/hvv/live/courses.json", tags=["hvv_live"])
 def get_known_courses(service_ids: str):
     """Known departureCourses by live serviceId (comma separated), the newest
-    fetch per id, for static/dev_station_departures.html."""
+    fetch per id, for static/dev_trips_departures.html."""
     wanted = {i.strip() for i in service_ids.split(",") if i.strip()}
     if len(wanted) > MAX_COURSE_IDS:
         raise HTTPException(status_code=400, detail="too many service ids")
@@ -367,15 +366,6 @@ def get_known_courses(service_ids: str):
                 ],
             }
     return {"courses": found}
-
-
-@app.get("/api/hvv/live/departures-by-trip.json", tags=["hvv_live"])
-def get_departures_by_trip():
-    """Mode -> line -> trip (serviceId) -> stops, from by_service."""
-    payload = _read_cached_payload(REDIS_BY_SERVICE_KEY)
-    anchor = _read_anchor()
-    tree = build_trip_tree(payload["data"], anchor)
-    return {**_departures_meta(payload, anchor), **tree}
 
 
 # --- gti-live layers: departureList/sublines based ---------------------------
@@ -463,34 +453,6 @@ def get_gtilive_courses(limit: int = 500):
 @app.get("/api/hvv/gtfs/positions.geojson", tags=["hvv_gtfs"])
 def get_gtfs_positions():
     return _read_cached_json("hvv:gtfs:positions")
-
-
-_gtfs_departures_cache: dict = {}  # fetched_at -> {(line, station): departures}
-
-
-@app.get("/api/hvv/gtfs/departures.json", tags=["hvv_gtfs"])
-def get_gtfs_departures(line: str, station: str):
-    """Scheduled departures of today at one station and line from the static
-    GTFS feed (static/dev_station_departures.html)."""
-    payload = _read_cached_payload("hvv:gtfs:departures")
-    stamp = payload.get("fetched_at")
-    if stamp not in _gtfs_departures_cache:
-        index = {}
-        for mode in payload["data"]["modes"]:
-            for line_node in mode["lines"]:
-                for station_node in line_node["stations"]:
-                    key = (line_node["name"], station_node["name"])
-                    index.setdefault(key, []).extend(station_node["departures"])
-        _gtfs_departures_cache.clear()
-        _gtfs_departures_cache[stamp] = index
-    return {
-        "fetched_at": stamp,
-        "anchor": payload["data"]["anchor"],
-        "departures": sorted(
-            _gtfs_departures_cache[stamp].get((line, station), []),
-            key=lambda d: d["offset"],
-        ),
-    }
 
 
 @app.get("/api/hvv/gtfs/lines.geojson", tags=["hvv_gtfs"])
