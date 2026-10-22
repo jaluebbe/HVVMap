@@ -969,3 +969,29 @@ def test_announced_destination_already_passed_gives_way_to_the_course_end():
     assert destination_from_courses(["Ohlsdorf"], [course], before) == "Ohlsdorf"
     assert destination_from_courses(["Ohlsdorf"], [course], after) == "Wedel"
     assert destination_from_courses(["Wedel"], [course], after) == "Wedel"
+
+
+def test_live_delay_carries_on_behind_the_anchor_while_the_course_is_older():
+    from hvv_map.trips import carry_live_delay
+
+    def rows():
+        return [
+            {"match": {"delay": 240}, "delay": 240},
+            {"match": None, "delay": 0},
+            {"match": None, "delay": 60},
+        ]
+
+    from zoneinfo import ZoneInfo
+
+    berlin = ZoneInfo("Europe/Berlin")
+    old = {"fetched_at": datetime(2026, 10, 17, 8, 45, tzinfo=berlin).timestamp()}
+    new = {"fetched_at": datetime(2026, 10, 17, 9, 5, tzinfo=berlin).timestamp()}
+    anchor = datetime(2026, 10, 17, 9, 0)
+
+    stale = rows()
+    carry_live_delay(stale, old, anchor)
+    fresh = rows()
+    carry_live_delay(fresh, new, anchor)
+
+    assert [r["delay"] for r in stale] == [240, None, None]
+    assert [r["delay"] for r in fresh] == [240, 0, 60]

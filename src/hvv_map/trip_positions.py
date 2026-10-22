@@ -22,6 +22,7 @@ from hvv_map.stations import StationInfo, by_id, load_stations
 from hvv_map.trip_courses import REDIS_COURSES_KEY
 from hvv_map.trip_position import AT_STOP, BETWEEN, Position, locate, stops_from_row
 from hvv_map.trips import (
+    COMBINED_DESTINATION,
     REDIS_VEHICLES_KEY,
     STATUS_CANCELLED,
     STATUS_MISSING,
@@ -181,7 +182,9 @@ def _drawn_by_others(trips: list[dict], now: datetime) -> tuple[set, set]:
     to another trip's live id, and a trip whose live id is another trip's own
     serviceId (one vehicle, two plan trips). A trip whose live id is another
     trip's wing part is skipped while the coupled train runs as one; after
-    the split it draws that part instead of the other trip's wing."""
+    the split it draws that part instead of the other trip's wing. Of trips
+    sharing one course, only the one whose serviceId it is (else a
+    confirmed one) is drawn."""
     wings = {
         alias["service_id"]: (row, alias)
         for row in trips
@@ -222,6 +225,20 @@ def _drawn_by_others(trips: list[dict], now: datetime) -> tuple[set, set]:
                 skip.add(id(row))
             else:
                 hidden.add(service_id)
+    by_course = defaultdict(list)
+    for row in trips:
+        if row.get("course_id") and row["status"] not in (
+            STATUS_CANCELLED,
+            STATUS_MISSING,
+        ):
+            by_course[row["course_id"]].append(row)
+    for course_id, rows in by_course.items():
+        keep = (
+            next((r for r in rows if r.get("service_id") == course_id), None)
+            or next((r for r in rows if r.get("primary_ids")), None)
+            or rows[0]
+        )
+        skip.update(id(r) for r in rows if r is not keep)
     return skip, hidden
 
 
@@ -240,6 +257,30 @@ def _without_joined(features: list[dict], unconfirmed: set[int]) -> list[dict]:
     ]
 
 
+def _merge_coupled(features: list[dict], meta: dict[int, tuple]) -> list[dict]:
+    """Confirmed trips of one line and direction at the same spot are one
+    coupled train (e.g. RE7 to Kiel and Flensburg): one feature with all
+    destinations."""
+    groups: dict[tuple, list[dict]] = defaultdict(list)
+    for f in features:
+        if id(f) in meta:
+            groups[(_spot(f), meta[id(f)][0])].append(f)
+    merged = set()
+    for parts in groups.values():
+        if len(parts) < 2:
+            continue
+        first = parts[0]
+        destinations = list(dict.fromkeys(meta[id(f)][1] for f in parts))
+        combined = COMBINED_DESTINATION.join(destinations)
+        props = first["properties"]
+        props["text"] = props["text"].replace(meta[id(first)][1], combined, 1)
+        props["label"] = COMBINED_DESTINATION.join(
+            d.split("(")[0].strip() for d in destinations
+        )
+        merged.update(id(f) for f in parts[1:])
+    return [f for f in features if id(f) not in merged]
+
+
 def build_positions(
     table: dict,
     now: datetime,
@@ -254,6 +295,7 @@ def build_positions(
     features = []
     skip, hidden = _drawn_by_others(table["trips"], now)
     unconfirmed: set[int] = set()
+    confirmed: dict[int, tuple] = {}  # feature -> (direction id, destination)
     for row in table["trips"]:
         if row["status"] in (STATUS_CANCELLED, STATUS_MISSING) or id(row) in skip:
             continue
@@ -268,7 +310,9 @@ def build_positions(
                 delay = row["stops"][position.index]["delay"]
                 destination = _label_destination(row, now, ferry)
                 feature = _feature(row, destination, position, point, delay, straight)
-                if not row.get("primary_ids"):
+                if row.get("primary_ids"):
+                    confirmed[id(feature)] = (row.get("direction_id"), destination)
+                else:
                     unconfirmed.add(id(feature))
                 features.append(feature)
         for alias in row["alias_courses"]:
@@ -298,7 +342,7 @@ def build_positions(
                 )
     return {
         "type": "FeatureCollection",
-        "features": _without_joined(features, unconfirmed),
+        "features": _merge_coupled(_without_joined(features, unconfirmed), confirmed),
     }
 
 

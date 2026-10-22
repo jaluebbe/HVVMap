@@ -370,6 +370,28 @@ def unify_shared_delays(rows: list[dict], main_at: float, aliases: list[dict]):
             row["delay"] = stop["delay"] = delay
 
 
+def carry_live_delay(rows: list[dict], course: dict | None, live_anchor: datetime):
+    """Behind the last stop with a live delay, a course older than the live
+    data gives no delay: the live one carries on (trip_position.apply_delay)."""
+    if not course or not course.get("fetched_at"):
+        return
+    fetched = datetime.fromtimestamp(course["fetched_at"], ZoneInfo("Europe/Berlin"))
+    if fetched.replace(tzinfo=None) >= live_anchor:
+        return
+    last = max(
+        (
+            i
+            for i, row in enumerate(rows)
+            if row["match"] and row["match"].get("delay") is not None
+        ),
+        default=None,
+    )
+    if last is None:
+        return
+    for row in rows[last + 1 :]:
+        row["delay"] = None
+
+
 def _vehicle_fields(
     trip: dict, unique: list, memory: dict | None, course: dict | None = None
 ) -> dict:
@@ -937,6 +959,7 @@ def build_trip_table(
             or trip["stops"]
         )
         stops, outside = _route_rows(trip, live_anchor, window_end, course)
+        carry_live_delay(stops, course, live_anchor)
         alias_courses = _alias_courses(trip, aliases, course, courses, live_anchor)
         rows.append(
             {

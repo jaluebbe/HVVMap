@@ -235,18 +235,17 @@ def test_course_vehicles_are_recorded_as_sightings(monkeypatch):
 
 
 def test_running_course_is_refreshed_with_its_stored_request_between_anchors():
-    stored_request = {"serviceId": 5, "time": "2026-10-17T09:02:00.000+0200"}
-    cached = _cached(5, age=3600, request=stored_request)
+    cached = _between(5, 3600)
     now_ts = trip_courses.time.time()
 
     running = trip_courses.course_jobs(
-        None, cached, datetime(2026, 10, 17, 9, 5), now_ts
+        None, cached, datetime(2026, 10, 17, 9, 10), now_ts
     )
     later = trip_courses.course_jobs(
-        None, cached, datetime(2026, 10, 17, 10, 0), now_ts
+        None, cached, datetime(2026, 10, 17, 11, 0), now_ts
     )
 
-    assert running == [("live:5", stored_request)]
+    assert running == [("live:5", {"serviceId": 5})]
     assert later == []
 
 
@@ -259,3 +258,48 @@ def test_missing_courses_come_before_old_ones():
         live, _cached(5, age=3600), NOW, trip_courses.time.time()
     )
     assert [key for key, _ in jobs] == ["live:6", "live:5"]
+
+
+def _between(service_id, age, delay=0, last="2026-10-17T10:00"):
+    stops = [
+        {"id": "A", "dep": "2026-10-17T09:00", "arr": None, "dep_delay": delay},
+        {
+            "id": "B",
+            "dep": "2026-10-17T09:30",
+            "arr": "2026-10-17T09:29",
+            "dep_delay": delay,
+        },
+        {"id": "C", "dep": None, "arr": last, "arr_delay": delay},
+    ]
+    return {
+        f"live:{service_id}": {
+            "fetched_at": trip_courses.time.time() - age,
+            "stops": stops,
+            "request": {"serviceId": service_id},
+        }
+    }
+
+
+def test_refresh_prefers_trips_between_anchors_then_delayed_ones():
+    now = datetime(2026, 10, 17, 9, 10)
+    live = {
+        "anchor": {"date": "2026-10-17", "time": "09:00:00"},
+        "departures": [_dep(5, offset=10)],
+    }
+    cached = {
+        **_between(5, 4000),  # live, oldest
+        **_between(6, 600),  # between anchors
+        **_between(7, 900),  # between anchors, older
+        **_between(8, 600, delay=300),  # between anchors, delayed
+    }
+    cached["live:5"]["stops"][0]["id"] = "A"
+    jobs = trip_courses.course_jobs(live, cached, now, trip_courses.time.time())
+    assert [key for key, _ in jobs] == ["live:8", "live:7", "live:6", "live:5"]
+
+
+def test_course_ending_soon_is_not_refreshed():
+    now = datetime(2026, 10, 17, 9, 57)
+    jobs = trip_courses.course_jobs(
+        None, _between(6, 600), now, trip_courses.time.time()
+    )
+    assert jobs == []

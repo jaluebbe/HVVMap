@@ -224,6 +224,33 @@ def test_two_plan_trips_of_one_vehicle_are_drawn_once():
     assert _ids([feeder, own]) == ["70311"]
 
 
+def test_trips_sharing_one_course_are_drawn_once():
+    flensburg = _row(id="2468", service_id="2468", primary_ids=[], course_id="2468")
+    kiel = _row(
+        id="2576", service_id="2576", primary_ids=[], course_id="2468", line="U2"
+    )
+    assert _ids([kiel, flensburg]) == ["2468"]
+
+
+def test_confirmed_trips_of_one_direction_at_the_same_spot_are_one_coupled_train():
+    kiel = _row(id="2639", primary_ids=["2639"], direction_id=1, destination="Kiel Hbf")
+    flensburg = _row(
+        id="2454", primary_ids=["2454"], direction_id=1, destination="Flensburg"
+    )
+    back = _row(id="9", primary_ids=["9"], direction_id=6, destination="Hamburg Hbf")
+
+    features = _positions_of([kiel, flensburg, back])
+
+    labels = sorted(f["properties"]["label"] for f in features)
+    assert labels == ["Hamburg Hbf", "Kiel Hbf / Flensburg"]
+    coupled = next(f for f in features if "/" in f["properties"]["label"])
+    assert coupled["properties"]["text"].startswith("Kiel Hbf / Flensburg<br>")
+
+
+def _positions_of(rows, now=NOW):
+    return build_positions({"trips": rows}, now, STATIONS)["features"]
+
+
 class _FakeRedis:
     def __init__(self, values=None):
         self.values = dict(values or {})
