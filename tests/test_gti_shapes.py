@@ -206,6 +206,13 @@ class _FakeRedis:
         value = self.values.get(key)
         return json.dumps({"data": value}) if value is not None else None
 
+    def lpush(self, key, *values):
+        self.lists = getattr(self, "lists", {})
+        self.lists[key] = list(reversed(values)) + self.lists.get(key, [])
+
+    def ltrim(self, key, start, end):
+        self.lists[key] = self.lists[key][start : end + 1]
+
 
 class _FakeClient:
     def __init__(self, response):
@@ -238,6 +245,12 @@ def test_update_gti_shapes_sends_dlid_as_line_id_not_icon_key(tmp_path):
     assert summary == {"resolved": 1, "skipped": 0, "failed": 0, "no_query": 0}
     _, request = client.sent_requests[0]
     assert request["lineId"] == "de:hvv:U1:"
+    [logged] = [json.loads(raw) for raw in redis_client.lists["hvv:courses:log"]]
+    assert (logged["kind"], logged["reason"], logged["result"]) == (
+        "track",
+        "new subline",
+        "ok",
+    )
 
 
 def test_update_gti_shapes_counts_no_query_without_making_a_call(tmp_path):

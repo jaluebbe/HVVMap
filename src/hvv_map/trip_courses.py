@@ -10,6 +10,7 @@ import requests
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
+from hvv_map.course_log import KIND_TRIP, call_entry, log_calls
 from hvv_map.departures import berlin_now
 from hvv_map.gti_client import GtiClient
 from hvv_map.redis_client import get_redis_client
@@ -145,8 +146,19 @@ def _is_running(entry: dict, now: datetime) -> bool:
     return bool(times) and min(times) <= now <= max(times) + slack
 
 
+# Reasons of a course request, see course_jobs
+REASON_NEW = "new"
+REASON_OTHER_RUN = "other_run"  # cached course is another run of the id
+REASON_RETRY = "retry"
+REASON_STATION = "station"  # live departure at a station the course lacks
+REASON_BETWEEN = "between"  # running between anchors, no live departure
+REASON_REGIONAL = "regional"
+REASON_DELAYED = "delayed"
+REASON_AGE = "age"
+
+
 def course_jobs(live: dict | None, cached: dict, now: datetime, now_ts: float):
-    """(cache key, request) per live serviceId whose course is missing, does
+    """(cache key, request, reason) per live serviceId whose course is missing, does
     not run at the departure's time (ids repeat daily), lacks a station the
     id departs from (refetched at that station) or, while running, is older
     than COURSE_REFRESH_SECONDS. These first; of the old ones, trips without
@@ -170,12 +182,12 @@ def course_jobs(live: dict | None, cached: dict, now: datetime, now_ts: float):
         entry = cached.get(key)
         request = _dep_request(start, deps[0])
         if entry is None:
-            urgent.append((key, request))
+            urgent.append((key, request, REASON_NEW))
         elif entry["stops"] is None:
             if _retry_due(entry, now_ts):
-                urgent.append((key, request))
+                urgent.append((key, request, REASON_RETRY))
         elif not course_fits_request(entry["stops"], request):
-            urgent.append((key, request))
+            urgent.append((key, request, REASON_OTHER_RUN))
         else:
             known = {stop["id"] for stop in entry["stops"]}
             outside = [
@@ -185,7 +197,7 @@ def course_jobs(live: dict | None, cached: dict, now: datetime, now_ts: float):
                 and dep["station"]["id"] != entry.get("station_id")
             ]
             if outside:
-                urgent.append((key, _dep_request(start, outside[0])))
+                urgent.append((key, _dep_request(start, outside[0]), REASON_STATION))
             elif now_ts - entry["fetched_at"] >= COURSE_REFRESH_SECONDS:
                 regional = mode_for_line(deps[0].get("line") or {}) == "R"
                 stale.append(
@@ -204,19 +216,24 @@ def course_jobs(live: dict | None, cached: dict, now: datetime, now_ts: float):
             stale.append(
                 (False, entry, entry.get("mode") == "R", key, entry["request"])
             )
-    refresh = [
-        (
-            live_seen,
-            not (regional or _delayed(entry, now)),
-            entry["fetched_at"],
-            key,
-            request,
+    refresh = []
+    for live_seen, entry, regional, key, request in stale:
+        if _ends_soon(entry, now):
+            continue
+        delayed = _delayed(entry, now)
+        reason = (
+            REASON_BETWEEN
+            if not live_seen
+            else (
+                REASON_REGIONAL
+                if regional
+                else REASON_DELAYED if delayed else REASON_AGE
+            )
         )
-        for live_seen, entry, regional, key, request in stale
-        if not _ends_soon(entry, now)
-    ]
-    refresh.sort(key=lambda job: job[:3])
-    return urgent + [(key, request) for *_order, key, request in refresh]
+        order = (live_seen, not (regional or delayed), entry["fetched_at"])
+        refresh.append((order, key, request, reason))
+    refresh.sort(key=lambda job: job[0])
+    return urgent + [job[1:] for job in refresh]
 
 
 def _stop_times(entry: dict) -> list[tuple[datetime, int | None]]:
@@ -243,6 +260,31 @@ def _ends_soon(entry: dict, now: datetime) -> bool:
     return bool(times) and times[-1][0] < now + end
 
 
+def delay_change(old: list[dict] | None, new: list[dict] | None) -> int | None:
+    """Largest delay difference in seconds at the stops both courses share
+    (same station and planned time), None without a comparison."""
+    if not old or not new:
+        return None
+
+    def delays(stops):
+        return {
+            (stop["id"], stop.get("dep") or stop.get("arr")): (
+                stop.get("dep_delay")
+                if stop.get("dep_delay") is not None
+                else stop.get("arr_delay")
+            )
+            for stop in stops
+        }
+
+    before, after = delays(old), delays(new)
+    changes = [
+        abs(after[key] - before[key])
+        for key in before.keys() & after.keys()
+        if before[key] is not None and after[key] is not None
+    ]
+    return max(changes) if changes else None
+
+
 def run_trip_courses(client: GtiClient, redis_client, now: datetime | None = None):
     """Fetch up to COURSE_MAX_CALLS courses by live serviceId; returns
     (fetched, failed)."""
@@ -267,14 +309,20 @@ def run_trip_courses(client: GtiClient, redis_client, now: datetime | None = Non
         str(dep["serviceId"]): mode_for_line(dep.get("line") or {})
         for dep in (live or {}).get("departures", [])
     }
-    for key, request in jobs[:COURSE_MAX_CALLS]:
+    calls = []
+    for key, request, reason in jobs[:COURSE_MAX_CALLS]:
+        started = time.time()
+        result = "ok"
         try:
             response = client.send("departureCourse", request)
         except requests.RequestException as error:
             print(f"[trip_courses] {key} {request['lineId']}: {error}", flush=True)
             response = {}
-        time.sleep(1)  # 1 req/s rate limit across all GTI endpoints
+            status = getattr(getattr(error, "response", None), "status_code", None)
+            result = f"HTTP {status}" if status else type(error).__name__
         stops = parse_course(response)
+        if stops is None and result == "ok":
+            result = "no course"
         if stops is not None and not course_fits_request(stops, request):
             print(
                 f"[trip_courses] {key} {request['lineId']}: "
@@ -282,9 +330,22 @@ def run_trip_courses(client: GtiClient, redis_client, now: datetime | None = Non
                 flush=True,
             )
             stops = None
+            result = "other run"
         if stops is not None:
             sightings += course_sightings(request, response)
         previous = cached.get(key) or {}
+        calls.append(
+            call_entry(
+                KIND_TRIP,
+                request,
+                result,
+                started,
+                stops=len(stops or []),
+                reason=reason,
+                delay_change=delay_change(previous.get("stops"), stops),
+            )
+        )
+        time.sleep(1)  # 1 req/s rate limit across all GTI endpoints
         attempts = 0 if stops else previous.get("attempts", 0) + 1
         cached[key] = {
             "fetched_at": int(time.time()),
@@ -304,6 +365,7 @@ def run_trip_courses(client: GtiClient, redis_client, now: datetime | None = Non
     payload = json.dumps({"fetched_at": int(time.time()), "data": cached})
     redis_client.set(REDIS_COURSES_KEY, payload, ex=COURSES_TTL)
     record(redis_client, sightings)
+    log_calls(redis_client, calls)
     return fetched, failed
 
 

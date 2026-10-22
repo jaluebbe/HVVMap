@@ -11,8 +11,8 @@ one Redis instance:
 - **fetcher** (`hvv_map.fetcher`) - background loop polling the HVV GTI API
   (`getAnnouncements`, `listLines`, `listStations`, `departureList`,
   `departureCourse`), respecting its 1 req/s rate limit. Writes to Redis:
-  `hvv:disruptions`, `hvv:departures:*`, `hvv:trips:courses`, `hvv:stations`,
-  `hvv:sublines`. A second thread (`hvv_map.trip_positions`) computes the
+  `hvv:disruptions`, `hvv:departures:*`, `hvv:trips:courses`,
+  `hvv:courses:log`, `hvv:stations`, `hvv:sublines`. A second thread (`hvv_map.trip_positions`) computes the
   vehicle positions once per second from that data and writes
   `hvv:positions_gtilive`. Needs GTI credentials, no web-facing port.
 - **gtfs-fetcher** (`hvv_map.gtfs_fetcher`) - background loop building the
@@ -151,8 +151,10 @@ Debug pages (`noindex`, only linked from `index.html`):
   station, paired with the rules of `departure_pairing.js`, with the known
   courses of each trip and wing trains.
 - `dev_gtilive_map.html` - gti-live lines and stops with debug properties.
-- `dev_courses.html` - log of the `departureCourse` calls made for subline
-  tracks (not the per-trip courses).
+- `dev_courses.html` - all `departureCourse` calls (trip courses, subline
+  tracks, `hvvmap-course`) from the Redis log `hvv:courses:log` (last 5000
+  calls), coverage and age of the trip course cache per line, and the
+  persistent subline track log (SQLite).
 - `dev_announcements.html`, see below.
 
 `dev_announcements.html` fetches `/api/hvv/live/announcements.json` and lists every
