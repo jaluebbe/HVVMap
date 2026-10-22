@@ -558,7 +558,7 @@
                         const cells = m
                             ? `<td class="ok">${esc(m.quality)}</td><td>${esc(m.service_id)}${wing}</td><td>${esc(m.vehicles)}</td><td>${esc(m.destination)}${m.destination_changed ? ' <span class="warn">≠ Plan</span>' : ''}</td>`
                             : `<td class="${s.expected ? 'warn' : 'muted'}">${s.expected ? 'erwartet, nicht gesehen' : ''}</td><td></td><td></td><td></td>`;
-                        return `<tr class="${s.expected ? 'expected' : ''} ${idx === nextIdx ? 'next' : ''}"><td>${esc(s.station)}</td><td>${esc(s.arr)}</td><td>${dep}</td><td>${delayCell(s.delay)}</td><td>${esc(s.platform)}</td>${cells}</tr>`;
+                        return `<tr class="${s.expected ? 'expected' : ''} ${idx === nextIdx ? 'next' : ''}"><td>${esc(s.station)}</td><td>${esc(s.arr)}</td><td>${dep}</td><td>${m && m.cancelled ? '<span class="late">ausgefallen</span>' : delayCell(s.delay)}</td><td>${esc(s.platform)}</td>${cells}</tr>`;
                     }).join('');
                     html += `<tr class="detail"><td colspan="7">${idLine(t)}<div class="cols"><div class="alias"><table class="inner small"><tr><th>Halt</th><th>an</th><th>ab</th><th>Verspätung</th><th>Gleis</th><th>Paarung</th><th>Live-ID</th><th>Fahrzeuge</th><th>Live-Ziel</th></tr>${stops}</table></div>${(t.alias_courses || []).map(aliasTable).join('')}</div><div class="muted small">~ interpoliert zwischen Ankern · grau: gemeinsamer Abschnitt der Flügelteile</div></td></tr>`;
                 }

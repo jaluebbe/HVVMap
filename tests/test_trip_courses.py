@@ -117,6 +117,15 @@ def _cached(service_id, age=0, station_id="A", request=None):
     }
 
 
+def test_cancelled_departure_gets_no_course(monkeypatch):
+    monkeypatch.setattr(trip_courses.time, "sleep", lambda _: None)
+    redis = _redis([{**_dep(7), "cancelled": True}, _dep(8, "B")])
+    client = _Client()
+
+    assert run_trip_courses(client, redis, NOW) == (1, 0)
+    assert [r["serviceId"] for _, r in client.requests] == [8]
+
+
 def test_course_is_fetched_once_per_live_service_id(monkeypatch):
     monkeypatch.setattr(trip_courses.time, "sleep", lambda _: None)
     redis = _redis([_dep(7, "B", 4), _dep(7, "A", 2)])

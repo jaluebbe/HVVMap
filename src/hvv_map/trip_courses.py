@@ -151,13 +151,15 @@ def course_jobs(live: dict | None, cached: dict, now: datetime, now_ts: float):
     id departs from (refetched at that station) or, while running, is older
     than COURSE_REFRESH_SECONDS. These first; of the old ones, trips without
     a live departure (between anchors) come first, then delayed and regional
-    trains, then the oldest; a course ending soon is not refreshed."""
+    trains, then the oldest; a course ending soon is not refreshed. Cancelled
+    departures are ignored."""
     by_id: dict[str, list] = defaultdict(list)
     if live:
         for dep in live["departures"]:
             if (
                 _is_trip_line(dep.get("line") or {})
                 and dep.get("timeOffset") is not None
+                and not dep.get("cancelled")
             ):
                 by_id[str(dep["serviceId"])].append(dep)
     start = _live_start(live) if live else None

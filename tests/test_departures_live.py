@@ -49,6 +49,7 @@ def test_fetch_live_departures_splits_each_category_into_small_requests(monkeypa
     for endpoint, request in client.requests:
         assert endpoint == "departureList"
         assert request["useRealtime"] is True
+        assert request["allowCancellations"] is True
         assert 0 < len(request["stations"]) <= live.LIVE_CHUNK_STATIONS
         assert request["maxTimeOffset"] == (
             live.LIVE_WINDOW_MINUTES

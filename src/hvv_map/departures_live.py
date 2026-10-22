@@ -49,6 +49,7 @@ def _live_request(
         "maxList": LIVE_MAX_LIST,
         "maxTimeOffset": minutes,
         "useRealtime": True,
+        "allowCancellations": True,  # else cancelled departures are left out
         "stations": [{"type": "STATION", "name": name} for name in sorted(stations)],
         "time": {
             "date": start.strftime("%Y-%m-%d"),
