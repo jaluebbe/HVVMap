@@ -309,7 +309,7 @@ def _between(service_id, age, delay=0, last="2026-10-17T10:00"):
     }
 
 
-def test_refresh_prefers_trips_between_anchors_then_delayed_ones():
+def test_refresh_alternates_between_anchors_and_live_then_delayed_first():
     now = datetime(2026, 10, 17, 9, 10)
     live = {
         "anchor": {"date": "2026-10-17", "time": "09:00:00"},
@@ -325,9 +325,9 @@ def test_refresh_prefers_trips_between_anchors_then_delayed_ones():
     jobs = trip_courses.course_jobs(live, cached, now, trip_courses.time.time())
     assert [(key, reason) for key, _, reason in jobs] == [
         ("live:8", "between"),
+        ("live:5", "age"),
         ("live:7", "between"),
         ("live:6", "between"),
-        ("live:5", "age"),
     ]
 
 
