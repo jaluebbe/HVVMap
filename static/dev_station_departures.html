@@ -446,6 +446,10 @@
 
         function delayCell(live) {
             const cell = el('td');
+            if (live && live.cancelled) {
+                cell.append(el('span', 'delay late', 'ausgefallen'));
+                return cell;
+            }
             if (!live || live.delay === null || live.delay === undefined) {
                 cell.className = 'muted';
                 cell.textContent = live ? 'keine Angabe' : '';

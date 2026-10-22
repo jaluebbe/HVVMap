@@ -465,6 +465,9 @@
                 minutes === 0 ? 'pünktlich' : (minutes > 0 ? '+' : '') + minutes + ' min');
         }
 
+        const liveDelay = live => live.cancelled
+            ? el('span', 'delay late', 'ausgefallen') : delayText(live.delay);
+
         const unique = values => [...new Set(values.filter(Boolean))].join(' / ');
 
         // One planned time per stop: the live planned time, with the plan time
@@ -512,7 +515,7 @@
                 tr.append(el('td', anchor ? 'time' : '', courseTime(stop)));
             }
             const delay = el('td');
-            const text = delayText(lives[0]?.delay ?? courseDelay(stop));
+            const text = lives[0] ? liveDelay(lives[0]) : delayText(courseDelay(stop));
             if (text) delay.append(text);
             tr.append(delay);
             tr.append(el('td', null, anchor ? (anchor.plan ? anchor.plan.platform || ''
@@ -578,7 +581,7 @@
                 const lives = stop.lives;
                 tr.append(el('td', null, stop.station), plannedCell(stop));
                 const delay = el('td');
-                const first = lives[0] ? delayText(lives[0].delay) : null;
+                const first = lives[0] ? liveDelay(lives[0]) : null;
                 if (first) delay.append(first);
                 tr.append(delay);
                 tr.append(el('td', null, stop.plan ? stop.plan.platform || ''
@@ -692,10 +695,10 @@
                 tr.append(el('td', matchedStops ? '' : 'muted',
                     planStops ? matchedStops + ' / ' + planStops + ' Halte' : liveIds.length ? 'nur live' : ''));
                 const delay = el('td');
-                const upcoming = trip.stops.filter(s => s.lives.length && s.lives[0].delay != null)
+                const upcoming = trip.stops.filter(s => s.lives.length && (s.lives[0].delay != null || s.lives[0].cancelled))
                     .sort((a, b) => a.at - b.at);
                 const shown = upcoming.find(s => s.at >= now - 1) ?? upcoming[upcoming.length - 1];
-                const text = shown ? delayText(shown.lives[0].delay) : null;
+                const text = shown ? liveDelay(shown.lives[0]) : null;
                 if (text) delay.append(text, ' ', el('span', 'muted', shown.station));
                 tr.append(delay);
                 tr.append(el('td', 'muted', liveIds.join(' / ')));
