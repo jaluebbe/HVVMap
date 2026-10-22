@@ -170,8 +170,14 @@ body {
     pointer-events: none;
 }
 
-.hvv-labels-hidden .hvv-marker-delay-standalone {
+.hvv-labels-hidden .hvv-marker-delay-standalone,
+.hvv-label-collided .hvv-marker-delay-standalone {
     display: block;
+}
+
+/* Label would overlap other vehicles (see placeVehicleLabels) */
+.hvv-label-collided .hvv-marker-label {
+    display: none;
 }
 
 .hvv-wakelock-active,
