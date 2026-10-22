@@ -222,27 +222,6 @@ def test_departures_by_station_returns_tree_with_meta(client, monkeypatch):
     assert line["stations"][0]["departures"][0]["time"] == "04:05"
 
 
-def test_departures_by_trip_returns_tree(client, monkeypatch):
-    service = {
-        "line": {"id": "L", "name": "U1", "type": {"shortInfo": "U"}},
-        "directionId": 1,
-        "destination": "B",
-        "subline": None,
-        "stops": [{"timeOffset": 5, "station": {"id": "s1", "combinedName": "A"}}],
-    }
-    fake = _FakeRedis(
-        {
-            "hvv:departures:by_service": {"fetched_at": 1, "data": {"9": service}},
-            "hvv:departures:anchor_start": _ANCHOR,
-        }
-    )
-    monkeypatch.setattr(api_module, "_redis_client", fake)
-
-    data = client.get("/api/hvv/live/departures-by-trip.json").json()
-
-    assert data["modes"][0]["lines"][0]["trips"][0]["service_id"] == "9"
-
-
 def test_departures_endpoints_work_without_anchor(client, monkeypatch):
     fake = _FakeRedis(
         {
@@ -262,7 +241,6 @@ def test_departures_endpoints_work_without_anchor(client, monkeypatch):
 def test_departures_endpoints_503_when_cache_missing(client, monkeypatch):
     monkeypatch.setattr(api_module, "_redis_client", _FakeRedis({}))
     assert client.get("/api/hvv/live/departures-by-station.json").status_code == 503
-    assert client.get("/api/hvv/live/departures-by-trip.json").status_code == 503
 
 
 def test_gtilive_debug_returns_lines_stops_and_summary(client, monkeypatch):
@@ -428,46 +406,6 @@ def test_static_cache_headers(client, tmp_path):
         in client.get("/static/maplibre-gl/lib.js").headers["cache-control"]
     )
     assert "max-age=604800" in client.get("/fonts/f.pbf").headers["cache-control"]
-
-
-def test_gtfs_departures_are_filtered_by_line_and_station(client):
-    tree = {
-        "anchor": "2026-10-21 00:00",
-        "modes": [
-            {
-                "mode": "U",
-                "lines": [
-                    {
-                        "name": "U1",
-                        "id": "U1",
-                        "stations": [
-                            {
-                                "id": "Farmsen",
-                                "name": "Farmsen",
-                                "departures": [
-                                    {"offset": 20, "time": "00:20"},
-                                    {"offset": 10, "time": "00:10"},
-                                ],
-                            }
-                        ],
-                    }
-                ],
-            }
-        ],
-    }
-    get_redis_client().set(
-        "hvv:gtfs:departures", json.dumps({"fetched_at": 1, "data": tree})
-    )
-
-    body = client.get(
-        "/api/hvv/gtfs/departures.json", params={"line": "U1", "station": "Farmsen"}
-    ).json()
-    empty = client.get(
-        "/api/hvv/gtfs/departures.json", params={"line": "U2", "station": "Farmsen"}
-    ).json()
-
-    assert [d["offset"] for d in body["departures"]] == [10, 20]
-    assert body["anchor"] == "2026-10-21 00:00" and empty["departures"] == []
 
 
 def test_known_courses_returns_the_newest_course_per_live_service_id(

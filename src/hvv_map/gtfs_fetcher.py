@@ -14,7 +14,6 @@ import os
 import time
 
 from hvv_map.gtfs_geojson import (
-    build_departures_tree,
     build_lines_geojson,
     build_positions_geojson,
     build_stops_geojson,
@@ -31,7 +30,6 @@ REFERENCE_TTL = 24 * 60 * 60  # seconds; rebuilt on feed change anyway
 POSITIONS_KEY = "hvv:gtfs:positions"
 LINES_KEY = "hvv:gtfs:reference_lines"
 STOPS_KEY = "hvv:gtfs:reference_stops"
-DEPARTURES_KEY = "hvv:gtfs:departures"
 
 
 def _store(redis_client, key: str, data: dict, ttl) -> None:
@@ -46,7 +44,6 @@ def _routes_txt_mtime() -> float:
 def _rebuild_reference(redis_client, schedule) -> None:
     _store(redis_client, LINES_KEY, build_lines_geojson(schedule), REFERENCE_TTL)
     _store(redis_client, STOPS_KEY, build_stops_geojson(schedule), REFERENCE_TTL)
-    _store(redis_client, DEPARTURES_KEY, build_departures_tree(schedule), REFERENCE_TTL)
 
 
 def main() -> None:
