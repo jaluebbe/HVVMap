@@ -85,6 +85,7 @@ class LabelToggleControl {
             this._labelsVisible = !this._labelsVisible;
             mapInstance.getContainer().classList.toggle('hvv-labels-hidden');
             button.classList.toggle('hvv-labels-toggle-active', this._labelsVisible);
+            mapInstance.getContainer().dispatchEvent(new Event('hvv-labels-toggled'));
         });
         container.appendChild(button);
         this._container = container;
@@ -488,6 +489,13 @@ function buildMarkerElement(properties) {
             ? `<span class="hvv-marker-delay-standalone" style="left:${labelOffset}px;">${delayText}</span>`
             : '';
         wrapper.innerHTML = `<img src="${properties.icon}" alt="" style="height:${height}px" />${label}${delayStandalone}`;
+        // Read by placeVehicleLabels.
+        wrapper.hvvLayout = {
+            height,
+            labelOffset,
+            labelWidth: properties.label ? (properties.label.length + delayText.length) * 5.5 + 8 : 0,
+            delay,
+        };
 
         // The icon service has no symbol for some (e.g. replacement-bus) lines.
         const img = wrapper.querySelector('img');
@@ -557,6 +565,66 @@ const SOURCES = PAGE_CONFIG.sourceKeys
     ? ALL_SOURCES.filter((s) => PAGE_CONFIG.sourceKeys.includes(s.key))
     : ALL_SOURCES;
 
+// Vehicle labels that would overlap another vehicle's icon or an already
+// placed label are hidden (only the icon and a delay badge stay); zooming in
+// spreads the vehicles apart and brings them back. Delayed vehicles and
+// labels shown last time are placed first, so labels do not flicker.
+const LABEL_PADDING_PX = 2;
+
+function placeVehicleLabels(mapInstance, markers) {
+    const container = mapInstance.getContainer();
+    if (container.classList.contains('hvv-labels-hidden')) {
+        return;
+    }
+    const width = container.clientWidth;
+    const height = container.clientHeight;
+    const items = [];
+    markers.forEach((marker) => {
+        const element = marker.getElement();
+        const layout = element.hvvLayout;
+        if (!layout || element.style.display === 'none') {
+            return;
+        }
+        const point = mapInstance.project(marker.getLngLat());
+        if (point.x < -200 || point.y < -50 || point.x > width + 50 || point.y > height + 50) {
+            return;
+        }
+        if (!layout.measured) {
+            const span = element.querySelector('.hvv-marker-label');
+            if (span && span.offsetWidth) {
+                layout.labelWidth = span.offsetWidth;
+                layout.measured = true;
+            }
+        }
+        const half = layout.height / 2;
+        items.push({
+            element,
+            layout,
+            icon: [point.x - layout.height, point.y - half, point.x + layout.labelOffset, point.y + half],
+            label: layout.labelWidth ? [
+                point.x + layout.labelOffset, point.y - 7,
+                point.x + layout.labelOffset + layout.labelWidth, point.y + 7,
+            ] : null,
+        });
+    });
+    const overlaps = (a, b) => a[0] < b[2] + LABEL_PADDING_PX && b[0] < a[2] + LABEL_PADDING_PX
+        && a[1] < b[3] + LABEL_PADDING_PX && b[1] < a[3] + LABEL_PADDING_PX;
+    items.sort((a, b) => (Number(b.element.hvvLabelShown || false) - Number(a.element.hvvLabelShown || false))
+        || (b.layout.delay - a.layout.delay)
+        || (a.icon[1] - b.icon[1]));
+    const placed = [];
+    items.forEach((item) => {
+        const free = item.label
+            && !items.some((other) => other !== item && overlaps(item.label, other.icon))
+            && !placed.some((box) => overlaps(item.label, box));
+        if (free) {
+            placed.push(item.label);
+        }
+        item.element.hvvLabelShown = Boolean(free);
+        item.element.classList.toggle('hvv-label-collided', !free);
+    });
+}
+
 // initialSourceKey defaults to the first source when omitted or unknown.
 function initHvvVehicleLayers(initialSourceKey) {
     // Single shared popup (vehicles/stops/disruptions); anchor:'bottom' points its tip straight down.
@@ -590,6 +658,19 @@ function initHvvVehicleLayers(initialSourceKey) {
             && linesVisible(modeKey, [marker.hvvLine])
             && (showStraight || !marker.hvvStraight);
     }
+
+    let labelFrame = null;
+    function schedulePlaceLabels() {
+        if (labelFrame === null) {
+            labelFrame = requestAnimationFrame(() => {
+                labelFrame = null;
+                placeVehicleLabels(map, [...positionEntries.values()].map((entry) => entry.marker));
+            });
+        }
+    }
+    map.on('move', schedulePlaceLabels);
+    map.on('resize', schedulePlaceLabels);
+    map.getContainer().addEventListener('hvv-labels-toggled', schedulePlaceLabels);
 
     function updateMarkerVisibility() {
         MODES.forEach((m) => {
@@ -968,6 +1049,7 @@ function initHvvVehicleLayers(initialSourceKey) {
                 positionMarkersByMode[entry.modeKey].push(entry.marker);
             });
             updateMarkerVisibility();
+            schedulePlaceLabels();
         } catch (error) {
             console.warn('Failed to load HVV positions:', error);
         }
