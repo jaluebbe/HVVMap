@@ -3,6 +3,7 @@ trip_position.locate() and placed on its station or along the stored track
 of its current segment."""
 
 import json
+from collections import defaultdict
 import traceback
 import sqlite3
 import time
@@ -21,6 +22,7 @@ from hvv_map.stations import StationInfo, by_id, load_stations
 from hvv_map.trip_courses import REDIS_COURSES_KEY
 from hvv_map.trip_position import AT_STOP, BETWEEN, Position, locate, stops_from_row
 from hvv_map.trips import (
+    COMBINED_DESTINATION,
     REDIS_VEHICLES_KEY,
     STATUS_CANCELLED,
     STATUS_MISSING,
@@ -161,26 +163,38 @@ def _label_destination(row: dict, now: datetime, ferry: bool) -> str:
             and position.state in (AT_STOP, BETWEEN)
             and _is_shared(alias, position)
         ):
-            own = [{"name": s["station"]} for s in row["stops"]]
+            last = len(row["stops"]) - 1
+            own = [
+                {"name": s["station"], "dep": s["at"] if i < last else None}
+                for i, s in enumerate(row["stops"])
+            ]
             return destination_from_courses(
                 [alias.get("destination_announced"), row.get("destination_announced")],
                 [own, alias["stops"]],
+                now,
             )
     return row["destination"]
 
 
 def _drawn_by_others(trips: list[dict], now: datetime) -> tuple[set, set]:
     """(rows to skip, wing ids not to draw): one train part is drawn once.
-    A trip without a current live departure whose course belongs to another
-    trip's live id is skipped. A trip whose live id is another trip's wing
-    part is skipped while the coupled train runs as one; after the split it
-    draws that part instead of the other trip's wing."""
+    Skipped are a trip without a current live departure whose course belongs
+    to another trip's live id, and a trip whose live id is another trip's own
+    serviceId (one vehicle, two plan trips). A trip whose live id is another
+    trip's wing part is skipped while the coupled train runs as one; after
+    the split it draws that part instead of the other trip's wing. Of trips
+    sharing one course, only the one whose serviceId it is (else a
+    confirmed one) is drawn."""
     wings = {
         alias["service_id"]: (row, alias)
         for row in trips
         for alias in row["alias_courses"]
     }
     primaries = {sid: row for row in trips for sid in row.get("primary_ids") or []}
+    owners = defaultdict(list)
+    for row in trips:
+        for sid in row.get("primary_ids") or []:
+            owners[sid].append(row)
     skip, hidden = set(), set()
     for row in trips:
         ids = row.get("primary_ids") or []
@@ -189,6 +203,14 @@ def _drawn_by_others(trips: list[dict], now: datetime) -> tuple[set, set]:
             other = primaries.get(course_id) or (wings.get(course_id) or (None,))[0]
             if other is not None and other is not row:
                 skip.add(id(row))
+            continue
+        if any(
+            other is not row and other["service_id"] == sid
+            for sid in ids
+            for other in owners[sid]
+        ):
+            # the live id is another trip's own serviceId: that trip draws it
+            skip.add(id(row))
             continue
         for service_id in ids:
             owner, alias = wings.get(service_id) or (None, None)
@@ -203,7 +225,61 @@ def _drawn_by_others(trips: list[dict], now: datetime) -> tuple[set, set]:
                 skip.add(id(row))
             else:
                 hidden.add(service_id)
+    by_course = defaultdict(list)
+    for row in trips:
+        if row.get("course_id") and row["status"] not in (
+            STATUS_CANCELLED,
+            STATUS_MISSING,
+        ):
+            by_course[row["course_id"]].append(row)
+    for course_id, rows in by_course.items():
+        keep = (
+            next((r for r in rows if r.get("service_id") == course_id), None)
+            or next((r for r in rows if r.get("primary_ids")), None)
+            or rows[0]
+        )
+        skip.update(id(r) for r in rows if r is not keep)
     return skip, hidden
+
+
+def _spot(feature: dict) -> tuple:
+    lon, lat = feature["geometry"]["coordinates"]
+    return feature["properties"]["line"], round(lon, 4), round(lat, 4)
+
+
+def _one_per_train(features: list[dict], meta: dict[int, tuple]) -> list[dict]:
+    """Main features of one line and direction at the same spot are one
+    train. Confirmed trips win over trips without a current live departure
+    (coupled parts after joining, when GTI lists only one of them); several
+    confirmed trips are a coupled train (e.g. RE7 to Kiel and Flensburg) and
+    get one feature with all destinations; of unconfirmed ones only the trip
+    on its own course stays. meta: feature -> (direction id, destination,
+    confirmed, on own course)."""
+    groups: dict[tuple, list[dict]] = defaultdict(list)
+    for f in features:
+        if id(f) in meta:
+            groups[(_spot(f), meta[id(f)][0])].append(f)
+    dropped = set()
+    for parts in groups.values():
+        if len(parts) < 2:
+            continue
+        confirmed = [f for f in parts if meta[id(f)][2]]
+        if not confirmed:
+            keep = next((f for f in parts if meta[id(f)][3]), parts[0])
+            dropped.update(id(f) for f in parts if f is not keep)
+            continue
+        dropped.update(id(f) for f in parts if not meta[id(f)][2])
+        first = confirmed[0]
+        destinations = list(dict.fromkeys(meta[id(f)][1] for f in confirmed))
+        if len(destinations) > 1:
+            props = first["properties"]
+            combined = COMBINED_DESTINATION.join(destinations)
+            props["text"] = props["text"].replace(meta[id(first)][1], combined, 1)
+            props["label"] = COMBINED_DESTINATION.join(
+                d.split("(")[0].strip() for d in destinations
+            )
+        dropped.update(id(f) for f in confirmed[1:])
+    return [f for f in features if id(f) not in dropped]
 
 
 def build_positions(
@@ -219,6 +295,7 @@ def build_positions(
     cache = {} if cache is None else cache
     features = []
     skip, hidden = _drawn_by_others(table["trips"], now)
+    meta: dict[int, tuple] = {}  # see _one_per_train
     for row in table["trips"]:
         if row["status"] in (STATUS_CANCELLED, STATUS_MISSING) or id(row) in skip:
             continue
@@ -232,9 +309,14 @@ def build_positions(
                 point, straight = placed
                 delay = row["stops"][position.index]["delay"]
                 destination = _label_destination(row, now, ferry)
-                features.append(
-                    _feature(row, destination, position, point, delay, straight)
+                feature = _feature(row, destination, position, point, delay, straight)
+                meta[id(feature)] = (
+                    row.get("direction_id"),
+                    destination,
+                    bool(row.get("primary_ids")),
+                    row.get("course_id") == row.get("service_id"),
                 )
+                features.append(feature)
         for alias in row["alias_courses"]:
             if alias["service_id"] in hidden:
                 continue
@@ -260,7 +342,10 @@ def build_positions(
                         straight,
                     )
                 )
-    return {"type": "FeatureCollection", "features": features}
+    return {
+        "type": "FeatureCollection",
+        "features": _one_per_train(features, meta),
+    }
 
 
 class PositionsState:

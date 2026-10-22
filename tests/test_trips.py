@@ -929,3 +929,69 @@ def test_live_trip_of_a_wing_part_paired_later_is_dropped():
     table = build_trip_table(plan, PLAN_ANCHOR, later, None, memory)
 
     assert not any(t["live_only"] for t in table["trips"])
+
+
+def test_course_of_a_reused_service_id_in_the_other_direction_does_not_fit():
+    from hvv_map.trips import _course_fits
+
+    trip = {
+        "stops": [
+            {"station_id": "O", "planned": datetime(2026, 10, 22, 6, 49)},
+            {"station_id": "I", "planned": datetime(2026, 10, 22, 7, 39)},
+        ]
+    }
+    later_run = {
+        "stops": [
+            {"id": "I", "dep": "2026-10-22T07:33", "arr": None},
+            {"id": "O", "dep": "2026-10-22T08:26", "arr": "2026-10-22T08:23"},
+        ]
+    }
+    own_run = {
+        "stops": [
+            {"id": "O", "dep": "2026-10-22T06:49", "arr": None},
+            {"id": "X", "dep": "2026-10-22T07:10", "arr": None},
+        ]
+    }
+    assert not _course_fits(trip, later_run)
+    assert _course_fits(trip, own_run)
+
+
+def test_announced_destination_already_passed_gives_way_to_the_course_end():
+    from hvv_map.trips import destination_from_courses
+
+    course = [
+        {"name": "Poppenbüttel", "dep": "2026-10-22T07:38"},
+        {"name": "Ohlsdorf", "dep": "2026-10-22T07:49"},
+        {"name": "Wedel", "dep": None},
+    ]
+    before = datetime(2026, 10, 22, 7, 45)
+    after = datetime(2026, 10, 22, 7, 55)
+    assert destination_from_courses(["Ohlsdorf"], [course], before) == "Ohlsdorf"
+    assert destination_from_courses(["Ohlsdorf"], [course], after) == "Wedel"
+    assert destination_from_courses(["Wedel"], [course], after) == "Wedel"
+
+
+def test_live_delay_carries_on_behind_the_anchor_while_the_course_is_older():
+    from hvv_map.trips import carry_live_delay
+
+    def rows():
+        return [
+            {"match": {"delay": 240}, "delay": 240},
+            {"match": None, "delay": 0},
+            {"match": None, "delay": 60},
+        ]
+
+    from zoneinfo import ZoneInfo
+
+    berlin = ZoneInfo("Europe/Berlin")
+    old = {"fetched_at": datetime(2026, 10, 17, 8, 45, tzinfo=berlin).timestamp()}
+    new = {"fetched_at": datetime(2026, 10, 17, 9, 5, tzinfo=berlin).timestamp()}
+    anchor = datetime(2026, 10, 17, 9, 0)
+
+    stale = rows()
+    carry_live_delay(stale, old, anchor)
+    fresh = rows()
+    carry_live_delay(fresh, new, anchor)
+
+    assert [r["delay"] for r in stale] == [240, None, None]
+    assert [r["delay"] for r in fresh] == [240, 0, 60]

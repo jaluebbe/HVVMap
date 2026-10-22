@@ -370,6 +370,28 @@ def unify_shared_delays(rows: list[dict], main_at: float, aliases: list[dict]):
             row["delay"] = stop["delay"] = delay
 
 
+def carry_live_delay(rows: list[dict], course: dict | None, live_anchor: datetime):
+    """Behind the last stop with a live delay, a course older than the live
+    data gives no delay: the live one carries on (trip_position.apply_delay)."""
+    if not course or not course.get("fetched_at"):
+        return
+    fetched = datetime.fromtimestamp(course["fetched_at"], ZoneInfo("Europe/Berlin"))
+    if fetched.replace(tzinfo=None) >= live_anchor:
+        return
+    last = max(
+        (
+            i
+            for i, row in enumerate(rows)
+            if row["match"] and row["match"].get("delay") is not None
+        ),
+        default=None,
+    )
+    if last is None:
+        return
+    for row in rows[last + 1 :]:
+        row["delay"] = None
+
+
 def _vehicle_fields(
     trip: dict, unique: list, memory: dict | None, course: dict | None = None
 ) -> dict:
@@ -422,11 +444,21 @@ COURSE_DESTINATION_LINES = {"S1"}
 
 
 def destination_from_courses(
-    announced: list[str | None], stop_lists: list[list[dict]]
+    announced: list[str | None],
+    stop_lists: list[list[dict]],
+    now: datetime | None = None,
 ) -> str | None:
     """The announced destinations (split at " / ") that one of the courses
-    contains, in order; if none is left, the courses' last stops."""
-    names = {stop["name"] for stops in stop_lists for stop in stops}
+    still has ahead (departure not before `now`, or its last stop), in order;
+    if none is left, the courses' last stops."""
+    names = {
+        stop["name"]
+        for stops in stop_lists
+        for stop in stops
+        if not stop.get("dep")
+        or now is None
+        or datetime.fromisoformat(stop["dep"]) >= now
+    }
     parts = [
         part for text in announced if text for part in text.split(COMBINED_DESTINATION)
     ]
@@ -437,28 +469,29 @@ def destination_from_courses(
 
 
 def course_destination(
-    announced: str | None, course: dict | None, line: str
+    announced: str | None, course: dict | None, line: str, now: datetime | None = None
 ) -> str | None:
     """On COURSE_DESTINATION_LINES the announced destinations the course
     contains, else the course's last stop (see destination_from_courses)."""
     stops = (course or {}).get("stops")
     if line not in COURSE_DESTINATION_LINES or not stops or not announced:
         return announced
-    return destination_from_courses([announced], [stops])
+    return destination_from_courses([announced], [stops], now)
 
 
 def _course_fits(trip: dict, course: dict) -> bool:
-    """A serviceId repeats every day: the course must run at the trip's
-    anchor times."""
+    """A serviceId repeats and is reused: the course must contain one of the
+    trip's anchors, and pass every anchor it contains at the anchor's time."""
     tolerance = timedelta(minutes=COURSE_FIT_MINUTES)
-    times = [
-        datetime.fromisoformat(stop[key])
-        for stop in course["stops"]
-        for key in ("dep", "arr")
-        if stop.get(key)
-    ]
-    return any(
-        abs(at - stop["planned"]) <= tolerance for at in times for stop in trip["stops"]
+    times: dict[str, list[datetime]] = defaultdict(list)
+    for stop in course["stops"]:
+        for key in ("dep", "arr"):
+            if stop.get(key):
+                times[stop["id"]].append(datetime.fromisoformat(stop[key]))
+    contained = [stop for stop in trip["stops"] if stop["station_id"] in times]
+    return bool(contained) and all(
+        any(abs(at - stop["planned"]) <= tolerance for at in times[stop["station_id"]])
+        for stop in contained
     )
 
 
@@ -477,7 +510,11 @@ def _trip_course(
 
 
 def _alias_courses(
-    trip: dict, aliases: list[dict], main: dict | None, courses: dict
+    trip: dict,
+    aliases: list[dict],
+    main: dict | None,
+    courses: dict,
+    now: datetime | None = None,
 ) -> list:
     """Courses of the extra live entries of a trip (e.g. the second half of a
     split train), with the station up to which they match the trip's own."""
@@ -494,7 +531,7 @@ def _alias_courses(
             {
                 "service_id": alias["service_id"],
                 "destination": course_destination(
-                    alias["destination"], course, trip["line"]
+                    alias["destination"], course, trip["line"], now
                 ),
                 "destination_announced": alias["destination"],
                 "shared_until": shared,
@@ -922,7 +959,8 @@ def build_trip_table(
             or trip["stops"]
         )
         stops, outside = _route_rows(trip, live_anchor, window_end, course)
-        alias_courses = _alias_courses(trip, aliases, course, courses)
+        carry_live_delay(stops, course, live_anchor)
+        alias_courses = _alias_courses(trip, aliases, course, courses, live_anchor)
         rows.append(
             {
                 "id": trip["id"],
@@ -931,7 +969,9 @@ def build_trip_table(
                 "line_id": (trip["line_obj"] or {}).get("id", ""),
                 "mode": _mode_label(trip["line_obj"]),
                 "direction_id": trip["direction_id"],
-                "destination": course_destination(announced, course, trip["line"]),
+                "destination": course_destination(
+                    announced, course, trip["line"], live_anchor
+                ),
                 "destination_announced": announced,
                 "status": status,
                 "start_time": trip["stops"][0]["planned"].strftime("%H:%M"),

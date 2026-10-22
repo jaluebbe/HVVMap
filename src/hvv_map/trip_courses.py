@@ -15,6 +15,7 @@ from hvv_map.gti_client import GtiClient
 from hvv_map.redis_client import get_redis_client
 from hvv_map.vehicle_sightings import course_sightings, record
 from hvv_map.departures_live import REDIS_LIVE_KEY
+from hvv_map.gtilive_geojson import mode_for_line
 from hvv_map.trips import _is_trip_line, alias_course_key
 
 BERLIN_TZ = ZoneInfo("Europe/Berlin")
@@ -27,6 +28,8 @@ COURSE_RETRY_LIVE_SECONDS = 120  # retry of a failed fetch ...
 COURSE_RETRY_LIVE_ATTEMPTS = 3  # ... for this many tries, then COURSE_RETRY_SECONDS
 COURSE_REFRESH_SECONDS = 300  # running trips refetch their course after this
 COURSE_RUNNING_SLACK_MINUTES = 2
+COURSE_DELAYED_SECONDS = 120  # delayed trains are refreshed first
+COURSE_END_SKIP_MINUTES = 5  # a course ending sooner is not refreshed
 COURSE_TIME_TOLERANCE_MINUTES = 10  # requested time vs. the course's own times
 
 
@@ -53,9 +56,9 @@ def parse_course(response: dict) -> list[dict] | None:
                 "id": origin.get("id"),
                 "name": origin.get("name"),
                 "dep": _parse_time(element.get("depTime")),
-                "arr": _parse_time(elements[index - 1].get("arrTime"))
-                if index
-                else None,
+                "arr": (
+                    _parse_time(elements[index - 1].get("arrTime")) if index else None
+                ),
                 "dep_delay": element.get("depDelay"),
                 "arr_delay": elements[index - 1].get("arrDelay") if index else None,
                 "platform": element.get("fromRealtimePlatform")
@@ -146,7 +149,9 @@ def course_jobs(live: dict | None, cached: dict, now: datetime, now_ts: float):
     """(cache key, request) per live serviceId whose course is missing, does
     not run at the departure's time (ids repeat daily), lacks a station the
     id departs from (refetched at that station) or, while running, is older
-    than COURSE_REFRESH_SECONDS. Missing first, then the oldest."""
+    than COURSE_REFRESH_SECONDS. These first; of the old ones, trips without
+    a live departure (between anchors) come first, then delayed and regional
+    trains, then the oldest; a course ending soon is not refreshed."""
     by_id: dict[str, list] = defaultdict(list)
     if live:
         for dep in live["departures"]:
@@ -180,8 +185,9 @@ def course_jobs(live: dict | None, cached: dict, now: datetime, now_ts: float):
             if outside:
                 urgent.append((key, _dep_request(start, outside[0])))
             elif now_ts - entry["fetched_at"] >= COURSE_REFRESH_SECONDS:
+                regional = mode_for_line(deps[0].get("line") or {}) == "R"
                 stale.append(
-                    (entry["fetched_at"], key, entry.get("request") or request)
+                    (True, entry, regional, key, entry.get("request") or request)
                 )
     # running trips between their anchors: refresh with the stored request
     for key, entry in cached.items():
@@ -193,9 +199,46 @@ def course_jobs(live: dict | None, cached: dict, now: datetime, now_ts: float):
             and now_ts - entry["fetched_at"] >= COURSE_REFRESH_SECONDS
             and _is_running(entry, now)
         ):
-            stale.append((entry["fetched_at"], key, entry["request"]))
-    stale.sort(key=lambda job: job[0])
-    return urgent + [(key, request) for _at, key, request in stale]
+            stale.append(
+                (False, entry, entry.get("mode") == "R", key, entry["request"])
+            )
+    refresh = [
+        (
+            live_seen,
+            not (regional or _delayed(entry, now)),
+            entry["fetched_at"],
+            key,
+            request,
+        )
+        for live_seen, entry, regional, key, request in stale
+        if not _ends_soon(entry, now)
+    ]
+    refresh.sort(key=lambda job: job[:3])
+    return urgent + [(key, request) for *_order, key, request in refresh]
+
+
+def _stop_times(entry: dict) -> list[tuple[datetime, int | None]]:
+    """(time, delay) per stop of a course."""
+    result = []
+    for stop in entry["stops"]:
+        key = "dep" if stop.get("dep") else "arr"
+        if stop.get(key):
+            result.append((datetime.fromisoformat(stop[key]), stop.get(f"{key}_delay")))
+    return result
+
+
+def _delayed(entry: dict, now: datetime) -> bool:
+    """A stop still ahead is delayed by COURSE_DELAYED_SECONDS or more."""
+    return any(
+        at >= now and (delay or 0) >= COURSE_DELAYED_SECONDS
+        for at, delay in _stop_times(entry)
+    )
+
+
+def _ends_soon(entry: dict, now: datetime) -> bool:
+    times = _stop_times(entry)
+    end = timedelta(minutes=COURSE_END_SKIP_MINUTES)
+    return bool(times) and times[-1][0] < now + end
 
 
 def run_trip_courses(client: GtiClient, redis_client, now: datetime | None = None):
@@ -218,6 +261,10 @@ def run_trip_courses(client: GtiClient, redis_client, now: datetime | None = Non
     fetched = failed = 0
     sightings = []
     by_name = _station_ids(live)
+    modes = {
+        str(dep["serviceId"]): mode_for_line(dep.get("line") or {})
+        for dep in (live or {}).get("departures", [])
+    }
     for key, request in jobs[:COURSE_MAX_CALLS]:
         try:
             response = client.send("departureCourse", request)
@@ -244,6 +291,7 @@ def run_trip_courses(client: GtiClient, redis_client, now: datetime | None = Non
             "service_id": str(request["serviceId"]),
             "station_id": by_name.get(request["station"]["name"]),
             "request": request,
+            "mode": modes.get(str(request["serviceId"])) or previous.get("mode"),
             "vehicles": (response.get("vehicles") or []) if stops else [],
         }
         if stops is None:
