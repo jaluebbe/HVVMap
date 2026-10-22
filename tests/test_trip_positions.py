@@ -251,6 +251,12 @@ def _positions_of(rows, now=NOW):
     return build_positions({"trips": rows}, now, STATIONS)["features"]
 
 
+def test_of_unconfirmed_trips_at_one_spot_the_one_on_its_own_course_stays():
+    joined = _row(id="4654", service_id="4654", primary_ids=[], course_id="7211")
+    own = _row(id="3932", service_id="3932", primary_ids=[], course_id="3932")
+    assert _ids([joined, own]) == ["3932"]
+
+
 class _FakeRedis:
     def __init__(self, values=None):
         self.values = dict(values or {})

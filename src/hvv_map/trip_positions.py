@@ -247,38 +247,39 @@ def _spot(feature: dict) -> tuple:
     return feature["properties"]["line"], round(lon, 4), round(lat, 4)
 
 
-def _without_joined(features: list[dict], unconfirmed: set[int]) -> list[dict]:
-    """Drop features of trips without a current live departure that sit
-    where a live-confirmed trip of the line is: coupled parts after joining,
-    when GTI lists only one of them."""
-    confirmed = {_spot(f) for f in features if id(f) not in unconfirmed}
-    return [
-        f for f in features if id(f) not in unconfirmed or _spot(f) not in confirmed
-    ]
-
-
-def _merge_coupled(features: list[dict], meta: dict[int, tuple]) -> list[dict]:
-    """Confirmed trips of one line and direction at the same spot are one
-    coupled train (e.g. RE7 to Kiel and Flensburg): one feature with all
-    destinations."""
+def _one_per_train(features: list[dict], meta: dict[int, tuple]) -> list[dict]:
+    """Main features of one line and direction at the same spot are one
+    train. Confirmed trips win over trips without a current live departure
+    (coupled parts after joining, when GTI lists only one of them); several
+    confirmed trips are a coupled train (e.g. RE7 to Kiel and Flensburg) and
+    get one feature with all destinations; of unconfirmed ones only the trip
+    on its own course stays. meta: feature -> (direction id, destination,
+    confirmed, on own course)."""
     groups: dict[tuple, list[dict]] = defaultdict(list)
     for f in features:
         if id(f) in meta:
             groups[(_spot(f), meta[id(f)][0])].append(f)
-    merged = set()
+    dropped = set()
     for parts in groups.values():
         if len(parts) < 2:
             continue
-        first = parts[0]
-        destinations = list(dict.fromkeys(meta[id(f)][1] for f in parts))
-        combined = COMBINED_DESTINATION.join(destinations)
-        props = first["properties"]
-        props["text"] = props["text"].replace(meta[id(first)][1], combined, 1)
-        props["label"] = COMBINED_DESTINATION.join(
-            d.split("(")[0].strip() for d in destinations
-        )
-        merged.update(id(f) for f in parts[1:])
-    return [f for f in features if id(f) not in merged]
+        confirmed = [f for f in parts if meta[id(f)][2]]
+        if not confirmed:
+            keep = next((f for f in parts if meta[id(f)][3]), parts[0])
+            dropped.update(id(f) for f in parts if f is not keep)
+            continue
+        dropped.update(id(f) for f in parts if not meta[id(f)][2])
+        first = confirmed[0]
+        destinations = list(dict.fromkeys(meta[id(f)][1] for f in confirmed))
+        if len(destinations) > 1:
+            props = first["properties"]
+            combined = COMBINED_DESTINATION.join(destinations)
+            props["text"] = props["text"].replace(meta[id(first)][1], combined, 1)
+            props["label"] = COMBINED_DESTINATION.join(
+                d.split("(")[0].strip() for d in destinations
+            )
+        dropped.update(id(f) for f in confirmed[1:])
+    return [f for f in features if id(f) not in dropped]
 
 
 def build_positions(
@@ -294,8 +295,7 @@ def build_positions(
     cache = {} if cache is None else cache
     features = []
     skip, hidden = _drawn_by_others(table["trips"], now)
-    unconfirmed: set[int] = set()
-    confirmed: dict[int, tuple] = {}  # feature -> (direction id, destination)
+    meta: dict[int, tuple] = {}  # see _one_per_train
     for row in table["trips"]:
         if row["status"] in (STATUS_CANCELLED, STATUS_MISSING) or id(row) in skip:
             continue
@@ -310,10 +310,12 @@ def build_positions(
                 delay = row["stops"][position.index]["delay"]
                 destination = _label_destination(row, now, ferry)
                 feature = _feature(row, destination, position, point, delay, straight)
-                if row.get("primary_ids"):
-                    confirmed[id(feature)] = (row.get("direction_id"), destination)
-                else:
-                    unconfirmed.add(id(feature))
+                meta[id(feature)] = (
+                    row.get("direction_id"),
+                    destination,
+                    bool(row.get("primary_ids")),
+                    row.get("course_id") == row.get("service_id"),
+                )
                 features.append(feature)
         for alias in row["alias_courses"]:
             if alias["service_id"] in hidden:
@@ -342,7 +344,7 @@ def build_positions(
                 )
     return {
         "type": "FeatureCollection",
-        "features": _merge_coupled(_without_joined(features, unconfirmed), confirmed),
+        "features": _one_per_train(features, meta),
     }
 
 
