@@ -162,10 +162,15 @@ def _label_destination(row: dict, now: datetime, ferry: bool) -> str:
             and position.state in (AT_STOP, BETWEEN)
             and _is_shared(alias, position)
         ):
-            own = [{"name": s["station"]} for s in row["stops"]]
+            last = len(row["stops"]) - 1
+            own = [
+                {"name": s["station"], "dep": s["at"] if i < last else None}
+                for i, s in enumerate(row["stops"])
+            ]
             return destination_from_courses(
                 [alias.get("destination_announced"), row.get("destination_announced")],
                 [own, alias["stops"]],
+                now,
             )
     return row["destination"]
 

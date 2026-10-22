@@ -422,11 +422,21 @@ COURSE_DESTINATION_LINES = {"S1"}
 
 
 def destination_from_courses(
-    announced: list[str | None], stop_lists: list[list[dict]]
+    announced: list[str | None],
+    stop_lists: list[list[dict]],
+    now: datetime | None = None,
 ) -> str | None:
     """The announced destinations (split at " / ") that one of the courses
-    contains, in order; if none is left, the courses' last stops."""
-    names = {stop["name"] for stops in stop_lists for stop in stops}
+    still has ahead (departure not before `now`, or its last stop), in order;
+    if none is left, the courses' last stops."""
+    names = {
+        stop["name"]
+        for stops in stop_lists
+        for stop in stops
+        if not stop.get("dep")
+        or now is None
+        or datetime.fromisoformat(stop["dep"]) >= now
+    }
     parts = [
         part for text in announced if text for part in text.split(COMBINED_DESTINATION)
     ]
@@ -437,14 +447,14 @@ def destination_from_courses(
 
 
 def course_destination(
-    announced: str | None, course: dict | None, line: str
+    announced: str | None, course: dict | None, line: str, now: datetime | None = None
 ) -> str | None:
     """On COURSE_DESTINATION_LINES the announced destinations the course
     contains, else the course's last stop (see destination_from_courses)."""
     stops = (course or {}).get("stops")
     if line not in COURSE_DESTINATION_LINES or not stops or not announced:
         return announced
-    return destination_from_courses([announced], [stops])
+    return destination_from_courses([announced], [stops], now)
 
 
 def _course_fits(trip: dict, course: dict) -> bool:
@@ -478,7 +488,11 @@ def _trip_course(
 
 
 def _alias_courses(
-    trip: dict, aliases: list[dict], main: dict | None, courses: dict
+    trip: dict,
+    aliases: list[dict],
+    main: dict | None,
+    courses: dict,
+    now: datetime | None = None,
 ) -> list:
     """Courses of the extra live entries of a trip (e.g. the second half of a
     split train), with the station up to which they match the trip's own."""
@@ -495,7 +509,7 @@ def _alias_courses(
             {
                 "service_id": alias["service_id"],
                 "destination": course_destination(
-                    alias["destination"], course, trip["line"]
+                    alias["destination"], course, trip["line"], now
                 ),
                 "destination_announced": alias["destination"],
                 "shared_until": shared,
@@ -923,7 +937,7 @@ def build_trip_table(
             or trip["stops"]
         )
         stops, outside = _route_rows(trip, live_anchor, window_end, course)
-        alias_courses = _alias_courses(trip, aliases, course, courses)
+        alias_courses = _alias_courses(trip, aliases, course, courses, live_anchor)
         rows.append(
             {
                 "id": trip["id"],
@@ -932,7 +946,9 @@ def build_trip_table(
                 "line_id": (trip["line_obj"] or {}).get("id", ""),
                 "mode": _mode_label(trip["line_obj"]),
                 "direction_id": trip["direction_id"],
-                "destination": course_destination(announced, course, trip["line"]),
+                "destination": course_destination(
+                    announced, course, trip["line"], live_anchor
+                ),
                 "destination_announced": announced,
                 "status": status,
                 "start_time": trip["stops"][0]["planned"].strftime("%H:%M"),

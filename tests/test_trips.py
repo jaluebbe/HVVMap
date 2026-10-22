@@ -954,3 +954,18 @@ def test_course_of_a_reused_service_id_in_the_other_direction_does_not_fit():
     }
     assert not _course_fits(trip, later_run)
     assert _course_fits(trip, own_run)
+
+
+def test_announced_destination_already_passed_gives_way_to_the_course_end():
+    from hvv_map.trips import destination_from_courses
+
+    course = [
+        {"name": "Poppenbüttel", "dep": "2026-10-22T07:38"},
+        {"name": "Ohlsdorf", "dep": "2026-10-22T07:49"},
+        {"name": "Wedel", "dep": None},
+    ]
+    before = datetime(2026, 10, 22, 7, 45)
+    after = datetime(2026, 10, 22, 7, 55)
+    assert destination_from_courses(["Ohlsdorf"], [course], before) == "Ohlsdorf"
+    assert destination_from_courses(["Ohlsdorf"], [course], after) == "Wedel"
+    assert destination_from_courses(["Wedel"], [course], after) == "Wedel"
