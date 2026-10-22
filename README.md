@@ -143,8 +143,19 @@ The Leaflet pages were removed; the last state with them is tagged
 `index.html` (under `/static/`) is an overview for developers linking to the
 maps, the debug pages below and the API docs; it is not the start page.
 
-`dev_announcements.html` is a developer-only page, only linked from
-`index.html`: it fetches `/api/hvv/live/announcements.json` and lists every
+Debug pages (`noindex`, only linked from `index.html`):
+
+- `dev_trips.html` - the trip table behind the map (`/api/hvv/live/trips.json`):
+  planned trips with status, live ids, courses and vehicles.
+- `dev_trips_departures.html` - planned against live departures per line or
+  station, paired with the rules of `departure_pairing.js`, with the known
+  courses of each trip and wing trains.
+- `dev_gtilive_map.html` - gti-live lines and stops with debug properties.
+- `dev_courses.html` - log of the `departureCourse` calls made for subline
+  tracks (not the per-trip courses).
+- `dev_announcements.html`, see below.
+
+`dev_announcements.html` fetches `/api/hvv/live/announcements.json` and lists every
 raw announcement with its full fields (locations, validities, links, etc.),
 collapsible per entry (state kept in `localStorage`) with text search and
 filters by `reason`/`planned`/`broadcastRelevant` - for spotting patterns
