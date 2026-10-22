@@ -3,6 +3,7 @@ trip_position.locate() and placed on its station or along the stored track
 of its current segment."""
 
 import json
+from collections import defaultdict
 import traceback
 import sqlite3
 import time
@@ -171,16 +172,21 @@ def _label_destination(row: dict, now: datetime, ferry: bool) -> str:
 
 def _drawn_by_others(trips: list[dict], now: datetime) -> tuple[set, set]:
     """(rows to skip, wing ids not to draw): one train part is drawn once.
-    A trip without a current live departure whose course belongs to another
-    trip's live id is skipped. A trip whose live id is another trip's wing
-    part is skipped while the coupled train runs as one; after the split it
-    draws that part instead of the other trip's wing."""
+    Skipped are a trip without a current live departure whose course belongs
+    to another trip's live id, and a trip whose live id is another trip's own
+    serviceId (one vehicle, two plan trips). A trip whose live id is another
+    trip's wing part is skipped while the coupled train runs as one; after
+    the split it draws that part instead of the other trip's wing."""
     wings = {
         alias["service_id"]: (row, alias)
         for row in trips
         for alias in row["alias_courses"]
     }
     primaries = {sid: row for row in trips for sid in row.get("primary_ids") or []}
+    owners = defaultdict(list)
+    for row in trips:
+        for sid in row.get("primary_ids") or []:
+            owners[sid].append(row)
     skip, hidden = set(), set()
     for row in trips:
         ids = row.get("primary_ids") or []
@@ -189,6 +195,14 @@ def _drawn_by_others(trips: list[dict], now: datetime) -> tuple[set, set]:
             other = primaries.get(course_id) or (wings.get(course_id) or (None,))[0]
             if other is not None and other is not row:
                 skip.add(id(row))
+            continue
+        if any(
+            other is not row and other["service_id"] == sid
+            for sid in ids
+            for other in owners[sid]
+        ):
+            # the live id is another trip's own serviceId: that trip draws it
+            skip.add(id(row))
             continue
         for service_id in ids:
             owner, alias = wings.get(service_id) or (None, None)
@@ -206,6 +220,21 @@ def _drawn_by_others(trips: list[dict], now: datetime) -> tuple[set, set]:
     return skip, hidden
 
 
+def _spot(feature: dict) -> tuple:
+    lon, lat = feature["geometry"]["coordinates"]
+    return feature["properties"]["line"], round(lon, 4), round(lat, 4)
+
+
+def _without_joined(features: list[dict], unconfirmed: set[int]) -> list[dict]:
+    """Drop features of trips without a current live departure that sit
+    where a live-confirmed trip of the line is: coupled parts after joining,
+    when GTI lists only one of them."""
+    confirmed = {_spot(f) for f in features if id(f) not in unconfirmed}
+    return [
+        f for f in features if id(f) not in unconfirmed or _spot(f) not in confirmed
+    ]
+
+
 def build_positions(
     table: dict,
     now: datetime,
@@ -219,6 +248,7 @@ def build_positions(
     cache = {} if cache is None else cache
     features = []
     skip, hidden = _drawn_by_others(table["trips"], now)
+    unconfirmed: set[int] = set()
     for row in table["trips"]:
         if row["status"] in (STATUS_CANCELLED, STATUS_MISSING) or id(row) in skip:
             continue
@@ -232,9 +262,10 @@ def build_positions(
                 point, straight = placed
                 delay = row["stops"][position.index]["delay"]
                 destination = _label_destination(row, now, ferry)
-                features.append(
-                    _feature(row, destination, position, point, delay, straight)
-                )
+                feature = _feature(row, destination, position, point, delay, straight)
+                if not row.get("primary_ids"):
+                    unconfirmed.add(id(feature))
+                features.append(feature)
         for alias in row["alias_courses"]:
             if alias["service_id"] in hidden:
                 continue
@@ -260,7 +291,10 @@ def build_positions(
                         straight,
                     )
                 )
-    return {"type": "FeatureCollection", "features": features}
+    return {
+        "type": "FeatureCollection",
+        "features": _without_joined(features, unconfirmed),
+    }
 
 
 class PositionsState:

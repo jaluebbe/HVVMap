@@ -448,17 +448,18 @@ def course_destination(
 
 
 def _course_fits(trip: dict, course: dict) -> bool:
-    """A serviceId repeats every day: the course must run at the trip's
-    anchor times."""
+    """A serviceId repeats and is reused: the course must contain one of the
+    trip's anchors, and pass every anchor it contains at the anchor's time."""
     tolerance = timedelta(minutes=COURSE_FIT_MINUTES)
-    times = [
-        datetime.fromisoformat(stop[key])
-        for stop in course["stops"]
-        for key in ("dep", "arr")
-        if stop.get(key)
-    ]
-    return any(
-        abs(at - stop["planned"]) <= tolerance for at in times for stop in trip["stops"]
+    times: dict[str, list[datetime]] = defaultdict(list)
+    for stop in course["stops"]:
+        for key in ("dep", "arr"):
+            if stop.get(key):
+                times[stop["id"]].append(datetime.fromisoformat(stop[key]))
+    contained = [stop for stop in trip["stops"] if stop["station_id"] in times]
+    return bool(contained) and all(
+        any(abs(at - stop["planned"]) <= tolerance for at in times[stop["station_id"]])
+        for stop in contained
     )
 
 

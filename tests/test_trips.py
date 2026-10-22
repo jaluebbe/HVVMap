@@ -929,3 +929,28 @@ def test_live_trip_of_a_wing_part_paired_later_is_dropped():
     table = build_trip_table(plan, PLAN_ANCHOR, later, None, memory)
 
     assert not any(t["live_only"] for t in table["trips"])
+
+
+def test_course_of_a_reused_service_id_in_the_other_direction_does_not_fit():
+    from hvv_map.trips import _course_fits
+
+    trip = {
+        "stops": [
+            {"station_id": "O", "planned": datetime(2026, 10, 22, 6, 49)},
+            {"station_id": "I", "planned": datetime(2026, 10, 22, 7, 39)},
+        ]
+    }
+    later_run = {
+        "stops": [
+            {"id": "I", "dep": "2026-10-22T07:33", "arr": None},
+            {"id": "O", "dep": "2026-10-22T08:26", "arr": "2026-10-22T08:23"},
+        ]
+    }
+    own_run = {
+        "stops": [
+            {"id": "O", "dep": "2026-10-22T06:49", "arr": None},
+            {"id": "X", "dep": "2026-10-22T07:10", "arr": None},
+        ]
+    }
+    assert not _course_fits(trip, later_run)
+    assert _course_fits(trip, own_run)

@@ -211,6 +211,19 @@ def test_trip_without_live_departure_on_another_trips_course_is_not_drawn():
     assert _ids([main, remembered]) == ["1"]
 
 
+def test_unconfirmed_trip_at_the_place_of_a_confirmed_one_is_not_drawn():
+    confirmed = _row(primary_ids=["1"])
+    joined = _row(id="5", primary_ids=[])
+    elsewhere = _row(id="6", primary_ids=[], line="U2")
+    assert _ids([confirmed, joined, elsewhere]) == ["1", "6"]
+
+
+def test_two_plan_trips_of_one_vehicle_are_drawn_once():
+    own = _row(id="70311", service_id="70311", primary_ids=["70311"])
+    feeder = _row(id="70861", service_id="70861", primary_ids=["70311"], line="U2")
+    assert _ids([feeder, own]) == ["70311"]
+
+
 class _FakeRedis:
     def __init__(self, values=None):
         self.values = dict(values or {})
