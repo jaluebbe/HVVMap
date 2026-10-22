@@ -235,7 +235,7 @@
         const URL_LOG = "/api/hvv/live/course-log.json";
         const URL_CACHE = "/api/hvv/live/course-cache.json";
         const REFRESH_MS = 60000;
-        const TRIP_CALLS_PER_10_MIN = 150;  // trip_courses: 30 calls every 2 min
+        const TRIP_CALLS_PER_10_MIN = 300;  // trip_courses: 30 calls every minute
         let data = { calls: [], runs: [] };   // subline track history (SQLite)
         let log = [];                         // all departureCourse calls (Redis)
         let cache = null;                     // trip course cache summary
