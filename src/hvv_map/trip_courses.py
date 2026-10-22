@@ -44,8 +44,9 @@ def _parse_time(value: str | None) -> str | None:
 
 
 def parse_course(response: dict) -> list[dict] | None:
-    """[{id, name, dep, arr, dep_delay, arr_delay, platform}] per station of
-    the course, or None without courseElements."""
+    """[{id, name, dep, arr, dep_delay, arr_delay, platform, cancelled}] per
+    station of the course, or None without courseElements. cancelled: the
+    train does not stop there (realtime)."""
     elements = response.get("courseElements") or []
     if not elements:
         return None
@@ -64,6 +65,7 @@ def parse_course(response: dict) -> list[dict] | None:
                 "arr_delay": elements[index - 1].get("arrDelay") if index else None,
                 "platform": element.get("fromRealtimePlatform")
                 or element.get("fromPlatform"),
+                "cancelled": bool(element.get("fromCancelled")),
             }
         )
     last, final = elements[-1], elements[-1].get("toStation") or {}
@@ -76,6 +78,7 @@ def parse_course(response: dict) -> list[dict] | None:
             "dep_delay": None,
             "arr_delay": last.get("arrDelay"),
             "platform": last.get("toRealtimePlatform") or last.get("toPlatform"),
+            "cancelled": bool(last.get("toCancelled")),
         }
     )
     return stops
@@ -158,13 +161,14 @@ REASON_AGE = "age"
 
 
 def course_jobs(live: dict | None, cached: dict, now: datetime, now_ts: float):
-    """(cache key, request, reason) per live serviceId whose course is missing, does
-    not run at the departure's time (ids repeat daily), lacks a station the
-    id departs from (refetched at that station) or, while running, is older
-    than COURSE_REFRESH_SECONDS. These first; of the old ones, trips without
-    a live departure (between anchors) come first, then delayed and regional
-    trains, then the oldest; a course ending soon is not refreshed. Cancelled
-    departures are ignored."""
+    """(cache key, request, reason) per live serviceId whose course is
+    missing, does not run at the departure's time (ids repeat daily), lacks a
+    station the id departs from (refetched at that station) or, while
+    running, is older than COURSE_REFRESH_SECONDS. These first; the old ones
+    alternate between trips without a live departure (between anchors) and
+    those with one, each delayed and regional trains first, then the oldest;
+    a course ending soon is not refreshed. Cancelled departures are
+    ignored."""
     by_id: dict[str, list] = defaultdict(list)
     if live:
         for dep in live["departures"]:
@@ -230,10 +234,19 @@ def course_jobs(live: dict | None, cached: dict, now: datetime, now_ts: float):
                 else REASON_DELAYED if delayed else REASON_AGE
             )
         )
-        order = (live_seen, not (regional or delayed), entry["fetched_at"])
-        refresh.append((order, key, request, reason))
-    refresh.sort(key=lambda job: job[0])
-    return urgent + [job[1:] for job in refresh]
+        order = (not (regional or delayed), entry["fetched_at"])
+        refresh.append((live_seen, order, key, request, reason))
+    refresh.sort(key=lambda job: job[1])
+    between = [job[2:] for job in refresh if not job[0]]
+    seen = [job[2:] for job in refresh if job[0]]
+    return urgent + _alternate(between, seen)
+
+
+def _alternate(first: list, second: list) -> list:
+    """first[0], second[0], first[1], ... and then the rest of the longer."""
+    merged = [job for pair in zip(first, second) for job in pair]
+    shorter = min(len(first), len(second))
+    return merged + first[shorter:] + second[shorter:]
 
 
 def _stop_times(entry: dict) -> list[tuple[datetime, int | None]]:

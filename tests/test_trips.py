@@ -326,6 +326,33 @@ def test_cached_course_supplies_times_for_stations_outside_the_anchor_range():
     assert stops[4]["course_delay"] == 0
 
 
+def test_cancelled_course_stops_and_live_departures_mark_their_rows():
+    from hvv_map.trips import alias_course_key
+
+    course = {
+        "stops": [
+            {
+                "id": sid,
+                "name": sid.lower(),
+                "dep": f"2026-10-17T09:{minute:02d}",
+                "arr": None,
+                "dep_delay": None,
+                "cancelled": sid == "D",
+            }
+            for sid, minute in (("Z", 0), ("A", 2), ("B", 5), ("C", 8), ("D", 10))
+        ]
+    }
+    live = {
+        "anchor": LIVE_ANCHOR,
+        "departures": [_live("U1", "A", 2, 6, cancelled=True)],
+    }
+    courses = {alias_course_key("900"): course}
+
+    row = build_trip_table(_routed_plan(), PLAN_ANCHOR, live, courses)["trips"][0]
+
+    assert [s["cancelled"] for s in row["stops"]] == [False, True, False, False, True]
+
+
 def test_trip_row_reports_the_time_span_of_its_route():
     live = {"anchor": LIVE_ANCHOR, "departures": [_live("U1", "A", 2, 6)]}
     row = build_trip_table(PLAN, PLAN_ANCHOR, live)["trips"][0]

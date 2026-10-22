@@ -40,6 +40,16 @@ def test_parse_course_gives_one_stop_per_station_with_local_times():
     assert stops[0]["dep_delay"] == 60 and stops[0]["platform"] == "Gleis 1"
 
 
+def test_parse_course_marks_cancelled_stops():
+    response = _response()
+    response["courseElements"][0]["fromCancelled"] = True
+    response["courseElements"][1]["toCancelled"] = True
+
+    stops = parse_course(response)
+
+    assert [s["cancelled"] for s in stops] == [True, False, True]
+
+
 def test_parse_course_without_elements_is_none():
     assert parse_course({"returnCode": "OK"}) is None
 
@@ -299,7 +309,7 @@ def _between(service_id, age, delay=0, last="2026-10-17T10:00"):
     }
 
 
-def test_refresh_prefers_trips_between_anchors_then_delayed_ones():
+def test_refresh_alternates_between_anchors_and_live_then_delayed_first():
     now = datetime(2026, 10, 17, 9, 10)
     live = {
         "anchor": {"date": "2026-10-17", "time": "09:00:00"},
@@ -315,9 +325,9 @@ def test_refresh_prefers_trips_between_anchors_then_delayed_ones():
     jobs = trip_courses.course_jobs(live, cached, now, trip_courses.time.time())
     assert [(key, reason) for key, _, reason in jobs] == [
         ("live:8", "between"),
+        ("live:5", "age"),
         ("live:7", "between"),
         ("live:6", "between"),
-        ("live:5", "age"),
     ]
 
 
