@@ -400,3 +400,27 @@ def test_missing_trip_is_not_placed_on_the_map():
     row = {**_row(), "status": "vermutlich ausgefallen"}
 
     assert build_positions({"trips": [row]}, NOW, STATIONS)["features"] == []
+
+
+def _cancelled(row, *names):
+    for stop in row["stops"]:
+        stop["cancelled"] = stop["station"] in names
+    return row
+
+
+def test_cancelled_first_stop_is_not_driven():
+    # A cancelled: the train starts at B (09:05), so at 09:02:30 not yet
+    assert _positions(_cancelled(_row(), "A")) == []
+    [feature] = _positions(_cancelled(_row(), "A"), datetime(2026, 10, 17, 9, 6))
+    assert 0 < feature["properties"]["progress"] < 1
+
+
+def test_cancelled_last_stops_end_the_trip_early_with_their_label():
+    row = _cancelled(_row(), "C")
+    [feature] = _positions(row)
+    assert feature["properties"]["label"] == "B"
+    assert _positions(row, datetime(2026, 10, 17, 9, 7)) == []
+
+
+def test_trip_with_every_stop_cancelled_has_no_vehicle():
+    assert _positions(_cancelled(_row(), "A", "B", "C")) == []

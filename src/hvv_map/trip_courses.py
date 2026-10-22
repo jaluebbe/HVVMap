@@ -44,8 +44,9 @@ def _parse_time(value: str | None) -> str | None:
 
 
 def parse_course(response: dict) -> list[dict] | None:
-    """[{id, name, dep, arr, dep_delay, arr_delay, platform}] per station of
-    the course, or None without courseElements."""
+    """[{id, name, dep, arr, dep_delay, arr_delay, platform, cancelled}] per
+    station of the course, or None without courseElements. cancelled: the
+    train does not stop there (realtime)."""
     elements = response.get("courseElements") or []
     if not elements:
         return None
@@ -64,6 +65,7 @@ def parse_course(response: dict) -> list[dict] | None:
                 "arr_delay": elements[index - 1].get("arrDelay") if index else None,
                 "platform": element.get("fromRealtimePlatform")
                 or element.get("fromPlatform"),
+                "cancelled": bool(element.get("fromCancelled")),
             }
         )
     last, final = elements[-1], elements[-1].get("toStation") or {}
@@ -76,6 +78,7 @@ def parse_course(response: dict) -> list[dict] | None:
             "dep_delay": None,
             "arr_delay": last.get("arrDelay"),
             "platform": last.get("toRealtimePlatform") or last.get("toPlatform"),
+            "cancelled": bool(last.get("toCancelled")),
         }
     )
     return stops

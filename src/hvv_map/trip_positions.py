@@ -123,6 +123,39 @@ def _feature(
     }
 
 
+def _served(stops: list[dict]) -> list[dict]:
+    """Stops from the first to the last one the train serves; cancelled stops
+    before and after are cut, the train does not run there."""
+    kept = [i for i, stop in enumerate(stops) if not stop.get("cancelled")]
+    return stops[kept[0] : kept[-1] + 1] if kept else []
+
+
+def _served_row(row: dict) -> dict | None:
+    """The row and its wing courses cut to their served stops, ending at the
+    last served stop instead of the announced destination; None if no stop
+    is served."""
+    stops = _served(row["stops"])
+    if not stops:
+        return None
+    aliases = []
+    for alias in row["alias_courses"]:
+        served = _served(alias["stops"])
+        if served:
+            cut = served[-1] is not alias["stops"][-1]
+            destination = served[-1]["name"] if cut else alias["destination"]
+            aliases.append({**alias, "stops": served, "destination": destination})
+    cut = stops[-1] is not row["stops"][-1]
+    return {
+        **row,
+        "stops": stops,
+        "alias_courses": aliases,
+        "destination": stops[-1]["station"] if cut else row["destination"],
+        "destination_announced": (
+            stops[-1]["station"] if cut else row.get("destination_announced")
+        ),
+    }
+
+
 def _alias_stops(alias: dict) -> list[dict]:
     return [
         {
@@ -294,9 +327,10 @@ def build_positions(
     `cache` keeps segment tracks between calls on the same data."""
     cache = {} if cache is None else cache
     features = []
-    skip, hidden = _drawn_by_others(table["trips"], now)
+    rows = [r for r in map(_served_row, table["trips"]) if r]
+    skip, hidden = _drawn_by_others(rows, now)
     meta: dict[int, tuple] = {}  # see _one_per_train
-    for row in table["trips"]:
+    for row in rows:
         if row["status"] in (STATUS_CANCELLED, STATUS_MISSING) or id(row) in skip:
             continue
         ferry = row["mode"] == "FERRY"

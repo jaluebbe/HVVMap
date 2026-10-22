@@ -40,6 +40,16 @@ def test_parse_course_gives_one_stop_per_station_with_local_times():
     assert stops[0]["dep_delay"] == 60 and stops[0]["platform"] == "Gleis 1"
 
 
+def test_parse_course_marks_cancelled_stops():
+    response = _response()
+    response["courseElements"][0]["fromCancelled"] = True
+    response["courseElements"][1]["toCancelled"] = True
+
+    stops = parse_course(response)
+
+    assert [s["cancelled"] for s in stops] == [True, False, True]
+
+
 def test_parse_course_without_elements_is_none():
     assert parse_course({"returnCode": "OK"}) is None
 
