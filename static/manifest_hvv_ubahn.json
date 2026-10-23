@@ -1,8 +1,9 @@
 {
   "name": "U-Bahn Hamburg",
   "short_name": "U-Bahn",
-  "start_url": "/static/maplibre_map_hvv_ubahn.html",
-  "scope": "/static/maplibre_map_hvv_ubahn.html",
+  "id": "/static/maplibre_map_hvv_ubahn.html",
+  "start_url": "/ubahn",
+  "scope": "/ubahn",
   "display": "standalone",
   "orientation": "any",
   "lang": "de",
