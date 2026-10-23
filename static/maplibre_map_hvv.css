@@ -175,13 +175,46 @@ body {
     display: block;
 }
 
+/* Unit numbers below the icon, see UnitToggleControl */
+.hvv-marker-units {
+    display: none;
+    position: absolute;
+    left: 0;
+    transform: translateX(-50%);
+    margin-top: 1px;
+    font-size: 9px;
+    line-height: 1.1;
+    font-variant-numeric: tabular-nums;
+    color: #000;
+    background: rgba(255, 255, 255, 0.8);
+    padding: 0 2px;
+    border-radius: 2px;
+    white-space: nowrap;
+    pointer-events: none;
+}
+
+.hvv-units-visible .hvv-marker-units {
+    display: block;
+}
+
+.hvv-units-toggle {
+    font-size: 16px;
+    font-weight: bold;
+}
+
+.hvv-units-toggle-active {
+    color: #fff !important;
+}
+
 /* Label would overlap other vehicles (see placeVehicleLabels) */
-.hvv-label-collided .hvv-marker-label {
+.hvv-label-collided .hvv-marker-label,
+.hvv-units-visible .hvv-label-collided .hvv-marker-units {
     display: none;
 }
 
 .hvv-wakelock-active,
-.hvv-labels-toggle-active {
+.hvv-labels-toggle-active,
+.hvv-units-toggle-active {
     background-color: #1e64a0 !important;
 }
 

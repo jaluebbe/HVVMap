@@ -424,3 +424,13 @@ def test_cancelled_last_stops_end_the_trip_early_with_their_label():
 
 def test_trip_with_every_stop_cancelled_has_no_vehicle():
     assert _positions(_cancelled(_row(), "A", "B", "C")) == []
+
+
+def test_ubahn_vehicle_lists_its_unit_numbers():
+    [feature] = _positions(_row(vehicles="DT5.1 (388), DT5.2 (440)"))
+    assert feature["properties"]["units"] == "388 · 440"
+
+
+def test_other_modes_have_no_unit_numbers():
+    [feature] = _positions(_row(mode="S", vehicles="474 (4011)"))
+    assert feature["properties"]["units"] == ""
