@@ -30,8 +30,9 @@ def mode_for_line(line: dict) -> str:
 
 def build_stops_geojson(by_service: dict, stations: dict[str, StationInfo]) -> dict:
     """One Point feature per station on a resolved subline match (see
-    departures.match_sublines), with the set of modes seen there."""
+    departures.match_sublines), with the modes and line names seen there."""
     modes_by_station: dict[str, set[str]] = {}
+    lines_by_station: dict[str, set[str]] = {}
     for entry in by_service.values():
         subline = entry.get("subline")
         mode = mode_for_line(entry["line"])
@@ -39,6 +40,7 @@ def build_stops_geojson(by_service: dict, stations: dict[str, StationInfo]) -> d
             continue
         for stop in subline:
             modes_by_station.setdefault(stop["id"], set()).add(mode)
+            lines_by_station.setdefault(stop["id"], set()).add(entry["line"]["name"])
 
     features = []
     for station_id, modes in modes_by_station.items():
@@ -60,6 +62,7 @@ def build_stops_geojson(by_service: dict, stations: dict[str, StationInfo]) -> d
                     # human-readable form ("Lübeck Hbf").
                     "name": station.combined_name,
                     "modes": sorted(modes),
+                    "lines": sorted(lines_by_station[station_id]),
                     "text": station.combined_name,
                 },
             }
