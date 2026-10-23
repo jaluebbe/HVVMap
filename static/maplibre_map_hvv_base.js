@@ -131,39 +131,6 @@ class UnitToggleControl {
     }
 }
 
-// Toggle for the last known positions of units not on the map (pages with
-// PAGE_CONFIG.unitHistory); off by default.
-class HistoryToggleControl {
-    constructor(onToggle) {
-        this._onToggle = onToggle;
-    }
-
-    onAdd(mapInstance) {
-        this._map = mapInstance;
-        const container = document.createElement('div');
-        container.className = 'maplibregl-ctrl maplibregl-ctrl-group';
-        const button = document.createElement('button');
-        button.type = 'button';
-        button.title = 'Zuletzt gesehene Fahrzeuge ein-/ausblenden';
-        button.style.fontSize = '16px';
-        button.textContent = '🕓';
-        let visible = false;
-        button.addEventListener('click', () => {
-            visible = !visible;
-            button.classList.toggle('hvv-history-toggle-active', visible);
-            this._onToggle(visible);
-        });
-        container.appendChild(button);
-        this._container = container;
-        return container;
-    }
-
-    onRemove() {
-        this._container.parentNode.removeChild(this._container);
-        this._map = undefined;
-    }
-}
-
 // "vor 5 min", "vor 3 h", "vor 2 Tagen"
 function ageText(seconds) {
     const minutes = Math.max(1, Math.round(seconds / 60));
@@ -317,6 +284,7 @@ map.on('zoomstart', hideInfoPanel);
 const HVV_POLL_INTERVAL_MS = 1_000;
 const HISTORY_ENDPOINT = '/api/hvv/gtilive/unit-history.geojson';
 const HISTORY_POLL_INTERVAL_MS = 60_000;
+const HISTORY_RECENT_SECONDS = 20 * 60; // older history markers show only when searched
 const REFERENCE_POLL_INTERVAL_MS = 600_000;
 const DISRUPTIONS_POLL_INTERVAL_MS = 60_000;
 
@@ -834,43 +802,52 @@ function initHvvVehicleLayers(initialSourceKey) {
                 marker.getElement().style.display = markerVisible(m.key, marker) ? '' : 'none';
             });
         });
-        historyMarkers.forEach((marker) => {
-            marker.getElement().style.display = historyVisible(marker) ? '' : 'none';
-        });
+        historyMarkers.forEach(updateHistoryMarker);
     }
 
     // Last known positions of units not on the map (PAGE_CONFIG.unitHistory),
-    // one marker per place listing its trains.
+    // one marker per place listing its trains: those of the last
+    // HISTORY_RECENT_SECONDS, or during a unit search the ones searched for.
     const historyMarkers = [];
-    let showHistory = false;
 
-    function historyVisible(marker) {
+    function shownTrains(marker) {
         if (unitFilter) {
-            return marker.hvvUnits.some((number) => unitFilter.has(number));
+            return marker.hvvTrains.filter((t) => t.units.some((number) => unitFilter.has(number)));
         }
         const modeKey = Object.keys(LINE_TOGGLES)[0] || MODES[0].key;
-        return showHistory && linesVisible(modeKey, [marker.hvvLine]);
+        if (!linesVisible(modeKey, [marker.hvvLine])) {
+            return [];
+        }
+        const nowSeconds = Date.now() / 1000;
+        return marker.hvvTrains.filter((t) => nowSeconds - t.seenAt <= HISTORY_RECENT_SECONDS);
     }
 
-    function buildHistoryElement(features, nowSeconds) {
-        const first = features[0].properties;
+    function historyVisible(marker) {
+        return shownTrains(marker).length > 0;
+    }
+
+    function updateHistoryMarker(marker) {
+        const trains = shownTrains(marker);
+        const element = marker.getElement();
+        element.style.display = trains.length ? '' : 'none';
+        const nowSeconds = Date.now() / 1000;
+        // Shown via CSS content: browsers' data detectors would link plain digits.
+        const text = trains.map((t) => `${t.units.join(' · ')} ${ageText(nowSeconds - t.seenAt)}`).join('\n');
+        const label = element.querySelector('.hvv-history-label');
+        if (label.dataset.text !== text) {
+            label.dataset.text = text;
+        }
+    }
+
+    function buildHistoryElement(properties) {
         const element = document.createElement('div');
         element.className = 'hvv-history-marker';
         const img = document.createElement('img');
-        img.src = first.icon;
+        img.src = properties.icon;
         img.alt = '';
-        img.style.height = `${first.iconHeight || 20}px`;
+        img.style.height = `${properties.iconHeight || 20}px`;
         const label = document.createElement('div');
         label.className = 'hvv-history-label';
-        const trains = new Map();
-        features.forEach((f) => {
-            trains.set(f.properties.train.join(' · '), f.properties.seen_at);
-        });
-        // Shown via CSS content: browsers' data detectors would link plain digits.
-        label.dataset.text = [...trains]
-            .sort((a, b) => b[1] - a[1])
-            .map(([train, seenAt]) => `${train} ${ageText(nowSeconds - seenAt)}`)
-            .join('\n');
         element.append(img, label);
         return element;
     }
@@ -882,7 +859,6 @@ function initHvvVehicleLayers(initialSourceKey) {
                 throw new Error(`HTTP ${response.status}`);
             }
             const data = await response.json();
-            const nowSeconds = Date.now() / 1000;
             const places = new Map();
             data.features.forEach((f) => {
                 const key = f.geometry.coordinates.map((c) => c.toFixed(5)).join(',');
@@ -893,9 +869,14 @@ function initHvvVehicleLayers(initialSourceKey) {
             });
             historyMarkers.splice(0).forEach((marker) => marker.remove());
             places.forEach((features) => {
-                const marker = new maplibregl.Marker({ element: buildHistoryElement(features, nowSeconds), anchor: 'top-left' })
+                const marker = new maplibregl.Marker({ element: buildHistoryElement(features[0].properties), anchor: 'top-left' })
                     .setLngLat(features[0].geometry.coordinates)
                     .addTo(map);
+                const trains = new Map();
+                features.forEach((f) => {
+                    trains.set(f.properties.train.join(' · '), { units: f.properties.train, seenAt: f.properties.seen_at });
+                });
+                marker.hvvTrains = [...trains.values()].sort((a, b) => b.seenAt - a.seenAt);
                 marker.hvvUnits = features.map((f) => f.properties.unit);
                 marker.hvvLine = features[0].properties.line;
                 historyMarkers.push(marker);
@@ -904,11 +885,6 @@ function initHvvVehicleLayers(initialSourceKey) {
         } catch (error) {
             console.warn('Failed to load vehicle history:', error);
         }
-    }
-
-    function setHistoryVisibility(visible) {
-        showHistory = visible;
-        updateMarkerVisibility();
     }
 
     // Restricted pages hide disruptions without a mode.
@@ -1183,7 +1159,6 @@ function initHvvVehicleLayers(initialSourceKey) {
             map.addControl(new UnitToggleControl(), 'top-right');
         }
         if (PAGE_CONFIG.unitHistory) {
-            map.addControl(new HistoryToggleControl(setHistoryVisibility), 'top-right');
             refreshHistory();
             setInterval(refreshHistory, HISTORY_POLL_INTERVAL_MS);
         }

@@ -241,7 +241,7 @@ body {
     color: #fff !important;
 }
 
-/* Last known positions of units not on the map, see HistoryToggleControl */
+/* Last known positions of units not on the map (PAGE_CONFIG.unitHistory) */
 .hvv-history-marker img {
     position: absolute;
     transform: translate(-50%, -50%);
@@ -278,7 +278,6 @@ body {
 }
 
 .hvv-wakelock-active,
-.hvv-history-toggle-active,
 .hvv-labels-toggle-active,
 .hvv-units-toggle-active {
     background-color: #1e64a0 !important;

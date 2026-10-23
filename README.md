@@ -139,8 +139,9 @@ they're built directly from the static feed on first run.
   `maplibre_map_hvv_base.js`).
 - `TS.html` - internal U-Bahn page at `/TS.html`, not linked and marked
   `noindex`: unit numbers on and destination labels off by default, a search
-  for unit numbers, no "Luftlinien" toggle and no disruptions, plus a 🕓
-  toggle for the last known position of units not on the map (hash
+  for unit numbers with a 👻 button for all ghosts, no "Luftlinien" toggle and
+  no disruptions. Units not on the map show as grey "ghosts" at their last
+  known position for 20 minutes, older ones only when searched for (hash
   `hvv:vehicles:positions`, written by the positions loop every 30 s, kept
   14 days; `/api/hvv/gtilive/unit-history.geojson`).
 - `maplibre_map_hvv_sbahn.html` - the same for the S-Bahn: `gtilive` only,
