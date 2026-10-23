@@ -1,7 +1,8 @@
 """Last known map position per U-Bahn unit, for the vehicle history on
 static/TS.html: units no longer on the map are shown where they were last
 seen. Kept in SQLite (survives Redis restarts), next to the GTI shapes
-database; entries never expire."""
+database; entries never expire, but only those of the last SHOW_MAX_AGE are
+shown."""
 
 import json
 import os
@@ -15,6 +16,7 @@ DEFAULT_DB_PATH = os.environ.get(
     ),
 )
 RECORD_INTERVAL = 30  # seconds between writes from the positions loop
+SHOW_MAX_AGE = 3 * 24 * 3600  # older last positions stay in the database only
 
 
 def open_db(db_path: str | None = None) -> sqlite3.Connection:
@@ -71,15 +73,19 @@ def record_unit_positions(
     return len(rows)
 
 
-def unit_history(conn: sqlite3.Connection | None, current: list[dict]) -> dict:
+def unit_history(
+    conn: sqlite3.Connection | None, current: list[dict], now_ts: float
+) -> dict:
     """FeatureCollection of the units not on the map now (`current` are the
-    position features), at their last known position."""
+    position features) seen within SHOW_MAX_AGE, at their last known position."""
     empty = {"type": "FeatureCollection", "features": []}
     if conn is None:
         return empty
     try:
         rows = conn.execute(
-            "SELECT unit, seen_at, data_json FROM unit_positions ORDER BY unit"
+            "SELECT unit, seen_at, data_json FROM unit_positions "
+            "WHERE seen_at >= ? ORDER BY unit",
+            (int(now_ts - SHOW_MAX_AGE),),
         ).fetchall()
     except sqlite3.OperationalError:
         return empty

@@ -434,7 +434,7 @@ def get_unit_history():
         _unit_positions_connection = open_unit_positions_reader()
     raw = _redis_client.get(REDIS_POSITIONS_KEY)
     current = json.loads(raw)["data"]["features"] if raw else []
-    return unit_history(_unit_positions_connection, current)
+    return unit_history(_unit_positions_connection, current, time.time())
 
 
 @app.get("/api/hvv/gtilive/stops.geojson", tags=["hvv_gtilive"])

@@ -97,7 +97,9 @@ def test_unit_history_leaves_out_units_on_the_map(client, monkeypatch, tmp_path)
         "properties": {"units": "417"},
     }
     record_unit_positions(
-        open_db(path), [on_map, {**on_map, "properties": {"units": "388"}}], 1
+        open_db(path),
+        [on_map, {**on_map, "properties": {"units": "388"}}],
+        api_module.time.time(),
     )
     fake = _FakeRedis({"hvv:positions_gtilive": {"data": {"features": [on_map]}}})
     monkeypatch.setattr(api_module, "_redis_client", fake)
