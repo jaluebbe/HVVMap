@@ -713,7 +713,10 @@ function initHvvVehicleLayers(initialSourceKey) {
     let hoveredPositionKey = null;
     let currentSource = SOURCES.find((s) => s.key === initialSourceKey) || SOURCES[0];
     let modeToggleControl = null;
-    let showStraight = false;
+    // Pages with PAGE_CONFIG.straightToggle false have no "Luftlinien" toggle
+    // and show every segment.
+    const straightToggle = PAGE_CONFIG.straightToggle !== false;
+    let showStraight = !straightToggle;
     const pollTimers = [];
     const activeLines = new Set(Object.values(LINE_TOGGLES).flat().map((l) => l.key));
     // Last fetched lines/stops, re-filtered on line toggle.
@@ -1024,7 +1027,7 @@ function initHvvVehicleLayers(initialSourceKey) {
         );
         map.addControl(modeToggleControl, 'top-right');
         modeToggleControl.setCategoriesVisible(!!currentSource.disruptionsEndpoint);
-        modeToggleControl.setExtrasVisible(!!currentSource.straightToggle);
+        modeToggleControl.setExtrasVisible(straightToggle && !!currentSource.straightToggle);
         map.addControl(new LabelToggleControl(), 'top-right');
         if (PAGE_CONFIG.unitNumbers) {
             map.addControl(new UnitToggleControl(), 'top-right');
@@ -1318,7 +1321,7 @@ function initHvvVehicleLayers(initialSourceKey) {
         clearAllData();
         currentSource = next;
         modeToggleControl.setCategoriesVisible(!!currentSource.disruptionsEndpoint);
-        modeToggleControl.setExtrasVisible(!!currentSource.straightToggle);
+        modeToggleControl.setExtrasVisible(straightToggle && !!currentSource.straightToggle);
         startPolling();
     }
 
