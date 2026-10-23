@@ -271,6 +271,12 @@ body {
     content: attr(data-text);
 }
 
+/* Ghost label would overlap other markers (see placeVehicleLabels); hidden
+   but still laid out, so its size stays measurable. */
+.hvv-history-collided .hvv-history-label {
+    visibility: hidden;
+}
+
 /* Label would overlap other vehicles (see placeVehicleLabels) */
 .hvv-label-collided .hvv-marker-label,
 .hvv-units-visible .hvv-label-collided .hvv-marker-units {

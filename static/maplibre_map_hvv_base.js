@@ -676,24 +676,25 @@ const SOURCES = (PAGE_CONFIG.sourceKeys
 // labels shown last time are placed first, so labels do not flicker.
 const LABEL_PADDING_PX = 2;
 
-function placeVehicleLabels(mapInstance, markers) {
+function placeVehicleLabels(mapInstance, markers, ghosts = []) {
     const container = mapInstance.getContainer();
     const labelsOn = !container.classList.contains('hvv-labels-hidden');
     const unitsOn = container.classList.contains('hvv-units-visible');
-    if (!labelsOn && !unitsOn) {
-        return;
-    }
     const width = container.clientWidth;
     const height = container.clientHeight;
+    const onScreen = (marker) => {
+        if (marker.getElement().style.display === 'none') {
+            return null;
+        }
+        const point = mapInstance.project(marker.getLngLat());
+        return point.x < -200 || point.y < -50 || point.x > width + 50 || point.y > height + 50 ? null : point;
+    };
     const items = [];
     markers.forEach((marker) => {
         const element = marker.getElement();
         const layout = element.hvvLayout;
-        if (!layout || element.style.display === 'none') {
-            return;
-        }
-        const point = mapInstance.project(marker.getLngLat());
-        if (point.x < -200 || point.y < -50 || point.x > width + 50 || point.y > height + 50) {
+        const point = layout && onScreen(marker);
+        if (!point) {
             return;
         }
         if (!layout.measured) {
@@ -733,15 +734,51 @@ function placeVehicleLabels(mapInstance, markers) {
         || (b.layout.delay - a.layout.delay)
         || (a.icon[1] - b.icon[1]));
     const placed = [];
-    items.forEach((item) => {
-        const free = Boolean(item.boxes?.length) && item.boxes.every((box) =>
-            !items.some((other) => other !== item && overlaps(box, other.icon))
-            && !placed.some((other) => overlaps(box, other)));
-        if (free) {
-            placed.push(...item.boxes);
+    if (labelsOn || unitsOn) {
+        items.forEach((item) => {
+            const free = Boolean(item.boxes?.length) && item.boxes.every((box) =>
+                !items.some((other) => other !== item && overlaps(box, other.icon))
+                && !placed.some((other) => overlaps(box, other)));
+            if (free) {
+                placed.push(...item.boxes);
+            }
+            item.element.hvvLabelShown = Boolean(free);
+            item.element.classList.toggle('hvv-label-collided', !free);
+        });
+    }
+
+    // Ghost labels (history markers) come after the vehicles and also give
+    // way to every icon; a collided ghost keeps only its icon.
+    const ghostItems = [];
+    ghosts.forEach((marker) => {
+        const point = onScreen(marker);
+        if (!point) {
+            return;
         }
-        item.element.hvvLabelShown = Boolean(free);
-        item.element.classList.toggle('hvv-label-collided', !free);
+        const element = marker.getElement();
+        const label = element.querySelector('.hvv-history-label');
+        const iconHeight = parseFloat(element.querySelector('img').style.height) || 20;
+        ghostItems.push({
+            element,
+            icon: [point.x - iconHeight, point.y - iconHeight / 2, point.x + 18, point.y + iconHeight / 2],
+            box: label.offsetWidth ? [
+                point.x + 20, point.y - label.offsetHeight / 2,
+                point.x + 20 + label.offsetWidth, point.y + label.offsetHeight / 2,
+            ] : null,
+        });
+    });
+    ghostItems.sort((a, b) => (Number(b.element.hvvLabelShown || false) - Number(a.element.hvvLabelShown || false))
+        || (a.icon[1] - b.icon[1]));
+    ghostItems.forEach((ghost) => {
+        const free = ghost.box
+            && !items.some((item) => overlaps(ghost.box, item.icon))
+            && !ghostItems.some((other) => other !== ghost && overlaps(ghost.box, other.icon))
+            && !placed.some((box) => overlaps(ghost.box, box));
+        if (free) {
+            placed.push(ghost.box);
+        }
+        ghost.element.hvvLabelShown = Boolean(free);
+        ghost.element.classList.toggle('hvv-history-collided', !free);
     });
 }
 
@@ -794,7 +831,7 @@ function initHvvVehicleLayers(initialSourceKey) {
         if (labelFrame === null) {
             labelFrame = requestAnimationFrame(() => {
                 labelFrame = null;
-                placeVehicleLabels(map, [...positionEntries.values()].map((entry) => entry.marker));
+                placeVehicleLabels(map, [...positionEntries.values()].map((entry) => entry.marker), historyMarkers);
             });
         }
     }
@@ -906,6 +943,7 @@ function initHvvVehicleLayers(initialSourceKey) {
                 historyMarkers.push(marker);
             });
             updateMarkerVisibility();
+            schedulePlaceLabels();
         } catch (error) {
             console.warn('Failed to load vehicle history:', error);
         }
