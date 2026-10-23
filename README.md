@@ -137,6 +137,9 @@ they're built directly from the static feed on first run.
   also served at `/ubahn`.
   Page options are set via `window.HVV_PAGE_CONFIG` (see
   `maplibre_map_hvv_base.js`).
+- `maplibre_map_hvv_sbahn.html` - the same for the S-Bahn: `gtilive` only,
+  centered on Hamburg Hbf, S1-S7 toggleable individually, destination labels
+  on, no unit numbers; also served at `/sbahn`.
 - `maplibre_map_hvv_gtilive.html` - only the `gtilive` source, no dropdown;
   this is the public map, also served at `/`.
 

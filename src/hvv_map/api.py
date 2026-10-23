@@ -79,6 +79,11 @@ async def ubahn():
     return FileResponse("static/maplibre_map_hvv_ubahn.html")
 
 
+@app.get("/sbahn", include_in_schema=False)
+async def sbahn():
+    return FileResponse("static/maplibre_map_hvv_sbahn.html")
+
+
 @app.get("/robots.txt", include_in_schema=False)
 async def robots():
     return PlainTextResponse("User-agent: *\nDisallow: /api/\n")
