@@ -321,8 +321,9 @@ function buildIconNode(icon) {
 
 // One checkbox per mode + disruption category; collapsible on narrow/short screens.
 class ModeToggleControl {
-    constructor(onModeToggle, categories, onCategoryToggle, sourceConfig, onLineToggle, extraToggles) {
+    constructor(onModeToggle, categories, onCategoryToggle, sourceConfig, onLineToggle, extraToggles, onUnitSearch) {
         this._extraToggles = extraToggles || [];
+        this._onUnitSearch = onUnitSearch || null;
         this._onModeToggle = onModeToggle;
         this._onLineToggle = onLineToggle;
         this._categories = categories || [];
@@ -385,6 +386,26 @@ class ModeToggleControl {
                 this._appendItem(items, m.key, m.name, m.icon, true, this._onModeToggle);
             }
         });
+
+        if (this._onUnitSearch) {
+            const searchDivider = document.createElement('div');
+            searchDivider.className = 'hvv-mode-control-divider';
+            const search = document.createElement('input');
+            search.type = 'search';
+            search.className = 'hvv-mode-control-unit-search';
+            search.placeholder = 'Fahrzeug-Nr., z. B. 388, 417';
+            search.setAttribute('aria-label', 'Fahrzeugnummern suchen');
+            search.autocomplete = 'off';
+            // While numbers are entered, only their trips show and the checkboxes do not apply.
+            search.addEventListener('input', () => {
+                const numbers = search.value.split(/[\s,;]+/).filter((n) => /^\d+$/.test(n));
+                items.querySelectorAll('input[type=checkbox]').forEach((box) => {
+                    box.disabled = numbers.length > 0;
+                });
+                this._onUnitSearch(numbers.length ? new Set(numbers) : null);
+            });
+            items.append(searchDivider, search);
+        }
 
         this._categoriesSection = document.createElement('div');
         this._categoriesSection.className = 'hvv-mode-control-categories';
@@ -698,9 +719,13 @@ function initHvvVehicleLayers(initialSourceKey) {
     // Last fetched lines/stops, re-filtered on line toggle.
     const referenceData = {};
 
-    // Modes without line toggles and features without line info always pass.
+    // Unit numbers searched for (see ModeToggleControl), null without a search.
+    let unitFilter = null;
+
+    // Modes without line toggles and features without line info always pass,
+    // as does everything during a unit search.
     function linesVisible(modeKey, lineNames) {
-        if (!LINE_TOGGLES[modeKey] || !lineNames || lineNames.length === 0) {
+        if (unitFilter || !LINE_TOGGLES[modeKey] || !lineNames || lineNames.length === 0) {
             return true;
         }
         return lineNames.some((name) => activeLines.has(baseLineName(name)));
@@ -708,6 +733,9 @@ function initHvvVehicleLayers(initialSourceKey) {
 
     // Vehicles on a straight station-to-station segment follow the straight-line toggle.
     function markerVisible(modeKey, marker) {
+        if (unitFilter) {
+            return marker.hvvUnits.some((number) => unitFilter.has(number));
+        }
         return activeModes.has(modeKey)
             && linesVisible(modeKey, [marker.hvvLine])
             && (showStraight || !marker.hvvStraight);
@@ -771,6 +799,15 @@ function initHvvVehicleLayers(initialSourceKey) {
         renderReferenceLayer('hvv-lines');
         renderReferenceLayer('hvv-stops');
         renderDisruptionLayers();
+    }
+
+    function setUnitFilter(numbers) {
+        unitFilter = numbers;
+        updateMarkerVisibility();
+        renderReferenceLayer('hvv-lines');
+        renderReferenceLayer('hvv-stops');
+        renderDisruptionLayers();
+        schedulePlaceLabels();
     }
 
     function setStraightVisibility(_key, visible) {
@@ -961,6 +998,7 @@ function initHvvVehicleLayers(initialSourceKey) {
             { sources: SOURCES, initialKey: currentSource.key, onSourceChange: switchSource },
             setLineVisibility,
             [{ key: 'straight', name: 'Luftlinien', icon: '⋯', checked: false, onToggle: setStraightVisibility }],
+            PAGE_CONFIG.unitNumbers ? setUnitFilter : null,
         );
         map.addControl(modeToggleControl, 'top-right');
         modeToggleControl.setCategoriesVisible(!!currentSource.disruptionsEndpoint);
@@ -1069,6 +1107,7 @@ function initHvvVehicleLayers(initialSourceKey) {
                         .setLngLat(feature.geometry.coordinates)
                         .addTo(map);
                     marker.hvvLine = properties.line;
+                    marker.hvvUnits = (properties.units || '').split(' · ').filter(Boolean);
                     entry = { marker, look, modeKey };
                     positionEntries.set(key, entry);
                     if (properties.text) {
