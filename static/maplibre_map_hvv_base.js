@@ -288,6 +288,9 @@ const ALL_MODES = [
     { key: 'R', name: 'Regio', icon: '/static/hvv/icons/r.svg' },
 ];
 const MODES = PAGE_CONFIG.modes ? ALL_MODES.filter((m) => PAGE_CONFIG.modes.includes(m.key)) : ALL_MODES;
+// Map layers bottom to top: rapid transit above regional trains and ferries.
+const LAYER_ORDER = ['R', 'FERRY', 'AKN', 'S', 'U'];
+const LAYER_MODES = [...MODES].sort((a, b) => LAYER_ORDER.indexOf(a.key) - LAYER_ORDER.indexOf(b.key));
 
 // "U1-ERSATZ" -> "U1"
 function baseLineName(name) {
@@ -791,7 +794,7 @@ function initHvvVehicleLayers(initialSourceKey) {
         const disruptionLayerIds = [];
         // Split into two passes (lines+dots, then labels) so disruption markers can be
         // inserted in between - above every mode's stop dots, below every mode's labels.
-        MODES.forEach(function(m) {
+        LAYER_MODES.forEach(function(m) {
             map.addSource(`hvv-lines-${m.key}`, { type: 'geojson', data: EMPTY_FEATURE_COLLECTION });
             map.addLayer({
                 id: `hvv-lines-layer-${m.key}`,
@@ -866,7 +869,7 @@ function initHvvVehicleLayers(initialSourceKey) {
             disruptionLayerIds.push(`hvv-disruptions-layer-${c.key}`);
         });
 
-        MODES.forEach(function(m) {
+        LAYER_MODES.forEach(function(m) {
             // Our own station/pier name labels, from our own stops data.
             map.addLayer({
                 id: `hvv-stops-labels-${m.key}`,
