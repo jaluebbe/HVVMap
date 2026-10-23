@@ -68,11 +68,12 @@ function fixIOSResize() {
 window.addEventListener('orientationchange', fixIOSResize);
 window.addEventListener('resize', fixIOSResize);
 
-// Toggle visibility of vehicle destination labels.
+// Toggle visibility of vehicle destination labels; on unless
+// PAGE_CONFIG.destinationLabels is false.
 class LabelToggleControl {
     onAdd(mapInstance) {
         this._map = mapInstance;
-        this._labelsVisible = true;
+        this._labelsVisible = PAGE_CONFIG.destinationLabels !== false;
         const container = document.createElement('div');
         container.className = 'maplibregl-ctrl maplibregl-ctrl-group';
         const button = document.createElement('button');
@@ -80,7 +81,8 @@ class LabelToggleControl {
         button.title = 'Ziel-Labels ein-/ausblenden';
         button.style.fontSize = '16px';
         button.textContent = '🏷️';
-        button.classList.add('hvv-labels-toggle-active');
+        button.classList.toggle('hvv-labels-toggle-active', this._labelsVisible);
+        mapInstance.getContainer().classList.toggle('hvv-labels-hidden', !this._labelsVisible);
         button.addEventListener('click', () => {
             this._labelsVisible = !this._labelsVisible;
             mapInstance.getContainer().classList.toggle('hvv-labels-hidden');
