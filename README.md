@@ -130,10 +130,11 @@ they're built directly from the static feed on first run.
 - `maplibre_map_hvv_live.html` - all modes; the data source (`gtilive`,
   `gtfs`) is switched at runtime via a dropdown, no page reload needed; see
   `maplibre_map_hvv_base.js`'s `SOURCES`. Defaults to `gtilive`.
-- `maplibre_map_hvv_ubahn.html` - the same page restricted to the U-Bahn,
-  centered on Betriebshof Barmbek, with U1-U4 toggleable individually and a
-  `#` toggle for the unit numbers below the vehicle icons (on by default;
-  the destination labels start hidden there); also served at `/ubahn`.
+- `maplibre_map_hvv_ubahn.html` - the same page restricted to the U-Bahn and
+  the `gtilive` source, centered on Betriebshof Barmbek, with U1-U4
+  toggleable individually and a `#` toggle for the unit numbers below the
+  vehicle icons (on by default; the destination labels start hidden there);
+  also served at `/ubahn`.
   Page options are set via `window.HVV_PAGE_CONFIG` (see
   `maplibre_map_hvv_base.js`).
 - `maplibre_map_hvv_gtilive.html` - only the `gtilive` source, no dropdown;
