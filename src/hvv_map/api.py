@@ -74,6 +74,11 @@ async def root():
     return FileResponse("static/maplibre_map_hvv_gtilive.html")
 
 
+@app.get("/ubahn", include_in_schema=False)
+async def ubahn():
+    return FileResponse("static/maplibre_map_hvv_ubahn.html")
+
+
 @app.get("/robots.txt", include_in_schema=False)
 async def robots():
     return PlainTextResponse("User-agent: *\nDisallow: /api/\n")
