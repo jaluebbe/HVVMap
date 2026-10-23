@@ -87,24 +87,21 @@ def test_ts_page_is_served_with_noindex(client):
     assert response.headers["x-robots-tag"] == "noindex, nofollow"
 
 
-def test_unit_history_leaves_out_units_on_the_map(client, monkeypatch):
-    entry = {
-        "coordinates": [10.0, 53.5],
-        "line": "U1",
-        "icon": "i",
-        "iconHeight": 16,
-        "label": "Farmsen",
-        "train": ["388"],
-        "seen_at": int(api_module.time.time()) - 60,
+def test_unit_history_leaves_out_units_on_the_map(client, monkeypatch, tmp_path):
+    from hvv_map.unit_positions import open_db, open_reader, record_unit_positions
+
+    path = str(tmp_path / "units.db")
+    on_map = {
+        "type": "Feature",
+        "geometry": {"type": "Point", "coordinates": [10.0, 53.5]},
+        "properties": {"units": "417"},
     }
-
-    class _Redis(_FakeRedis):
-        def hgetall(self, key):
-            return {"388": json.dumps(entry), "417": json.dumps(entry)}
-
-    on_map = {"type": "Feature", "geometry": None, "properties": {"units": "417"}}
-    fake = _Redis({"hvv:positions_gtilive": {"data": {"features": [on_map]}}})
+    record_unit_positions(
+        open_db(path), [on_map, {**on_map, "properties": {"units": "388"}}], 1
+    )
+    fake = _FakeRedis({"hvv:positions_gtilive": {"data": {"features": [on_map]}}})
     monkeypatch.setattr(api_module, "_redis_client", fake)
+    monkeypatch.setattr(api_module, "_unit_positions_connection", open_reader(path))
 
     data = client.get("/api/hvv/gtilive/unit-history.geojson").json()
 

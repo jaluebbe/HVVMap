@@ -1,12 +1,5 @@
-import json
-
-from hvv_map.redis_client import get_redis_client
-from hvv_map.unit_positions import (
-    HISTORY_MAX_AGE,
-    REDIS_UNIT_POSITIONS_KEY,
-    record_unit_positions,
-    unit_history,
-)
+from hvv_map.unit_positions import open_db, open_reader, record_unit_positions
+from hvv_map.unit_positions import unit_history
 
 
 def _feature(units, lon=10.0, line="U1"):
@@ -17,42 +10,30 @@ def _feature(units, lon=10.0, line="U1"):
     }
 
 
-def test_positions_are_stored_per_unit_and_old_ones_dropped():
-    redis_client = get_redis_client()
-    redis_client.delete(REDIS_UNIT_POSITIONS_KEY)
-    redis_client.hset(
-        REDIS_UNIT_POSITIONS_KEY, "999", json.dumps({"seen_at": 0, "coordinates": []})
-    )
+def test_positions_are_stored_per_unit_and_replaced(tmp_path):
+    path = str(tmp_path / "units.db")
+    conn = open_db(path)
 
-    count = record_unit_positions(
-        redis_client, [_feature("388 · 340"), _feature("")], HISTORY_MAX_AGE + 10
-    )
+    record_unit_positions(conn, [_feature("388 · 340", lon=9.0)], 1000)
+    count = record_unit_positions(conn, [_feature("388 · 340"), _feature("")], 2000)
 
-    stored = redis_client.hgetall(REDIS_UNIT_POSITIONS_KEY)
-    assert count == 2 and sorted(stored) == ["340", "388"]
-    assert json.loads(stored["388"])["train"] == ["388", "340"]
-    redis_client.delete(REDIS_UNIT_POSITIONS_KEY)
+    rows = conn.execute("SELECT unit, seen_at FROM unit_positions ORDER BY unit")
+    assert count == 2 and rows.fetchall() == [("340", 2000), ("388", 2000)]
 
 
-def test_history_lists_units_not_on_the_map():
-    stored = {
-        unit: json.dumps(
-            {
-                "coordinates": [10.1, 53.6],
-                "line": "U1",
-                "icon": "i",
-                "iconHeight": 16,
-                "label": "Ohlstedt",
-                "train": [unit],
-                "seen_at": seen_at,
-            }
-        )
-        for unit, seen_at in (("388", 1000), ("417", 1000), ("101", -HISTORY_MAX_AGE))
-    }
+def test_history_lists_units_not_on_the_map_without_expiry(tmp_path):
+    path = str(tmp_path / "units.db")
+    record_unit_positions(open_db(path), [_feature("388 · 340"), _feature("417")], 0)
 
-    history = unit_history(stored, [_feature("417")], 2000)
+    history = unit_history(open_reader(path), [_feature("417")])
 
-    [feature] = history["features"]
-    assert feature["properties"]["unit"] == "388"
-    assert feature["properties"]["seen_at"] == 1000
-    assert feature["geometry"]["coordinates"] == [10.1, 53.6]
+    assert [f["properties"]["unit"] for f in history["features"]] == ["340", "388"]
+    feature = history["features"][1]
+    assert feature["properties"]["seen_at"] == 0
+    assert feature["properties"]["train"] == ["388", "340"]
+    assert feature["geometry"]["coordinates"] == [10.0, 53.5]
+
+
+def test_history_is_empty_before_the_first_write(tmp_path):
+    assert open_reader(str(tmp_path / "missing.db")) is None
+    assert unit_history(None, [])["features"] == []

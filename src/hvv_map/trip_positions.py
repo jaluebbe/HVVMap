@@ -22,6 +22,7 @@ from hvv_map.redis_client import get_redis_client
 from hvv_map.stations import StationInfo, by_id, load_stations
 from hvv_map.trip_courses import REDIS_COURSES_KEY
 from hvv_map.unit_positions import RECORD_INTERVAL, record_unit_positions
+from hvv_map.unit_positions import open_db as open_units_db
 from hvv_map.trip_position import AT_STOP, BETWEEN, Position, locate, stops_from_row
 from hvv_map.trips import (
     COMBINED_DESTINATION,
@@ -404,6 +405,7 @@ class PositionsState:
         self.tracks: dict = {}
         self.memory: dict | None = None  # trip vehicles, see trips.remember_vehicles
         self.recorded = float("-inf")  # last write of the unit positions
+        self.units_conn: sqlite3.Connection | None = None  # see unit_positions
 
 
 def _refresh(redis_client, state: PositionsState) -> bool:
@@ -465,7 +467,9 @@ def run_positions(
     )
     if time.time() - state.recorded >= RECORD_INTERVAL:
         state.recorded = time.time()
-        record_unit_positions(redis_client, collection["features"], state.recorded)
+        if state.units_conn is None:
+            state.units_conn = open_units_db()
+        record_unit_positions(state.units_conn, collection["features"], state.recorded)
     return len(collection["features"])
 
 

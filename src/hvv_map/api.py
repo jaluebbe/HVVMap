@@ -37,7 +37,8 @@ from hvv_map.gtilive_geojson import (
 from hvv_map.redis_client import get_redis_client
 from hvv_map.response_cache import CachedJsonResponse
 from hvv_map.stations import by_id, load_stations
-from hvv_map.unit_positions import REDIS_UNIT_POSITIONS_KEY, unit_history
+from hvv_map.unit_positions import open_reader as open_unit_positions_reader
+from hvv_map.unit_positions import unit_history
 from hvv_map.trips import REDIS_VEHICLES_KEY, berlin_now, build_trip_table
 
 mimetypes.add_type("text/javascript", ".cjs")
@@ -421,14 +422,19 @@ def get_gtilive_positions():
     return _read_cached_json(REDIS_POSITIONS_KEY)
 
 
+_unit_positions_connection: sqlite3.Connection | None = None
+
+
 @app.get("/api/hvv/gtilive/unit-history.geojson", tags=["hvv_gtilive"])
 def get_unit_history():
     """Last known position of the U-Bahn units not on the map now, for
     static/TS.html."""
+    global _unit_positions_connection
+    if _unit_positions_connection is None:
+        _unit_positions_connection = open_unit_positions_reader()
     raw = _redis_client.get(REDIS_POSITIONS_KEY)
     current = json.loads(raw)["data"]["features"] if raw else []
-    stored = _redis_client.hgetall(REDIS_UNIT_POSITIONS_KEY)
-    return unit_history(stored, current, time.time())
+    return unit_history(_unit_positions_connection, current)
 
 
 @app.get("/api/hvv/gtilive/stops.geojson", tags=["hvv_gtilive"])

@@ -15,7 +15,7 @@ one Redis instance:
   `hvv:courses:log`, `hvv:stations`, `hvv:sublines`. A second thread (`hvv_map.trip_positions`) computes the
   vehicle positions once per second from that data and writes
   `hvv:positions_gtilive` and the last known unit positions
-  (`hvv:vehicles:positions`). Needs GTI credentials, no web-facing port.
+  (`unit_positions.db`, next to `GTI_SHAPES_DB_PATH`). Needs GTI credentials, no web-facing port.
 - **gtfs-fetcher** (`hvv_map.gtfs_fetcher`) - background loop building the
   same kind of layers purely from a static GTFS feed on disk - no GTI
   credentials, no live API, no disruptions (a static feed has none). Writes
@@ -141,9 +141,11 @@ they're built directly from the static feed on first run.
   `noindex`: unit numbers on and destination labels off by default, a search
   for unit numbers with a 👻 button for the older ghosts, no "Luftlinien" toggle and
   no disruptions. Units not on the map show as grey "ghosts" at their last
-  known position for 20 minutes, older ones only when searched for (hash
-  `hvv:vehicles:positions`, written by the positions loop every 30 s, kept
-  14 days; `/api/hvv/gtilive/unit-history.geojson`).
+  known position for 20 minutes, older ones only when searched for. The
+  positions loop writes them every 30 s to the SQLite file
+  `unit_positions.db` next to `GTI_SHAPES_DB_PATH` (override with
+  `UNIT_POSITIONS_DB_PATH`), one row per unit without expiry, so the history
+  survives Redis restarts; read via `/api/hvv/gtilive/unit-history.geojson`.
 - `maplibre_map_hvv_sbahn.html` - the same for the S-Bahn: `gtilive` only,
   centered on Hamburg Hbf, S1-S7 toggleable individually, destination labels
   on, no unit numbers; also served at `/sbahn`.

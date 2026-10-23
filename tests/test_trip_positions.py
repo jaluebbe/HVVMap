@@ -269,16 +269,6 @@ class _FakeRedis:
         self.values[key] = value
         self.expiry[key] = ex
 
-    def hset(self, key, mapping):
-        self.values.setdefault(key, {}).update(mapping)
-
-    def hgetall(self, key):
-        return dict(self.values.get(key) or {})
-
-    def hdel(self, key, *fields):
-        for field in fields:
-            self.values.get(key, {}).pop(field, None)
-
 
 def test_run_positions_stores_the_feature_collection(monkeypatch):
     import json
