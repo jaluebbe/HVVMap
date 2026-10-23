@@ -222,3 +222,6 @@ credentials.json
 
 # Segment cache
 segment_cache.db
+
+# Unit positions of local runs
+unit_positions.db

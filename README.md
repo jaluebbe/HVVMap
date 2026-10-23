@@ -14,7 +14,8 @@ one Redis instance:
   `hvv:disruptions`, `hvv:departures:*`, `hvv:trips:courses`,
   `hvv:courses:log`, `hvv:stations`, `hvv:sublines`. A second thread (`hvv_map.trip_positions`) computes the
   vehicle positions once per second from that data and writes
-  `hvv:positions_gtilive`. Needs GTI credentials, no web-facing port.
+  `hvv:positions_gtilive` and the last known unit positions
+  (`unit_positions.db`, next to `GTI_SHAPES_DB_PATH`). Needs GTI credentials, no web-facing port.
 - **gtfs-fetcher** (`hvv_map.gtfs_fetcher`) - background loop building the
   same kind of layers purely from a static GTFS feed on disk - no GTI
   credentials, no live API, no disruptions (a static feed has none). Writes
@@ -133,10 +134,19 @@ they're built directly from the static feed on first run.
 - `maplibre_map_hvv_ubahn.html` - the same page restricted to the U-Bahn and
   the `gtilive` source, centered on Betriebshof Barmbek, with U1-U4
   toggleable individually and a `#` toggle for the unit numbers below the
-  vehicle icons (on by default; the destination labels start hidden there);
-  also served at `/ubahn`.
+  vehicle icons (off by default); also served at `/ubahn`.
   Page options are set via `window.HVV_PAGE_CONFIG` (see
   `maplibre_map_hvv_base.js`).
+- `TS.html` - internal U-Bahn page at `/TS.html`, not linked and marked
+  `noindex`: unit numbers on and destination labels off by default, a search
+  for unit numbers with a 👻 button for the older ghosts, no "Luftlinien" toggle and
+  no disruptions. Units not on the map show as grey "ghosts" at their last
+  known position for 20 minutes, older ones only when searched for. The
+  positions loop writes them every 30 s to the SQLite file
+  `unit_positions.db` next to `GTI_SHAPES_DB_PATH` (override with
+  `UNIT_POSITIONS_DB_PATH`), one row per unit without expiry, so the history
+  survives Redis restarts; `/api/hvv/gtilive/unit-history.geojson` shows the
+  last 3 days, older entries stay in the file.
 - `maplibre_map_hvv_sbahn.html` - the same for the S-Bahn: `gtilive` only,
   centered on Hamburg Hbf, S1-S7 toggleable individually, destination labels
   on, no unit numbers; also served at `/sbahn`.
