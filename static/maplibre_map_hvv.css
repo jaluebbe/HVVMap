@@ -193,6 +193,10 @@ body {
     pointer-events: none;
 }
 
+.hvv-marker-units::after {
+    content: attr(data-units);
+}
+
 .hvv-units-visible .hvv-marker-units {
     display: block;
 }

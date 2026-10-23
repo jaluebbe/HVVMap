@@ -519,8 +519,9 @@ function buildMarkerElement(properties) {
         const delayStandalone = delayText
             ? `<span class="hvv-marker-delay-standalone" style="left:${labelOffset}px;">${delayText}</span>`
             : '';
+        // Shown via CSS content: browsers' data detectors would link plain digits.
         const units = properties.units
-            ? `<span class="hvv-marker-units" style="top:${Math.round(height / 2)}px;">${properties.units}</span>`
+            ? `<span class="hvv-marker-units" data-units="${properties.units}" style="top:${Math.round(height / 2)}px;"></span>`
             : '';
         wrapper.innerHTML = `<img src="${properties.icon}" alt="" style="height:${height}px" />${label}${delayStandalone}${units}`;
         // Read by placeVehicleLabels.
