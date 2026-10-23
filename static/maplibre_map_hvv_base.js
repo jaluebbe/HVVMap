@@ -801,6 +801,23 @@ function initHvvVehicleLayers(initialSourceKey) {
         renderDisruptionLayers();
     }
 
+    // Moves the map to the found vehicles, zooming out only as far as needed.
+    function showFoundVehicles() {
+        const found = [...positionEntries.values()]
+            .filter((entry) => markerVisible(entry.modeKey, entry.marker))
+            .map((entry) => entry.marker.getLngLat());
+        if (found.length === 0) {
+            return;
+        }
+        const bounds = found.reduce((b, lngLat) => b.extend(lngLat), new maplibregl.LngLatBounds(found[0], found[0]));
+        const camera = map.cameraForBounds(bounds, { padding: 80 });
+        map.easeTo({
+            center: bounds.getCenter(),
+            zoom: camera ? Math.min(map.getZoom(), camera.zoom) : map.getZoom(),
+        });
+    }
+
+    let unitSearchTimer = null;
     function setUnitFilter(numbers) {
         unitFilter = numbers;
         updateMarkerVisibility();
@@ -808,6 +825,11 @@ function initHvvVehicleLayers(initialSourceKey) {
         renderReferenceLayer('hvv-stops');
         renderDisruptionLayers();
         schedulePlaceLabels();
+        clearTimeout(unitSearchTimer);
+        if (numbers) {
+            // Wait for the typing to pause before moving the map.
+            unitSearchTimer = setTimeout(showFoundVehicles, 600);
+        }
     }
 
     function setStraightVisibility(_key, visible) {
