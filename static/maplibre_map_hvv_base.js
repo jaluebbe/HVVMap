@@ -68,11 +68,12 @@ function fixIOSResize() {
 window.addEventListener('orientationchange', fixIOSResize);
 window.addEventListener('resize', fixIOSResize);
 
-// Toggle visibility of vehicle destination labels.
+// Toggle visibility of vehicle destination labels; on unless
+// PAGE_CONFIG.destinationLabels is false.
 class LabelToggleControl {
     onAdd(mapInstance) {
         this._map = mapInstance;
-        this._labelsVisible = true;
+        this._labelsVisible = PAGE_CONFIG.destinationLabels !== false;
         const container = document.createElement('div');
         container.className = 'maplibregl-ctrl maplibregl-ctrl-group';
         const button = document.createElement('button');
@@ -80,11 +81,41 @@ class LabelToggleControl {
         button.title = 'Ziel-Labels ein-/ausblenden';
         button.style.fontSize = '16px';
         button.textContent = '🏷️';
-        button.classList.add('hvv-labels-toggle-active');
+        button.classList.toggle('hvv-labels-toggle-active', this._labelsVisible);
+        mapInstance.getContainer().classList.toggle('hvv-labels-hidden', !this._labelsVisible);
         button.addEventListener('click', () => {
             this._labelsVisible = !this._labelsVisible;
             mapInstance.getContainer().classList.toggle('hvv-labels-hidden');
             button.classList.toggle('hvv-labels-toggle-active', this._labelsVisible);
+            mapInstance.getContainer().dispatchEvent(new Event('hvv-labels-toggled'));
+        });
+        container.appendChild(button);
+        this._container = container;
+        return container;
+    }
+
+    onRemove() {
+        this._container.parentNode.removeChild(this._container);
+        this._map = undefined;
+    }
+}
+
+// Toggle visibility of the unit numbers below the vehicle icons (pages with
+// PAGE_CONFIG.unitNumbers); on by default.
+class UnitToggleControl {
+    onAdd(mapInstance) {
+        this._map = mapInstance;
+        const container = document.createElement('div');
+        container.className = 'maplibregl-ctrl maplibregl-ctrl-group';
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.title = 'Fahrzeugnummern ein-/ausblenden';
+        button.className = 'hvv-units-toggle hvv-units-toggle-active';
+        button.textContent = '#';
+        mapInstance.getContainer().classList.add('hvv-units-visible');
+        button.addEventListener('click', () => {
+            const visible = mapInstance.getContainer().classList.toggle('hvv-units-visible');
+            button.classList.toggle('hvv-units-toggle-active', visible);
             mapInstance.getContainer().dispatchEvent(new Event('hvv-labels-toggled'));
         });
         container.appendChild(button);
@@ -488,12 +519,17 @@ function buildMarkerElement(properties) {
         const delayStandalone = delayText
             ? `<span class="hvv-marker-delay-standalone" style="left:${labelOffset}px;">${delayText}</span>`
             : '';
-        wrapper.innerHTML = `<img src="${properties.icon}" alt="" style="height:${height}px" />${label}${delayStandalone}`;
+        // Shown via CSS content: browsers' data detectors would link plain digits.
+        const units = properties.units
+            ? `<span class="hvv-marker-units" data-units="${properties.units}" style="top:${Math.round(height / 2)}px;"></span>`
+            : '';
+        wrapper.innerHTML = `<img src="${properties.icon}" alt="" style="height:${height}px" />${label}${delayStandalone}${units}`;
         // Read by placeVehicleLabels.
         wrapper.hvvLayout = {
             height,
             labelOffset,
             labelWidth: properties.label ? (properties.label.length + delayText.length) * 5.5 + 8 : 0,
+            unitsWidth: properties.units ? properties.units.length * 5 + 4 : 0,
             delay,
         };
 
@@ -573,7 +609,9 @@ const LABEL_PADDING_PX = 2;
 
 function placeVehicleLabels(mapInstance, markers) {
     const container = mapInstance.getContainer();
-    if (container.classList.contains('hvv-labels-hidden')) {
+    const labelsOn = !container.classList.contains('hvv-labels-hidden');
+    const unitsOn = container.classList.contains('hvv-units-visible');
+    if (!labelsOn && !unitsOn) {
         return;
     }
     const width = container.clientWidth;
@@ -596,15 +634,28 @@ function placeVehicleLabels(mapInstance, markers) {
                 layout.measured = true;
             }
         }
+        if (unitsOn && !layout.unitsMeasured) {
+            const span = element.querySelector('.hvv-marker-units');
+            if (span && span.offsetWidth) {
+                layout.unitsWidth = span.offsetWidth;
+                layout.unitsMeasured = true;
+            }
+        }
         const half = layout.height / 2;
+        const label = labelsOn && layout.labelWidth ? [
+            point.x + layout.labelOffset, point.y - 7,
+            point.x + layout.labelOffset + layout.labelWidth, point.y + 7,
+        ] : null;
+        const units = unitsOn && layout.unitsWidth ? [
+            point.x - layout.unitsWidth / 2, point.y + half,
+            point.x + layout.unitsWidth / 2, point.y + half + 12,
+        ] : null;
         items.push({
             element,
             layout,
             icon: [point.x - layout.height, point.y - half, point.x + layout.labelOffset, point.y + half],
-            label: layout.labelWidth ? [
-                point.x + layout.labelOffset, point.y - 7,
-                point.x + layout.labelOffset + layout.labelWidth, point.y + 7,
-            ] : null,
+            // A missing destination label counts as collided, as before.
+            boxes: labelsOn && !label ? null : [label, units].filter(Boolean),
         });
     });
     const overlaps = (a, b) => a[0] < b[2] + LABEL_PADDING_PX && b[0] < a[2] + LABEL_PADDING_PX
@@ -614,11 +665,11 @@ function placeVehicleLabels(mapInstance, markers) {
         || (a.icon[1] - b.icon[1]));
     const placed = [];
     items.forEach((item) => {
-        const free = item.label
-            && !items.some((other) => other !== item && overlaps(item.label, other.icon))
-            && !placed.some((box) => overlaps(item.label, box));
+        const free = Boolean(item.boxes?.length) && item.boxes.every((box) =>
+            !items.some((other) => other !== item && overlaps(box, other.icon))
+            && !placed.some((other) => overlaps(box, other)));
         if (free) {
-            placed.push(item.label);
+            placed.push(...item.boxes);
         }
         item.element.hvvLabelShown = Boolean(free);
         item.element.classList.toggle('hvv-label-collided', !free);
@@ -912,6 +963,9 @@ function initHvvVehicleLayers(initialSourceKey) {
         modeToggleControl.setCategoriesVisible(!!currentSource.disruptionsEndpoint);
         modeToggleControl.setExtrasVisible(!!currentSource.straightToggle);
         map.addControl(new LabelToggleControl(), 'top-right');
+        if (PAGE_CONFIG.unitNumbers) {
+            map.addControl(new UnitToggleControl(), 'top-right');
+        }
         map.addControl(new WakeLockControl(), 'top-right');
     }
 
@@ -995,7 +1049,7 @@ function initHvvVehicleLayers(initialSourceKey) {
                 seen.add(key);
                 // Everything buildMarkerElement renders; a change rebuilds the marker.
                 const look = JSON.stringify([modeKey, properties.icon, properties.iconHeight,
-                    properties.line, properties.label, properties.delay, properties.text]);
+                    properties.line, properties.label, properties.delay, properties.text, properties.units]);
                 let entry = positionEntries.get(key);
                 if (entry && entry.look === look) {
                     entry.marker.setLngLat(feature.geometry.coordinates);

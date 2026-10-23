@@ -12,7 +12,7 @@
     <title>U-Bahn Hamburg</title>
     <meta http-equiv="X-UA-Compatible" content="IE=edge" />
     <meta charset="utf-8" />
-    <meta name="format-detection" content="telephone=no">
+    <meta name="format-detection" content="telephone=no, date=no, address=no, email=no">
     <meta name="viewport" content="width=device-width,initial-scale=1.0,user-scalable=no,viewport-fit=cover">
     <link rel="stylesheet" href="maplibre-gl/maplibre-gl.css">
     <link rel="stylesheet" href="/static/maplibre_map_hvv.css">
@@ -31,6 +31,8 @@
         center: [10.036, 53.590],
         zoom: 12,
         modes: ['U'],
+        unitNumbers: true,
+        destinationLabels: false,
         lineToggles: {
             U: [
                 { key: 'U1', color: '#006ab3', icon: geofoxIcon('HHA-U:U1_HHA-U') },

@@ -3,6 +3,7 @@ trip_position.locate() and placed on its station or along the stored track
 of its current segment."""
 
 import json
+import re
 from collections import defaultdict
 import traceback
 import sqlite3
@@ -82,6 +83,13 @@ def _coordinates(
     return point, straight
 
 
+def _unit_numbers(row: dict) -> str:
+    """U-Bahn unit numbers, e.g. "388 · 340" from "DT5.1 (388), DT5.1 (340)"."""
+    if row["mode"] != "U":
+        return ""
+    return " · ".join(re.findall(r"\((\d+)\)", row.get("vehicles") or ""))
+
+
 def _feature(
     row: dict,
     destination: str,
@@ -119,6 +127,7 @@ def _feature(
             "mode": mode,
             "delay": minutes,
             "straight": straight,
+            "units": _unit_numbers(row),
         },
     }
 
