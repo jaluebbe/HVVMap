@@ -21,6 +21,9 @@ def client(tmp_path, monkeypatch):
     (tmp_path / "static" / "maplibre_map_hvv_gtilive.html").write_text(
         "<html>map</html>"
     )
+    (tmp_path / "static" / "maplibre_map_hvv_ubahn.html").write_text(
+        "<html>ubahn</html>"
+    )
     (tmp_path / "fonts").mkdir()
 
     conn = sqlite3.connect(osm_dir / "test.mbtiles")
@@ -59,6 +62,12 @@ def test_root_serves_the_gtilive_map(client):
     response = client.get("/", follow_redirects=False)
     assert response.status_code == 200
     assert "<html>map</html>" in response.text
+
+
+def test_ubahn_shortcut_serves_the_ubahn_map(client):
+    response = client.get("/ubahn", follow_redirects=False)
+    assert response.status_code == 200
+    assert "<html>ubahn</html>" in response.text
 
 
 def test_robots_txt_excludes_api(client):
