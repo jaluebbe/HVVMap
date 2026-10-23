@@ -3,7 +3,7 @@
 const HAMBURG_CENTER = [9.9937, 53.5511]; // MapLibre wants [lon, lat]
 const HAMBURG_DEFAULT_ZOOM = 12;
 
-// Optional page overrides (window.HVV_PAGE_CONFIG): center [lon, lat], zoom, modes,
+// Optional page overrides (window.HVV_PAGE_CONFIG): center [lon, lat], zoom, minZoom, modes,
 // lineToggles {mode: [{key, color, icon}]} - per-line checkboxes replacing that mode's,
 // sourceKeys - restricts the data source choices.
 const PAGE_CONFIG = window.HVV_PAGE_CONFIG || {};
@@ -14,7 +14,7 @@ const map = new maplibregl.Map({
     style: '/api/vector/style/positron.json',
     center: PAGE_CONFIG.center || HAMBURG_CENTER,
     zoom: PAGE_CONFIG.zoom ?? HAMBURG_DEFAULT_ZOOM,
-    minZoom: 6,
+    minZoom: PAGE_CONFIG.minZoom ?? 6,
     maxZoom: 18,
     attributionControl: false, // added manually below, with our own extra links
 });
