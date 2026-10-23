@@ -429,15 +429,20 @@ class ModeToggleControl {
             row.className = 'hvv-mode-control-search-row';
             row.appendChild(search);
             if (this._ghostUnits) {
-                // Fills in the units of all history markers.
+                // Fills in the units of the older ghosts, see olderGhostUnits.
                 const ghosts = document.createElement('button');
                 ghosts.type = 'button';
                 ghosts.className = 'hvv-mode-control-ghosts';
-                ghosts.title = 'Alle zuletzt gesehenen Fahrzeuge suchen';
+                ghosts.title = 'Fahrzeuge suchen, die seit über 20 Minuten nicht mehr fahren';
                 ghosts.textContent = '👻';
                 ghosts.addEventListener('click', () => {
-                    search.value = this._ghostUnits().join(', ');
+                    const units = this._ghostUnits();
+                    search.value = units.join(', ');
                     search.dispatchEvent(new Event('input'));
+                    if (!units.length) {
+                        search.placeholder = 'keine älteren Geister';
+                        setTimeout(() => { search.placeholder = 'Fahrzeug-Nr.'; }, 3000);
+                    }
                 });
                 row.appendChild(ghosts);
             }
@@ -822,6 +827,15 @@ function initHvvVehicleLayers(initialSourceKey) {
         return marker.hvvTrains.filter((t) => nowSeconds - t.seenAt <= HISTORY_RECENT_SECONDS);
     }
 
+    // Units of the ghosts no longer shown without a search, for the ghost button.
+    function olderGhostUnits() {
+        const nowSeconds = Date.now() / 1000;
+        const units = historyMarkers.flatMap((marker) => marker.hvvTrains
+            .filter((t) => nowSeconds - t.seenAt > HISTORY_RECENT_SECONDS)
+            .flatMap((t) => t.units));
+        return [...new Set(units)].sort((a, b) => a - b);
+    }
+
     function historyVisible(marker) {
         return shownTrains(marker).length > 0;
     }
@@ -1147,9 +1161,7 @@ function initHvvVehicleLayers(initialSourceKey) {
             setLineVisibility,
             [{ key: 'straight', name: 'Luftlinien', icon: '⋯', checked: false, onToggle: setStraightVisibility }],
             PAGE_CONFIG.unitSearch ? setUnitFilter : null,
-            PAGE_CONFIG.unitHistory
-                ? () => [...new Set(historyMarkers.flatMap((m) => m.hvvUnits))].sort((a, b) => a - b)
-                : null,
+            PAGE_CONFIG.unitHistory ? olderGhostUnits : null,
         );
         map.addControl(modeToggleControl, 'top-right');
         modeToggleControl.setCategoriesVisible(!!currentSource.disruptionsEndpoint);
