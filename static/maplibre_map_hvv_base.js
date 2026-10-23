@@ -285,6 +285,7 @@ const HVV_POLL_INTERVAL_MS = 1_000;
 const HISTORY_ENDPOINT = '/api/hvv/gtilive/unit-history.geojson';
 const HISTORY_POLL_INTERVAL_MS = 60_000;
 const HISTORY_RECENT_SECONDS = 20 * 60; // older history markers show only when searched
+const HISTORY_GROUP_METERS = 100;
 const REFERENCE_POLL_INTERVAL_MS = 600_000;
 const DISRUPTIONS_POLL_INTERVAL_MS = 60_000;
 
@@ -820,11 +821,9 @@ function initHvvVehicleLayers(initialSourceKey) {
             return marker.hvvTrains.filter((t) => t.units.some((number) => unitFilter.has(number)));
         }
         const modeKey = Object.keys(LINE_TOGGLES)[0] || MODES[0].key;
-        if (!linesVisible(modeKey, [marker.hvvLine])) {
-            return [];
-        }
         const nowSeconds = Date.now() / 1000;
-        return marker.hvvTrains.filter((t) => nowSeconds - t.seenAt <= HISTORY_RECENT_SECONDS);
+        return marker.hvvTrains.filter((t) => linesVisible(modeKey, [t.line])
+            && nowSeconds - t.seenAt <= HISTORY_RECENT_SECONDS);
     }
 
     // Units of the ghosts no longer shown without a search, for the ghost button.
@@ -846,7 +845,11 @@ function initHvvVehicleLayers(initialSourceKey) {
         element.style.display = trains.length ? '' : 'none';
         const nowSeconds = Date.now() / 1000;
         // Shown via CSS content: browsers' data detectors would link plain digits.
-        const text = trains.map((t) => `${t.units.join(' · ')} ${ageText(nowSeconds - t.seenAt)}`).join('\n');
+        // Places with several lines name the line of each train.
+        const mixed = new Set(marker.hvvTrains.map((t) => t.line)).size > 1;
+        const text = trains
+            .map((t) => `${mixed ? `${t.line} ` : ''}${t.units.join(' · ')} ${ageText(nowSeconds - t.seenAt)}`)
+            .join('\n');
         const label = element.querySelector('.hvv-history-label');
         if (label.dataset.text !== text) {
             label.dataset.text = text;
@@ -873,13 +876,17 @@ function initHvvVehicleLayers(initialSourceKey) {
                 throw new Error(`HTTP ${response.status}`);
             }
             const data = await response.json();
+            // One marker per place: ghosts within HISTORY_GROUP_METERS of the
+            // first one of a place (e.g. two platforms of one station) join it.
             const places = new Map();
             data.features.forEach((f) => {
-                const key = f.geometry.coordinates.map((c) => c.toFixed(5)).join(',');
-                if (!places.has(key)) {
-                    places.set(key, []);
+                const lngLat = maplibregl.LngLat.convert(f.geometry.coordinates);
+                const place = [...places.keys()].find((p) => p.distanceTo(lngLat) <= HISTORY_GROUP_METERS);
+                if (place) {
+                    places.get(place).push(f);
+                } else {
+                    places.set(lngLat, [f]);
                 }
-                places.get(key).push(f);
             });
             historyMarkers.splice(0).forEach((marker) => marker.remove());
             places.forEach((features) => {
@@ -888,11 +895,14 @@ function initHvvVehicleLayers(initialSourceKey) {
                     .addTo(map);
                 const trains = new Map();
                 features.forEach((f) => {
-                    trains.set(f.properties.train.join(' · '), { units: f.properties.train, seenAt: f.properties.seen_at });
+                    trains.set(f.properties.train.join(' · '), {
+                        units: f.properties.train,
+                        seenAt: f.properties.seen_at,
+                        line: f.properties.line,
+                    });
                 });
                 marker.hvvTrains = [...trains.values()].sort((a, b) => b.seenAt - a.seenAt);
                 marker.hvvUnits = features.map((f) => f.properties.unit);
-                marker.hvvLine = features[0].properties.line;
                 historyMarkers.push(marker);
             });
             updateMarkerVisibility();
