@@ -228,8 +228,10 @@ body {
 .hvv-history-marker img {
     position: absolute;
     transform: translate(-50%, -50%);
-    filter: grayscale(1);
-    opacity: 0.55;
+    /* grey, with a black hairline for contrast on the light basemap */
+    filter: grayscale(1) drop-shadow(0.5px 0 0 #000) drop-shadow(-0.5px 0 0 #000)
+        drop-shadow(0 0.5px 0 #000) drop-shadow(0 -0.5px 0 #000);
+    opacity: 0.8;
 }
 
 .hvv-history-label {
