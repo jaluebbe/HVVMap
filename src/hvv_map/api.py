@@ -37,6 +37,7 @@ from hvv_map.gtilive_geojson import (
 from hvv_map.redis_client import get_redis_client
 from hvv_map.response_cache import CachedJsonResponse
 from hvv_map.stations import by_id, load_stations
+from hvv_map.unit_positions import REDIS_UNIT_POSITIONS_KEY, unit_history
 from hvv_map.trips import REDIS_VEHICLES_KEY, berlin_now, build_trip_table
 
 mimetypes.add_type("text/javascript", ".cjs")
@@ -82,6 +83,13 @@ async def ubahn():
 @app.get("/sbahn", include_in_schema=False)
 async def sbahn():
     return FileResponse("static/maplibre_map_hvv_sbahn.html")
+
+
+@app.get("/TS.html", include_in_schema=False)
+async def ts_page():
+    """Internal U-Bahn page; noindex instead of a robots.txt block, so
+    crawlers can see it."""
+    return FileResponse("static/TS.html", headers={"X-Robots-Tag": "noindex, nofollow"})
 
 
 @app.get("/robots.txt", include_in_schema=False)
@@ -411,6 +419,16 @@ def get_known_courses(service_ids: str):
 def get_gtilive_positions():
     """Vehicle positions computed from the trip table (trip_positions.py)."""
     return _read_cached_json(REDIS_POSITIONS_KEY)
+
+
+@app.get("/api/hvv/gtilive/unit-history.geojson", tags=["hvv_gtilive"])
+def get_unit_history():
+    """Last known position of the U-Bahn units not on the map now, for
+    static/TS.html."""
+    raw = _redis_client.get(REDIS_POSITIONS_KEY)
+    current = json.loads(raw)["data"]["features"] if raw else []
+    stored = _redis_client.hgetall(REDIS_UNIT_POSITIONS_KEY)
+    return unit_history(stored, current, time.time())
 
 
 @app.get("/api/hvv/gtilive/stops.geojson", tags=["hvv_gtilive"])

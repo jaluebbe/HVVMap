@@ -224,6 +224,34 @@ body {
     color: #fff !important;
 }
 
+/* Last known positions of units not on the map, see HistoryToggleControl */
+.hvv-history-marker img {
+    position: absolute;
+    transform: translate(-50%, -50%);
+    filter: grayscale(1);
+    opacity: 0.55;
+}
+
+.hvv-history-label {
+    position: absolute;
+    left: 20px;
+    top: 0;
+    transform: translateY(-50%);
+    font-size: 9px;
+    line-height: 1.15;
+    font-variant-numeric: tabular-nums;
+    color: #444;
+    background: rgba(255, 255, 255, 0.75);
+    padding: 0 2px;
+    border-radius: 2px;
+    white-space: pre;
+    pointer-events: none;
+}
+
+.hvv-history-label::after {
+    content: attr(data-text);
+}
+
 /* Label would overlap other vehicles (see placeVehicleLabels) */
 .hvv-label-collided .hvv-marker-label,
 .hvv-units-visible .hvv-label-collided .hvv-marker-units {
@@ -231,6 +259,7 @@ body {
 }
 
 .hvv-wakelock-active,
+.hvv-history-toggle-active,
 .hvv-labels-toggle-active,
 .hvv-units-toggle-active {
     background-color: #1e64a0 !important;

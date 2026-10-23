@@ -101,18 +101,20 @@ class LabelToggleControl {
 }
 
 // Toggle visibility of the unit numbers below the vehicle icons (pages with
-// PAGE_CONFIG.unitNumbers); on by default.
+// PAGE_CONFIG.unitNumbers); on unless PAGE_CONFIG.unitNumbersVisible is false.
 class UnitToggleControl {
     onAdd(mapInstance) {
         this._map = mapInstance;
+        const visible = PAGE_CONFIG.unitNumbersVisible !== false;
         const container = document.createElement('div');
         container.className = 'maplibregl-ctrl maplibregl-ctrl-group';
         const button = document.createElement('button');
         button.type = 'button';
         button.title = 'Fahrzeugnummern ein-/ausblenden';
-        button.className = 'hvv-units-toggle hvv-units-toggle-active';
+        button.className = 'hvv-units-toggle';
+        button.classList.toggle('hvv-units-toggle-active', visible);
         button.textContent = '#';
-        mapInstance.getContainer().classList.add('hvv-units-visible');
+        mapInstance.getContainer().classList.toggle('hvv-units-visible', visible);
         button.addEventListener('click', () => {
             const visible = mapInstance.getContainer().classList.toggle('hvv-units-visible');
             button.classList.toggle('hvv-units-toggle-active', visible);
@@ -127,6 +129,52 @@ class UnitToggleControl {
         this._container.parentNode.removeChild(this._container);
         this._map = undefined;
     }
+}
+
+// Toggle for the last known positions of units not on the map (pages with
+// PAGE_CONFIG.unitHistory); off by default.
+class HistoryToggleControl {
+    constructor(onToggle) {
+        this._onToggle = onToggle;
+    }
+
+    onAdd(mapInstance) {
+        this._map = mapInstance;
+        const container = document.createElement('div');
+        container.className = 'maplibregl-ctrl maplibregl-ctrl-group';
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.title = 'Zuletzt gesehene Fahrzeuge ein-/ausblenden';
+        button.style.fontSize = '16px';
+        button.textContent = '🕓';
+        let visible = false;
+        button.addEventListener('click', () => {
+            visible = !visible;
+            button.classList.toggle('hvv-history-toggle-active', visible);
+            this._onToggle(visible);
+        });
+        container.appendChild(button);
+        this._container = container;
+        return container;
+    }
+
+    onRemove() {
+        this._container.parentNode.removeChild(this._container);
+        this._map = undefined;
+    }
+}
+
+// "vor 5 min", "vor 3 h", "vor 2 Tagen"
+function ageText(seconds) {
+    const minutes = Math.max(1, Math.round(seconds / 60));
+    if (minutes < 60) {
+        return `vor ${minutes} min`;
+    }
+    const hours = Math.round(minutes / 60);
+    if (hours < 48) {
+        return `vor ${hours} h`;
+    }
+    return `vor ${Math.round(hours / 24)} Tagen`;
 }
 
 // Keeps the screen awake via the Screen Wake Lock API. The browser releases
@@ -267,6 +315,8 @@ map.on('movestart', hideInfoPanel);
 map.on('zoomstart', hideInfoPanel);
 
 const HVV_POLL_INTERVAL_MS = 1_000;
+const HISTORY_ENDPOINT = '/api/hvv/gtilive/unit-history.geojson';
+const HISTORY_POLL_INTERVAL_MS = 60_000;
 const REFERENCE_POLL_INTERVAL_MS = 600_000;
 const DISRUPTIONS_POLL_INTERVAL_MS = 60_000;
 
@@ -766,6 +816,81 @@ function initHvvVehicleLayers(initialSourceKey) {
                 marker.getElement().style.display = markerVisible(m.key, marker) ? '' : 'none';
             });
         });
+        historyMarkers.forEach((marker) => {
+            marker.getElement().style.display = historyVisible(marker) ? '' : 'none';
+        });
+    }
+
+    // Last known positions of units not on the map (PAGE_CONFIG.unitHistory),
+    // one marker per place listing its trains.
+    const historyMarkers = [];
+    let showHistory = false;
+
+    function historyVisible(marker) {
+        if (unitFilter) {
+            return marker.hvvUnits.some((number) => unitFilter.has(number));
+        }
+        const modeKey = Object.keys(LINE_TOGGLES)[0] || MODES[0].key;
+        return showHistory && linesVisible(modeKey, [marker.hvvLine]);
+    }
+
+    function buildHistoryElement(features, nowSeconds) {
+        const first = features[0].properties;
+        const element = document.createElement('div');
+        element.className = 'hvv-history-marker';
+        const img = document.createElement('img');
+        img.src = first.icon;
+        img.alt = '';
+        img.style.height = `${first.iconHeight || 20}px`;
+        const label = document.createElement('div');
+        label.className = 'hvv-history-label';
+        const trains = new Map();
+        features.forEach((f) => {
+            trains.set(f.properties.train.join(' · '), f.properties.seen_at);
+        });
+        // Shown via CSS content: browsers' data detectors would link plain digits.
+        label.dataset.text = [...trains]
+            .sort((a, b) => b[1] - a[1])
+            .map(([train, seenAt]) => `${train} ${ageText(nowSeconds - seenAt)}`)
+            .join('\n');
+        element.append(img, label);
+        return element;
+    }
+
+    async function refreshHistory() {
+        try {
+            const response = await fetch(HISTORY_ENDPOINT, { cache: 'no-store' });
+            if (!response.ok) {
+                throw new Error(`HTTP ${response.status}`);
+            }
+            const data = await response.json();
+            const nowSeconds = Date.now() / 1000;
+            const places = new Map();
+            data.features.forEach((f) => {
+                const key = f.geometry.coordinates.map((c) => c.toFixed(5)).join(',');
+                if (!places.has(key)) {
+                    places.set(key, []);
+                }
+                places.get(key).push(f);
+            });
+            historyMarkers.splice(0).forEach((marker) => marker.remove());
+            places.forEach((features) => {
+                const marker = new maplibregl.Marker({ element: buildHistoryElement(features, nowSeconds), anchor: 'top-left' })
+                    .setLngLat(features[0].geometry.coordinates)
+                    .addTo(map);
+                marker.hvvUnits = features.map((f) => f.properties.unit);
+                marker.hvvLine = features[0].properties.line;
+                historyMarkers.push(marker);
+            });
+            updateMarkerVisibility();
+        } catch (error) {
+            console.warn('Failed to load vehicle history:', error);
+        }
+    }
+
+    function setHistoryVisibility(visible) {
+        showHistory = visible;
+        updateMarkerVisibility();
     }
 
     // Restricted pages hide disruptions without a mode.
@@ -811,7 +936,8 @@ function initHvvVehicleLayers(initialSourceKey) {
     function showFoundVehicles() {
         const found = [...positionEntries.values()]
             .filter((entry) => markerVisible(entry.modeKey, entry.marker))
-            .map((entry) => entry.marker.getLngLat());
+            .map((entry) => entry.marker.getLngLat())
+            .concat(historyMarkers.filter(historyVisible).map((marker) => marker.getLngLat()));
         if (found.length === 0) {
             return;
         }
@@ -1026,7 +1152,7 @@ function initHvvVehicleLayers(initialSourceKey) {
             { sources: SOURCES, initialKey: currentSource.key, onSourceChange: switchSource },
             setLineVisibility,
             [{ key: 'straight', name: 'Luftlinien', icon: '⋯', checked: false, onToggle: setStraightVisibility }],
-            PAGE_CONFIG.unitNumbers ? setUnitFilter : null,
+            PAGE_CONFIG.unitSearch ? setUnitFilter : null,
         );
         map.addControl(modeToggleControl, 'top-right');
         modeToggleControl.setCategoriesVisible(!!currentSource.disruptionsEndpoint);
@@ -1034,6 +1160,11 @@ function initHvvVehicleLayers(initialSourceKey) {
         map.addControl(new LabelToggleControl(), 'top-right');
         if (PAGE_CONFIG.unitNumbers) {
             map.addControl(new UnitToggleControl(), 'top-right');
+        }
+        if (PAGE_CONFIG.unitHistory) {
+            map.addControl(new HistoryToggleControl(setHistoryVisibility), 'top-right');
+            refreshHistory();
+            setInterval(refreshHistory, HISTORY_POLL_INTERVAL_MS);
         }
         map.addControl(new WakeLockControl(), 'top-right');
     }

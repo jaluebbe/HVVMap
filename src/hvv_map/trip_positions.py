@@ -21,6 +21,7 @@ from hvv_map.lines import replacement_bus_mode
 from hvv_map.redis_client import get_redis_client
 from hvv_map.stations import StationInfo, by_id, load_stations
 from hvv_map.trip_courses import REDIS_COURSES_KEY
+from hvv_map.unit_positions import RECORD_INTERVAL, record_unit_positions
 from hvv_map.trip_position import AT_STOP, BETWEEN, Position, locate, stops_from_row
 from hvv_map.trips import (
     COMBINED_DESTINATION,
@@ -402,6 +403,7 @@ class PositionsState:
         self.stations: dict[str, StationInfo] = {}
         self.tracks: dict = {}
         self.memory: dict | None = None  # trip vehicles, see trips.remember_vehicles
+        self.recorded = float("-inf")  # last write of the unit positions
 
 
 def _refresh(redis_client, state: PositionsState) -> bool:
@@ -461,6 +463,9 @@ def run_positions(
         json.dumps({"fetched_at": int(time.time()), "data": collection}),
         ex=POSITIONS_TTL,
     )
+    if time.time() - state.recorded >= RECORD_INTERVAL:
+        state.recorded = time.time()
+        record_unit_positions(redis_client, collection["features"], state.recorded)
     return len(collection["features"])
 
 

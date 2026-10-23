@@ -27,6 +27,7 @@ def client(tmp_path, monkeypatch):
     (tmp_path / "static" / "maplibre_map_hvv_sbahn.html").write_text(
         "<html>sbahn</html>"
     )
+    (tmp_path / "static" / "TS.html").write_text("<html>ts</html>")
     (tmp_path / "fonts").mkdir()
 
     conn = sqlite3.connect(osm_dir / "test.mbtiles")
@@ -77,6 +78,37 @@ def test_sbahn_shortcut_serves_the_sbahn_map(client):
     response = client.get("/sbahn", follow_redirects=False)
     assert response.status_code == 200
     assert "<html>sbahn</html>" in response.text
+
+
+def test_ts_page_is_served_with_noindex(client):
+    response = client.get("/TS.html", follow_redirects=False)
+    assert response.status_code == 200
+    assert "<html>ts</html>" in response.text
+    assert response.headers["x-robots-tag"] == "noindex, nofollow"
+
+
+def test_unit_history_leaves_out_units_on_the_map(client, monkeypatch):
+    entry = {
+        "coordinates": [10.0, 53.5],
+        "line": "U1",
+        "icon": "i",
+        "iconHeight": 16,
+        "label": "Farmsen",
+        "train": ["388"],
+        "seen_at": int(api_module.time.time()) - 60,
+    }
+
+    class _Redis(_FakeRedis):
+        def hgetall(self, key):
+            return {"388": json.dumps(entry), "417": json.dumps(entry)}
+
+    on_map = {"type": "Feature", "geometry": None, "properties": {"units": "417"}}
+    fake = _Redis({"hvv:positions_gtilive": {"data": {"features": [on_map]}}})
+    monkeypatch.setattr(api_module, "_redis_client", fake)
+
+    data = client.get("/api/hvv/gtilive/unit-history.geojson").json()
+
+    assert [f["properties"]["unit"] for f in data["features"]] == ["388"]
 
 
 def test_robots_txt_excludes_api(client):
