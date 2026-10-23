@@ -371,9 +371,11 @@ function buildIconNode(icon) {
 
 // One checkbox per mode + disruption category; collapsible on narrow/short screens.
 class ModeToggleControl {
-    constructor(onModeToggle, categories, onCategoryToggle, sourceConfig, onLineToggle, extraToggles, onUnitSearch) {
+    constructor(onModeToggle, categories, onCategoryToggle, sourceConfig, onLineToggle, extraToggles, onUnitSearch,
+        ghostUnits) {
         this._extraToggles = extraToggles || [];
         this._onUnitSearch = onUnitSearch || null;
+        this._ghostUnits = ghostUnits || null;
         this._onModeToggle = onModeToggle;
         this._onLineToggle = onLineToggle;
         this._categories = categories || [];
@@ -455,7 +457,23 @@ class ModeToggleControl {
                 });
                 this._onUnitSearch(numbers.length ? new Set(numbers) : null);
             });
-            items.append(searchDivider, search);
+            const row = document.createElement('div');
+            row.className = 'hvv-mode-control-search-row';
+            row.appendChild(search);
+            if (this._ghostUnits) {
+                // Fills in the units of all history markers.
+                const ghosts = document.createElement('button');
+                ghosts.type = 'button';
+                ghosts.className = 'hvv-mode-control-ghosts';
+                ghosts.title = 'Alle zuletzt gesehenen Fahrzeuge suchen';
+                ghosts.textContent = '👻';
+                ghosts.addEventListener('click', () => {
+                    search.value = this._ghostUnits().join(', ');
+                    search.dispatchEvent(new Event('input'));
+                });
+                row.appendChild(ghosts);
+            }
+            items.append(searchDivider, row);
         }
 
         this._categoriesSection = document.createElement('div');
@@ -1153,6 +1171,9 @@ function initHvvVehicleLayers(initialSourceKey) {
             setLineVisibility,
             [{ key: 'straight', name: 'Luftlinien', icon: '⋯', checked: false, onToggle: setStraightVisibility }],
             PAGE_CONFIG.unitSearch ? setUnitFilter : null,
+            PAGE_CONFIG.unitHistory
+                ? () => [...new Set(historyMarkers.flatMap((m) => m.hvvUnits))].sort((a, b) => a - b)
+                : null,
         );
         map.addControl(modeToggleControl, 'top-right');
         modeToggleControl.setCategoriesVisible(!!currentSource.disruptionsEndpoint);
