@@ -393,7 +393,8 @@ class ModeToggleControl {
             const search = document.createElement('input');
             search.type = 'search';
             search.className = 'hvv-mode-control-unit-search';
-            search.placeholder = 'Fahrzeug-Nr., z. B. 388, 417';
+            search.placeholder = 'Fahrzeug-Nr.';
+            search.title = 'Eine oder mehrere Nummern, z. B. 388, 417';
             search.setAttribute('aria-label', 'Fahrzeugnummern suchen');
             search.autocomplete = 'off';
             // While numbers are entered, only their trips show and the checkboxes do not apply.
@@ -621,9 +622,11 @@ const ALL_SOURCES = [
         straightToggle: true,
     },
 ];
-const SOURCES = PAGE_CONFIG.sourceKeys
+// PAGE_CONFIG.disruptions false: no disruption layer and no category toggles.
+const SOURCES = (PAGE_CONFIG.sourceKeys
     ? ALL_SOURCES.filter((s) => PAGE_CONFIG.sourceKeys.includes(s.key))
-    : ALL_SOURCES;
+    : ALL_SOURCES)
+    .map((s) => (PAGE_CONFIG.disruptions === false ? { ...s, disruptionsEndpoint: null } : s));
 
 // Vehicle labels that would overlap another vehicle's icon or an already
 // placed label are hidden (only the icon and a delay badge stay); zooming in

@@ -134,7 +134,8 @@ they're built directly from the static feed on first run.
   the `gtilive` source, centered on Betriebshof Barmbek, with U1-U4
   toggleable individually and a `#` toggle for the unit numbers below the
   vehicle icons (on by default; the destination labels start hidden there),
-  no "Luftlinien" toggle (GTI delivers real tracks for all U-Bahn lines);
+  no "Luftlinien" toggle (GTI delivers real tracks for all U-Bahn lines) and
+  no disruptions (they are on the main map);
   also served at `/ubahn`.
   Page options are set via `window.HVV_PAGE_CONFIG` (see
   `maplibre_map_hvv_base.js`).
