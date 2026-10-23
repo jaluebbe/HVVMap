@@ -1,0 +1,32 @@
+{
+  "name": "S-Bahn Hamburg",
+  "short_name": "S-Bahn",
+  "start_url": "/sbahn",
+  "scope": "/sbahn",
+  "display": "standalone",
+  "orientation": "any",
+  "lang": "de",
+  "background_color": "#ffffff",
+  "theme_color": "#1e64a0",
+  "categories": [
+    "navigation",
+    "utilities"
+  ],
+  "icons": [
+    {
+      "src": "/static/hvv/icons/s.svg",
+      "sizes": "any",
+      "type": "image/svg+xml"
+    },
+    {
+      "src": "/static/hvv/icon-sbahn-192.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "/static/hvv/icon-sbahn-512.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ]
+}
