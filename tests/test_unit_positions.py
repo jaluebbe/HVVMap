@@ -60,6 +60,19 @@ def test_ghost_train_omits_partners_running_again(tmp_path):
     assert feature["properties"]["train"] == ["396"]
 
 
+def test_ghost_train_omits_partners_seen_later_elsewhere(tmp_path):
+    conn = open_db(str(tmp_path / "units.db"))
+    record_unit_positions(conn, [_feature("332 · 460 · 301")], 0)
+    record_unit_positions(conn, [_feature("332 · 460", lon=9.97)], 100)
+
+    history = unit_history(conn, [], 200)
+
+    trains = {
+        f["properties"]["unit"]: f["properties"]["train"] for f in history["features"]
+    }
+    assert trains == {"301": ["301"], "332": ["332", "460"], "460": ["332", "460"]}
+
+
 def test_fleet_counts_every_unit_ever_seen_per_series(tmp_path):
     from hvv_map.unit_positions import fleet_summary
 
@@ -86,16 +99,3 @@ def test_fleet_without_database_counts_the_map_only():
     fleet = fleet_summary(None, [_feature("417")], 0)
 
     assert fleet["totals"]["DT5"]["seen"] == 1 and fleet["units"] == {}
-
-
-def test_ghost_train_omits_partners_seen_later_elsewhere(tmp_path):
-    conn = open_db(str(tmp_path / "units.db"))
-    record_unit_positions(conn, [_feature("332 · 460 · 301")], 0)
-    record_unit_positions(conn, [_feature("332 · 460", lon=9.97)], 100)
-
-    history = unit_history(conn, [], 200)
-
-    trains = {
-        f["properties"]["unit"]: f["properties"]["train"] for f in history["features"]
-    }
-    assert trains == {"301": ["301"], "332": ["332", "460"], "460": ["332", "460"]}
