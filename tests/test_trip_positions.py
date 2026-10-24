@@ -471,7 +471,7 @@ def test_arrival_at_the_terminus_is_recorded_at_once(monkeypatch):
     monkeypatch.setattr(module, "build_trip_table", lambda *a: {"trips": [row]})
     monkeypatch.setattr(module, "open_units_db", lambda: object())
     monkeypatch.setattr(
-        module, "record_unit_positions", lambda conn, f, ts: recorded.append(len(f))
+        module, "record_unit_positions", lambda conn, f, *a: recorded.append(len(f))
     )
     state = module.PositionsState()
     arrival = datetime(2026, 10, 17, 9, 9, 10)
@@ -482,3 +482,17 @@ def test_arrival_at_the_terminus_is_recorded_at_once(monkeypatch):
     module.run_positions(redis_client, None, arrival, state)  # already recorded
 
     assert recorded == [1, 1]
+
+
+def test_trip_ends_give_the_terminus_and_planned_arrival():
+    from datetime import timezone
+
+    from hvv_map.trip_positions import _trip_ends
+
+    row = {**_row(), "route_end": "2026-10-17T09:09"}  # summer time: UTC+2
+    unknown = {**_row(id="2"), "route_end": None}
+
+    ends = _trip_ends({"trips": [row, unknown]}, STATIONS)
+
+    at = int(datetime(2026, 10, 17, 7, 9, tzinfo=timezone.utc).timestamp())
+    assert ends == {"1": {"coordinates": [2, 53.5], "at": at}}
