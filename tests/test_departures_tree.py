@@ -156,3 +156,9 @@ def test_vehicle_numbers_text_lists_numbers_with_id_fallback():
     vehicles = [{"id": "9001", "number": "4711"}, {"id": "7"}, {}]
     assert vehicle_numbers_text(vehicles) == "4711, id 7"
     assert vehicle_numbers_text(None) == ""
+
+
+def test_clock_before_anchor_is_not_next_day():
+    from hvv_map.departures_tree import _clock
+
+    assert _clock(datetime(2026, 10, 24), -10) == ("23:50", False)
