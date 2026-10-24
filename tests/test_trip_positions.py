@@ -434,3 +434,35 @@ def test_ubahn_vehicle_lists_its_unit_numbers():
 def test_other_modes_have_no_unit_numbers():
     [feature] = _positions(_row(mode="S", vehicles="474 (4011)"))
     assert feature["properties"]["units"] == ""
+
+
+def test_vehicle_at_its_last_stop_is_flagged_terminus():
+    [between] = _positions(_row())
+    [arrived] = _positions(_row(), datetime(2026, 10, 17, 9, 9, 10))
+
+    assert "terminus" not in between["properties"]
+    assert arrived["properties"]["terminus"] is True
+
+
+def test_arrival_at_the_terminus_is_recorded_at_once(monkeypatch):
+    from hvv_map import trip_positions as module
+
+    recorded = []
+    row = _row(vehicles="DT5.1 (417)")
+    redis_client = _redis_with_source_data(module)
+    monkeypatch.setattr(module, "parse_anchor", lambda data: None)
+    monkeypatch.setattr(module, "load_stations", lambda client: list(STATIONS.values()))
+    monkeypatch.setattr(module, "build_trip_table", lambda *a: {"trips": [row]})
+    monkeypatch.setattr(module, "open_units_db", lambda: object())
+    monkeypatch.setattr(
+        module, "record_unit_positions", lambda conn, f, ts: recorded.append(len(f))
+    )
+    state = module.PositionsState()
+    arrival = datetime(2026, 10, 17, 9, 9, 10)
+
+    module.run_positions(redis_client, None, NOW, state)  # due: first write
+    module.run_positions(redis_client, None, NOW, state)  # not due, not arrived
+    module.run_positions(redis_client, None, arrival, state)  # arrived
+    module.run_positions(redis_client, None, arrival, state)  # already recorded
+
+    assert recorded == [1, 1]

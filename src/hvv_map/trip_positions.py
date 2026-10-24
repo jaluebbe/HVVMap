@@ -355,6 +355,8 @@ def build_positions(
                 delay = row["stops"][position.index]["delay"]
                 destination = _label_destination(row, now, ferry)
                 feature = _feature(row, destination, position, point, delay, straight)
+                if position.state == AT_STOP and position.index == len(stops) - 1:
+                    feature["properties"]["terminus"] = True
                 meta[id(feature)] = (
                     row.get("direction_id"),
                     destination,
@@ -406,6 +408,7 @@ class PositionsState:
         self.memory: dict | None = None  # trip vehicles, see trips.remember_vehicles
         self.recorded = float("-inf")  # last write of the unit positions
         self.units_conn: sqlite3.Connection | None = None  # see unit_positions
+        self.at_terminus: set[str] = set()  # journeys recorded at their terminus
 
 
 def _refresh(redis_client, state: PositionsState) -> bool:
@@ -465,11 +468,26 @@ def run_positions(
         json.dumps({"fetched_at": int(time.time()), "data": collection}),
         ex=POSITIONS_TTL,
     )
-    if time.time() - state.recorded >= RECORD_INTERVAL:
-        state.recorded = time.time()
+    # the terminus dwell can be shorter than RECORD_INTERVAL: record arrivals
+    # there at once, so the last known position is the terminus
+    terminus = {
+        f["properties"]["journeyID"]: f
+        for f in collection["features"]
+        if f["properties"].get("terminus")
+    }
+    arrived = [f for jid, f in terminus.items() if jid not in state.at_terminus]
+    state.at_terminus = set(terminus)
+    due = time.time() - state.recorded >= RECORD_INTERVAL
+    if due or arrived:
         if state.units_conn is None:
             state.units_conn = open_units_db()
-        record_unit_positions(state.units_conn, collection["features"], state.recorded)
+        if due:
+            state.recorded = time.time()
+            record_unit_positions(
+                state.units_conn, collection["features"], state.recorded
+            )
+        else:
+            record_unit_positions(state.units_conn, arrived, time.time())
     return len(collection["features"])
 
 
