@@ -119,3 +119,29 @@ def test_singular_no_service_wording_is_closure():
         "description": "Am Montag fährt keine S7 zwischen A und B",
     }
     assert classify_category(announcement) == CATEGORY_SPERRUNG
+
+
+def test_classify_category_sperrung_from_a_dropped_section():
+    announcement = {
+        "summary": "🚧 Busse statt S-Bahnen zw. Altona u. Wedel",
+        "description": "Freitag, 23.10.(20 Uhr) bis Sonntag, 25.10. (Betriebsende) "
+        "fährt aufgrund von Gleisbauarbeiten die S1 ausschließlich zwischen Altona "
+        "und Airport/Poppenbüttel. Zwischen Altona und Wedel entfällt die S1, es "
+        "steht ein Ersatzverkehr mit drei Buslinien zur Verfügung.",
+    }
+    assert classify_category(announcement) == CATEGORY_SPERRUNG
+    for text in [
+        "Zwischen Altona und Wedel entfällt die S1",
+        "Die U3 entfällt zwischen Barmbek und Wandsbek-Gartenstadt",
+        "Am Sonntag entfällt die S5 nach Stade",
+    ]:
+        assert classify_category({"summary": "", "description": text}) == (
+            CATEGORY_SPERRUNG
+        ), text
+
+
+def test_classify_category_dropped_stop_without_line_stays_sonstige():
+    text = "Der Halt am Rathaus entfällt heute wegen einer Veranstaltung"
+    assert classify_category({"summary": "", "description": text}) == (
+        CATEGORY_SONSTIGE
+    )

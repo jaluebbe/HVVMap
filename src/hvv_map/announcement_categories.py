@@ -38,6 +38,10 @@ CLOSURE_PATTERNS = [
     # Cancelled trains ("entfallen die Züge ...", "Züge ... entfallen")
     re.compile(r"\bZüge\b[^.\n]{0,80}\bentfallen", re.IGNORECASE),
     re.compile(r"\bentfallen\b[^.\n]{0,40}\bZüge\b", re.IGNORECASE),
+    # A section or line dropped ("Zwischen Altona und Wedel entfällt die S1")
+    re.compile(r"\bzwischen\b[^.\n]{0,60}\bentf[aä]ll(t|en)\b", re.IGNORECASE),
+    re.compile(r"\bentf[aä]ll(t|en)\b[^.\n]{0,40}\b(S|U|A|RE|RB)\d+\b"),
+    re.compile(r"\b(S|U|A|RE|RB)\d+\b[^.\n]{0,40}\bentf[aä]ll(t|en)\b"),
 ]
 
 
