@@ -498,4 +498,3 @@ def test_arrival_at_the_terminus_is_recorded_at_once(monkeypatch):
     module.run_positions(redis_client, None, arrival, state)  # already recorded
 
     assert recorded == [1, 1]
-
