@@ -4,7 +4,7 @@
 <head>
     <link rel="apple-touch-icon" href="/static/hvv/icon-ubahn-180.png">
     <meta name="mobile-web-app-capable" content="yes">
-    <meta name="apple-mobile-web-app-status-bar-style" content="default">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <meta name="apple-mobile-web-app-title" content="TS">
     <meta name="theme-color" content="#1e64a0">
     <link rel="icon" href="/static/hvv/icons/u.svg" type="image/svg+xml">
@@ -17,6 +17,19 @@
     <meta name="viewport" content="width=device-width,initial-scale=1.0,user-scalable=no,viewport-fit=cover">
     <link rel="stylesheet" href="/static/maplibre-gl/maplibre-gl.css">
     <link rel="stylesheet" href="/static/maplibre_map_hvv.css">
+    <style>
+        /* solid bar under the status bar: iOS blurs the map there otherwise */
+        body::before {
+            content: '';
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: env(safe-area-inset-top, 0px);
+            background: #1e64a0;
+            z-index: 10;
+        }
+    </style>
 </head>
 
 <body>
