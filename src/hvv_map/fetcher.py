@@ -137,7 +137,15 @@ def main() -> None:
     while True:
         cycle_start = time.time()
         try:
-            if cycle_start - last_stations >= STATIONS_INTERVAL:
+            # live first: trip statuses go stale without it, e.g. after a restart
+            if cycle_start - last_live_departures >= LIVE_DEPARTURES_INTERVAL:
+                last_live_departures = cycle_start
+                if not fetch_live_departures_snapshot():
+                    # retry soon instead of after the full interval
+                    last_live_departures -= (
+                        LIVE_DEPARTURES_INTERVAL - LIVE_RETRY_SECONDS
+                    )
+            elif cycle_start - last_stations >= STATIONS_INTERVAL:
                 last_stations = cycle_start
                 fetch_stations_catalog()
             elif cycle_start - last_announcements_fetch >= ANNOUNCEMENTS_INTERVAL:
@@ -152,13 +160,6 @@ def main() -> None:
             ):
                 last_daily_departures = cycle_start
                 fetch_daily_departures()
-            elif cycle_start - last_live_departures >= LIVE_DEPARTURES_INTERVAL:
-                last_live_departures = cycle_start
-                if not fetch_live_departures_snapshot():
-                    # retry soon instead of after the full interval
-                    last_live_departures -= (
-                        LIVE_DEPARTURES_INTERVAL - LIVE_RETRY_SECONDS
-                    )
             elif cycle_start - last_trip_courses >= TRIP_COURSES_INTERVAL:
                 last_trip_courses = cycle_start
                 fetch_trip_courses()
