@@ -296,6 +296,16 @@ def test_combine_days_appends_tomorrows_early_hours_as_offsets():
     assert tomorrow[0]["timeOffset"] == 10  # input untouched
 
 
+def test_combine_days_prepends_yesterdays_late_hours_as_negative_offsets():
+    yesterday = [
+        {"serviceId": "1", "timeOffset": 1430},
+        {"serviceId": "1", "timeOffset": 600},  # before the kept tail
+    ]
+    combined = combine_days([{"serviceId": "1", "timeOffset": 5}], [], yesterday)
+    assert [d["timeOffset"] for d in combined] == [-10, 5]
+    assert yesterday[0]["timeOffset"] == 1430  # input untouched
+
+
 class _StoreRedis(_FakeRedis):
     def set(self, key, value, ex=None):
         self.data[key] = value

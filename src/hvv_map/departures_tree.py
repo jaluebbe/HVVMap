@@ -26,11 +26,12 @@ def parse_anchor(data: dict | None) -> datetime | None:
 
 def _clock(anchor: datetime | None, offset) -> tuple[str | None, bool]:
     """("HH:MM", whether it falls on the day after the anchor's) for a
-    timeOffset in minutes; (None, False) without anchor or offset."""
+    timeOffset in minutes (negative: the day before); (None, False) without
+    anchor or offset."""
     if anchor is None or offset is None:
         return None, False
     moment = anchor + timedelta(minutes=offset)
-    return moment.strftime("%H:%M"), moment.date() != anchor.date()
+    return moment.strftime("%H:%M"), moment.date() > anchor.date()
 
 
 def _natural_key(text: str) -> list:

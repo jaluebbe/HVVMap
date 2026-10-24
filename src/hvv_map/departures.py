@@ -85,6 +85,7 @@ REDIS_ANCHOR_KEY = "hvv:departures:anchor_start"
 # timetable, so a plan query must start at 00:00 and end before 24:00.
 QUERY_ANCHOR_HOUR = 0
 NEXT_DAY_TAIL_MINUTES = 6 * 60  # tomorrow's hours kept in the plan
+PREVIOUS_DAY_TAIL_MINUTES = 3 * 60  # yesterday's late hours kept after midnight
 PLAN_MINUTES = 24 * 60 - 1
 
 
@@ -421,10 +422,19 @@ def _shifted(departures: list[dict], minutes: int, limit: int) -> list[dict]:
     return shifted
 
 
-def combine_days(today: list[dict], tomorrow: list[dict]) -> list[dict]:
-    """Today's departures plus the early hours of tomorrow, as offsets from
-    today's start, so trips running past midnight stay in one piece."""
-    return today + _shifted(tomorrow, 24 * 60, NEXT_DAY_TAIL_MINUTES)
+def combine_days(
+    today: list[dict], tomorrow: list[dict], yesterday: list[dict] | None = None
+) -> list[dict]:
+    """Yesterday's late hours (negative offsets), today's departures and the
+    early hours of tomorrow, as offsets from today's start, so trips running
+    past midnight stay in one piece, also across the midnight rollover."""
+    late = 24 * 60 - PREVIOUS_DAY_TAIL_MINUTES
+    previous = [
+        {**d, "timeOffset": d["timeOffset"] - 24 * 60}
+        for d in yesterday or []
+        if d.get("timeOffset") is not None and d["timeOffset"] >= late
+    ]
+    return previous + today + _shifted(tomorrow, 24 * 60, NEXT_DAY_TAIL_MINUTES)
 
 
 def run_daily_snapshots(client: GtiClient, redis_client) -> None:
@@ -439,7 +449,11 @@ def run_daily_snapshots(client: GtiClient, redis_client) -> None:
         print(f"tomorrow's plan not available: {e}")
         tomorrow = []
 
-    merged = combine_days(today, tomorrow)
+    # yesterday only if still stored: no query just for the rollover
+    yesterday = _load_data(
+        redis_client, _day_key(start.date() - timedelta(days=1))
+    ).get("departures", [])
+    merged = combine_days(today, tomorrow, yesterday)
     _store(redis_client, REDIS_MERGED_KEY, {"departures": merged})
     print(f"{len(merged)} unique departures ({REDIS_MERGED_KEY})")
 
