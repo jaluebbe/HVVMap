@@ -297,12 +297,14 @@ def _one_per_train(features: list[dict], meta: dict[int, tuple]) -> list[dict]:
     (coupled parts after joining, when GTI lists only one of them); several
     confirmed trips are a coupled train (e.g. RE7 to Kiel and Flensburg) and
     get one feature with all destinations; of unconfirmed ones only the trip
-    on its own course stays. meta: feature -> (direction id, destination,
-    confirmed, on own course)."""
+    on its own course stays. A trip at its terminus is another train than
+    one starting there (e.g. U3 at Barmbek). meta: feature -> (direction id,
+    destination, confirmed, on own course)."""
     groups: dict[tuple, list[dict]] = defaultdict(list)
     for f in features:
         if id(f) in meta:
-            groups[(_spot(f), meta[id(f)][0])].append(f)
+            terminus = bool(f["properties"].get("terminus"))
+            groups[(_spot(f), meta[id(f)][0], terminus)].append(f)
     dropped = set()
     for parts in groups.values():
         if len(parts) < 2:
