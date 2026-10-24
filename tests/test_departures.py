@@ -374,3 +374,49 @@ def test_day_minutes_follows_the_dst_changes():
     assert day_minutes(date(2026, 10, 24)) == 1440
     assert day_minutes(date(2026, 10, 25)) == 1500
     assert day_minutes(date(2026, 3, 29)) == 1380
+
+
+def test_fetch_day_splits_a_25_hour_day_into_two_windows(monkeypatch):
+    from datetime import date, datetime
+
+    from hvv_map import departures
+
+    calls = []
+
+    def fake(client, start, minutes, *rest):
+        calls.append((start, minutes))
+        offset = 30 if start.hour == 22 else 1439  # 22:30 / 22:59 winter time
+        return {"departures": [{"serviceId": str(start.hour), "timeOffset": offset}]}
+
+    monkeypatch.setattr(departures, "fetch_main_departures", fake)
+    monkeypatch.setattr(departures, "fetch_r_departures", lambda *a: {})
+    monkeypatch.setattr(departures, "fetch_sev_departures", lambda *a: None)
+    monkeypatch.setattr(departures.time, "sleep", lambda s: None)
+
+    result = departures.fetch_day(None, None, date(2026, 10, 25))
+
+    assert calls == [
+        (datetime(2026, 10, 25), departures.PLAN_MINUTES),
+        (datetime(2026, 10, 25, 22), 119),
+    ]
+    assert sorted(d["timeOffset"] for d in result) == [1350, 1379]
+
+
+def test_fetch_day_queries_an_ordinary_day_once(monkeypatch):
+    from datetime import date
+
+    from hvv_map import departures
+
+    calls = []
+    monkeypatch.setattr(
+        departures,
+        "fetch_main_departures",
+        lambda c, start, minutes: calls.append(minutes) or {},
+    )
+    monkeypatch.setattr(departures, "fetch_r_departures", lambda *a: {})
+    monkeypatch.setattr(departures, "fetch_sev_departures", lambda *a: None)
+    monkeypatch.setattr(departures.time, "sleep", lambda s: None)
+
+    departures.fetch_day(None, None, date(2026, 10, 24))
+
+    assert calls == [departures.PLAN_MINUTES]

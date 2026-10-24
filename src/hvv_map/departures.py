@@ -419,16 +419,41 @@ def match_sublines(by_service: dict[str, dict], sublines_cache: dict) -> None:
         entry["subline"] = candidates[0] if len(candidates) == 1 else None
 
 
-def fetch_day(client: GtiClient, redis_client, day: date) -> list[dict]:
-    """Merged departures of all three queries for one calendar day."""
-    start = datetime.combine(day, dtime.min)
-    minutes = day_minutes(day) - 1  # maxTimeOffset counts elapsed minutes
+LATE_WINDOW_HOUR = 22  # second query on a 25-hour day, see fetch_day
+
+
+def _fetch_window(
+    client: GtiClient, redis_client, day_start: datetime, start: datetime, minutes: int
+) -> list[dict]:
+    """The three queries for one window, as wall-clock offsets from day_start."""
     main = fetch_main_departures(client, start, minutes)
     time.sleep(1)  # 1 req/s rate limit across all GTI endpoints
     regional = fetch_r_departures(client, start, minutes)
     time.sleep(1)
     sev = fetch_sev_departures(client, redis_client, start, minutes) or {}
-    return to_wall_offsets(merge_departures(main, regional, sev), start)
+    shift = round((start - day_start).total_seconds() / 60)
+    return [
+        {**d, "timeOffset": d["timeOffset"] + shift}
+        if d.get("timeOffset") is not None
+        else d
+        for d in to_wall_offsets(merge_departures(main, regional, sev), start)
+    ]
+
+
+def fetch_day(client: GtiClient, redis_client, day: date) -> list[dict]:
+    """Merged departures of all three queries for one calendar day. GTI takes
+    at most PLAN_MINUTES (elapsed); a 25-hour day gets a second window for
+    its last hours."""
+    start = datetime.combine(day, dtime.min)
+    departures = _fetch_window(client, redis_client, start, start, PLAN_MINUTES)
+    if day_minutes(day) > 24 * 60:
+        time.sleep(1)
+        late = datetime.combine(day, dtime(LATE_WINDOW_HOUR))
+        minutes = (24 - LATE_WINDOW_HOUR) * 60 - 1
+        departures += _fetch_window(client, redis_client, start, late, minutes)
+    # a 23-hour day's window reaches into the next day, which has its own query
+    departures = [d for d in departures if (d.get("timeOffset") or 0) < 24 * 60]
+    return merge_departures({"departures": departures})
 
 
 def _ensure_day(client: GtiClient, redis_client, day: date) -> list[dict]:
