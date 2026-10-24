@@ -67,6 +67,22 @@ def test_vehicle_at_a_stop_sits_on_the_station():
     assert feature["geometry"]["coordinates"] == [1, 53.5]
 
 
+def test_terminus_missing_from_stations_sits_at_the_end_of_its_track():
+    from hvv_map.gti_shapes import open_db, store_segment
+
+    conn = open_db(":memory:")
+    store_segment(conn, "B", "X", [[1, 53.5], [1.5, 53.52], [1.9, 53.51]])
+    row = _row()
+    row["stops"][-1] = {**_stop("X", "09:09", None), "station": "Barmbek"}
+
+    [feature] = build_positions(
+        {"trips": [row]}, datetime(2026, 10, 17, 9, 9, 10), STATIONS, conn
+    )["features"]
+
+    assert feature["geometry"]["coordinates"] == [1.9, 53.51]
+    assert feature["properties"]["terminus"] is True
+
+
 def test_delay_is_reported_in_minutes():
     row = _row()
     row["stops"][0]["delay"] = 120
@@ -483,18 +499,3 @@ def test_arrival_at_the_terminus_is_recorded_at_once(monkeypatch):
 
     assert recorded == [1, 1]
 
-
-def test_terminus_missing_from_stations_sits_at_the_end_of_its_track():
-    from hvv_map.gti_shapes import open_db, store_segment
-
-    conn = open_db(":memory:")
-    store_segment(conn, "B", "X", [[1, 53.5], [1.5, 53.52], [1.9, 53.51]])
-    row = _row()
-    row["stops"][-1] = {**_stop("X", "09:09", None), "station": "Barmbek"}
-
-    [feature] = build_positions(
-        {"trips": [row]}, datetime(2026, 10, 17, 9, 9, 10), STATIONS, conn
-    )["features"]
-
-    assert feature["geometry"]["coordinates"] == [1.9, 53.51]
-    assert feature["properties"]["terminus"] is True
