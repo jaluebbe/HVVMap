@@ -7,7 +7,8 @@ fetcher loop - run manually or on its own schedule.
 
 import json
 import time
-from datetime import date, datetime, time as dtime, timedelta
+from datetime import date, datetime, time as dtime, timedelta, timezone
+from zoneinfo import ZoneInfo
 
 from hvv_map.departures_tree import parse_anchor
 from hvv_map.gti_client import GtiClient
@@ -87,6 +88,35 @@ QUERY_ANCHOR_HOUR = 0
 NEXT_DAY_TAIL_MINUTES = 6 * 60  # tomorrow's hours kept in the plan
 PREVIOUS_DAY_TAIL_MINUTES = 3 * 60  # yesterday's late hours kept after midnight
 PLAN_MINUTES = 24 * 60 - 1
+
+
+BERLIN_TZ = ZoneInfo("Europe/Berlin")
+
+
+def to_wall_offsets(departures: list[dict], start: datetime) -> list[dict]:
+    """GTI counts timeOffset in elapsed minutes; the plan uses Berlin
+    wall-clock minutes from the naive `start`. Differs only across a DST
+    change; the repeated hour in autumn folds onto the first one."""
+    begin = start.replace(tzinfo=BERLIN_TZ).astimezone(timezone.utc)
+    result = []
+    for departure in departures:
+        offset = departure.get("timeOffset")
+        if offset is not None:
+            moment = begin + timedelta(minutes=offset)
+            wall = moment.astimezone(BERLIN_TZ).replace(tzinfo=None)
+            offset = round((wall - start).total_seconds() / 60)
+            departure = {**departure, "timeOffset": offset}
+        result.append(departure)
+    return result
+
+
+def day_minutes(day: date) -> int:
+    """Elapsed minutes of a Berlin calendar day (1380/1440/1500)."""
+    begin, end = (
+        datetime.combine(d, dtime.min, BERLIN_TZ).astimezone(timezone.utc)
+        for d in (day, day + timedelta(days=1))
+    )
+    return round((end - begin).total_seconds() / 60)
 
 
 def _query_start_time(now: datetime) -> datetime:
@@ -392,12 +422,13 @@ def match_sublines(by_service: dict[str, dict], sublines_cache: dict) -> None:
 def fetch_day(client: GtiClient, redis_client, day: date) -> list[dict]:
     """Merged departures of all three queries for one calendar day."""
     start = datetime.combine(day, dtime.min)
-    main = fetch_main_departures(client, start)
+    minutes = day_minutes(day) - 1  # maxTimeOffset counts elapsed minutes
+    main = fetch_main_departures(client, start, minutes)
     time.sleep(1)  # 1 req/s rate limit across all GTI endpoints
-    regional = fetch_r_departures(client, start)
+    regional = fetch_r_departures(client, start, minutes)
     time.sleep(1)
-    sev = fetch_sev_departures(client, redis_client, start) or {}
-    return merge_departures(main, regional, sev)
+    sev = fetch_sev_departures(client, redis_client, start, minutes) or {}
+    return to_wall_offsets(merge_departures(main, regional, sev), start)
 
 
 def _ensure_day(client: GtiClient, redis_client, day: date) -> list[dict]:

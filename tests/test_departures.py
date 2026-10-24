@@ -339,3 +339,38 @@ def test_run_daily_snapshots_fetches_today_and_tomorrow_once(monkeypatch):
     by_service = json.loads(redis_client.data[departures.REDIS_BY_SERVICE_KEY])["data"]
     assert [s["timeOffset"] for s in by_service["7"]["stops"]] == [600]
     assert not departures.snapshots_stale(redis_client, datetime(2026, 10, 19, 12))
+
+
+def test_to_wall_offsets_converts_elapsed_minutes_across_the_dst_change():
+    from datetime import datetime
+
+    from hvv_map.departures import to_wall_offsets
+
+    start = datetime(2026, 10, 25)
+    departures = [{"timeOffset": 120}, {"timeOffset": 282}, {"x": 1}]
+    # 02:00 summer time, then 03:42 winter time (elapsed 282 min)
+    assert to_wall_offsets(departures, start) == [
+        {"timeOffset": 120},
+        {"timeOffset": 222},
+        {"x": 1},
+    ]
+    assert departures[1]["timeOffset"] == 282  # input untouched
+
+
+def test_to_wall_offsets_is_a_no_op_on_ordinary_days():
+    from datetime import datetime
+
+    from hvv_map.departures import to_wall_offsets
+
+    departures = [{"timeOffset": 0}, {"timeOffset": 1439}]
+    assert to_wall_offsets(departures, datetime(2026, 10, 24)) == departures
+
+
+def test_day_minutes_follows_the_dst_changes():
+    from datetime import date
+
+    from hvv_map.departures import day_minutes
+
+    assert day_minutes(date(2026, 10, 24)) == 1440
+    assert day_minutes(date(2026, 10, 25)) == 1500
+    assert day_minutes(date(2026, 3, 29)) == 1380
