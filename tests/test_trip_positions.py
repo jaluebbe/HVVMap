@@ -247,6 +247,22 @@ def test_confirmed_trips_of_one_direction_at_the_same_spot_are_one_coupled_train
     assert coupled["properties"]["text"].startswith("Kiel Hbf / Flensburg<br>")
 
 
+def test_trip_at_its_terminus_is_not_merged_with_one_starting_there():
+    arriving = _row(id="1", primary_ids=[], vehicles="DT5.1 (375)")
+    starting = _row(
+        id="2",
+        primary_ids=["2"],
+        stops=[_stop("C", "09:09", "09:12"), _stop("D", "09:15", None)],
+    )
+
+    features = _positions_of([arriving, starting], datetime(2026, 10, 17, 9, 9, 10))
+
+    assert sorted(f["properties"]["journeyID"] for f in features) == ["1", "2"]
+    assert next(f for f in features if f["properties"]["journeyID"] == "1")[
+        "properties"
+    ]["terminus"]
+
+
 def _positions_of(rows, now=NOW):
     return build_positions({"trips": rows}, now, STATIONS)["features"]
 
