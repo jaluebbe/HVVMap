@@ -71,10 +71,22 @@ def _coordinates(
     cache: dict,
 ) -> tuple[tuple[float, float], bool] | None:
     """(point, straight): the station at a stop, a point on the segment's
-    track between stops."""
+    track between stops. A stop missing from `stations` (e.g. a platform id)
+    is placed at the end of the stored track leading to it."""
     if position.state == AT_STOP:
-        station = stations.get(ids[position.index] or "")
-        return ((station.lon, station.lat), False) if station else None
+        index = position.index
+        station = stations.get(ids[index] or "")
+        if station:
+            return (station.lon, station.lat), False
+        if index > 0 and ids[index - 1] and ids[index]:
+            track = _track(ids[index - 1], ids[index], stations, shapes_conn, cache)
+            if track:
+                return track[0][-1], track[2]
+        if index + 1 < len(ids) and ids[index] and ids[index + 1]:
+            track = _track(ids[index], ids[index + 1], stations, shapes_conn, cache)
+            if track:
+                return track[0][0], track[2]
+        return None
     start, end = ids[position.index], ids[position.end_index]
     if not start or not end:
         return None
