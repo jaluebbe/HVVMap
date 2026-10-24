@@ -21,6 +21,7 @@ from hvv_map.departures import (
     _store,
     berlin_now,
     merge_departures,
+    to_wall_offsets,
 )
 from hvv_map.gti_client import GtiClient
 from hvv_map.lines import WANTED_R_BAHN_LINES
@@ -132,7 +133,7 @@ def fetch_live_departures(
                 ]
             responses.append(response)
     return {
-        "departures": merge_departures(*responses),
+        "departures": to_wall_offsets(merge_departures(*responses), start),
         "anchor": {
             "date": start.strftime("%Y-%m-%d"),
             "time": start.strftime("%H:%M:%S"),
