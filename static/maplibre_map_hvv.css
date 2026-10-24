@@ -146,14 +146,15 @@ body {
     margin: 2px 0;
 }
 
-/* Safe-area / PWA - MapLibre's own control container classes. */
+/* Safe-area / PWA - MapLibre's own control container classes. Top: the full
+   inset, iOS blurs everything under the status bar. */
 .maplibregl-ctrl-top-left {
-    padding-top: calc(env(safe-area-inset-top, 0px) * 0.75);
+    padding-top: env(safe-area-inset-top, 0px);
     padding-left: calc(env(safe-area-inset-left, 0px) * 0.75);
 }
 
 .maplibregl-ctrl-top-right {
-    padding-top: calc(env(safe-area-inset-top, 0px) * 0.75);
+    padding-top: env(safe-area-inset-top, 0px);
     padding-right: calc(env(safe-area-inset-right, 0px) * 0.75);
 }
 
