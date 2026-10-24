@@ -414,7 +414,7 @@ class ModeToggleControl {
             const search = document.createElement('input');
             search.type = 'search';
             search.className = 'hvv-mode-control-unit-search';
-            search.placeholder = 'Fahrzeug-Nr.';
+            search.placeholder = 'Fzg.-Nr.';
             search.title = 'Eine oder mehrere Nummern, z. B. 388, 417';
             search.setAttribute('aria-label', 'Fahrzeugnummern suchen');
             search.autocomplete = 'off';
@@ -457,8 +457,8 @@ class ModeToggleControl {
                     search.value = units.join(', ');
                     search.dispatchEvent(new Event('input'));
                     if (!units.length) {
-                        search.placeholder = 'keine älteren Geister';
-                        setTimeout(() => { search.placeholder = 'Fahrzeug-Nr.'; }, 3000);
+                        search.placeholder = 'keine Geister';
+                        setTimeout(() => { search.placeholder = 'Fzg.-Nr.'; }, 3000);
                     }
                 });
                 row.appendChild(ghosts);
