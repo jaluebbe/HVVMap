@@ -47,3 +47,14 @@ def test_old_positions_stay_in_the_database(tmp_path):
 
     assert unit_history(conn, [], 10 * SHOW_MAX_AGE)["features"] == []
     assert conn.execute("SELECT unit FROM unit_positions").fetchall() == [("101",)]
+
+
+def test_ghost_train_omits_partners_running_again(tmp_path):
+    conn = open_db(str(tmp_path / "units.db"))
+    record_unit_positions(conn, [_feature("396 · 456")], 0)
+
+    history = unit_history(conn, [_feature("314 · 456")], 1)
+
+    [feature] = history["features"]
+    assert feature["properties"]["unit"] == "396"
+    assert feature["properties"]["train"] == ["396"]

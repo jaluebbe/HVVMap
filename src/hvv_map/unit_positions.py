@@ -105,7 +105,8 @@ def unit_history(
                     "icon": entry["icon"],
                     "iconHeight": entry["iconHeight"],
                     "label": entry["label"],
-                    "train": entry["train"],
+                    # partners running again (re-coupled) are not part of the ghost
+                    "train": [u for u in entry["train"] if u not in on_map],
                     "seen_at": seen_at,
                 },
             }
