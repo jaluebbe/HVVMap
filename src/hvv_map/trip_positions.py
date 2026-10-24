@@ -9,6 +9,7 @@ import traceback
 import sqlite3
 import time
 from datetime import datetime
+from zoneinfo import ZoneInfo
 
 from hvv_map.departures import REDIS_ANCHOR_KEY, REDIS_BY_SERVICE_KEY, berlin_now
 from hvv_map.departures_live import REDIS_LIVE_KEY
@@ -451,6 +452,23 @@ def _refresh(redis_client, state: PositionsState) -> bool:
     return True
 
 
+def _trip_ends(table: dict, stations: dict[str, StationInfo]) -> dict[str, dict]:
+    """journeyID -> terminus coordinates and planned arrival (epoch), stored
+    with the unit positions, see unit_positions.unit_history."""
+    ends = {}
+    for row in table.get("trips", []):
+        stops = row.get("stops") or []
+        station = stations.get(stops[-1].get("station_id") or "") if stops else None
+        if station is None or not row.get("route_end"):
+            continue
+        end = datetime.fromisoformat(row["route_end"])
+        ends[row["id"]] = {
+            "coordinates": [station.lon, station.lat],
+            "at": int(end.replace(tzinfo=ZoneInfo("Europe/Berlin")).timestamp()),
+        }
+    return ends
+
+
 def run_positions(
     redis_client,
     shapes_conn: sqlite3.Connection | None,
@@ -483,13 +501,14 @@ def run_positions(
     if due or arrived:
         if state.units_conn is None:
             state.units_conn = open_units_db()
+        ends = _trip_ends(state.table, state.stations)
         if due:
             state.recorded = time.time()
             record_unit_positions(
-                state.units_conn, collection["features"], state.recorded
+                state.units_conn, collection["features"], state.recorded, ends
             )
         else:
-            record_unit_positions(state.units_conn, arrived, time.time())
+            record_unit_positions(state.units_conn, arrived, time.time(), ends)
     return len(collection["features"])
 
 

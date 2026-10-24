@@ -47,9 +47,13 @@ def _units(feature: dict) -> list[str]:
 
 
 def record_unit_positions(
-    conn: sqlite3.Connection, features: list[dict], now_ts: float
+    conn: sqlite3.Connection,
+    features: list[dict],
+    now_ts: float,
+    ends: dict[str, dict] | None = None,
 ) -> int:
-    """Store the position of every unit on the map; returns their number."""
+    """Store the position of every unit on the map, with the terminus of its
+    trip (`ends`: journeyID -> {coordinates, at}); returns their number."""
     rows = []
     for feature in features:
         units = _units(feature)
@@ -62,6 +66,7 @@ def record_unit_positions(
                 "iconHeight": properties.get("iconHeight"),
                 "label": properties.get("label"),
                 "train": units,
+                "end": (ends or {}).get(properties.get("journeyID")),
             }
         )
         rows += [(unit, int(now_ts), data) for unit in units]
@@ -97,6 +102,10 @@ def unit_history(
         if unit in on_map:
             continue
         entry = json.loads(data_json)
+        end = entry.get("end")
+        if end and seen_at < end["at"] <= now_ts:
+            # lost mid-route (e.g. a restart): trips run to their terminus
+            entry["coordinates"], seen_at = end["coordinates"], end["at"]
         features.append(
             {
                 "type": "Feature",
@@ -151,7 +160,9 @@ def fleet_summary(
             "missing": [int(n) for n in numbers if n not in seen and n not in on_map],
         }
         series.append(entry)
-        family = totals.setdefault(name.split(".")[0], dict.fromkeys(("total", "seen", "on_map"), 0))
+        family = totals.setdefault(
+            name.split(".")[0], dict.fromkeys(("total", "seen", "on_map"), 0)
+        )
         for key in family:
             family[key] += entry[key]
     units = {
