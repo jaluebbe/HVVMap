@@ -45,14 +45,19 @@ def _station_name(station: dict) -> str:
     )
 
 
-# Hamburg U-Bahn fleet: (first, last number, series). GTI's line.type.model
-# is the planned type and can be wrong, the vehicle numbers are authoritative.
+# Hamburg U-Bahn fleet: (first, last number, series); a series may span
+# several ranges. GTI's line.type.model is the planned type and can be wrong,
+# the vehicle numbers are authoritative.
 UBAHN_SERIES = [
     (101, 130, "DT4.1"),
-    (131, 151, "DT4.2"),
+    (131, 140, "DT4.2"),
+    (141, 141, "DT4.26"),
+    (142, 142, "DT4.2"),
+    (143, 151, "DT4.26"),
     (152, 171, "DT4.3"),
     (172, 186, "DT4.4"),
-    (187, 211, "DT4.5"),
+    (187, 209, "DT4.5"),
+    (210, 211, "DT4.56"),
     (212, 226, "DT4.6"),
     (301, 418, "DT5.1"),
     (419, 463, "DT5.2"),

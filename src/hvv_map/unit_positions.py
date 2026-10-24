@@ -134,14 +134,17 @@ def fleet_summary(
     except sqlite3.OperationalError:
         seen = {}
     on_map = {unit for feature in current for unit in _units(feature)}
-    series, totals, known = [], {}, set()
+    ranges: dict[str, list[list[int]]] = {}
     for first, last, name in UBAHN_SERIES:
-        numbers = [str(n) for n in range(first, last + 1) if n not in RETIRED_UNITS]
-        known.update(range(first, last + 1))
+        ranges.setdefault(name, []).append([first, last])
+    series, totals, known = [], {}, set()
+    for name, spans in sorted(ranges.items(), key=lambda kv: kv[1][0][0]):
+        members = [n for first, last in spans for n in range(first, last + 1)]
+        numbers = [str(n) for n in members if n not in RETIRED_UNITS]
+        known.update(members)
         entry = {
             "series": name,
-            "first": first,
-            "last": last,
+            "ranges": spans,
             "total": len(numbers),
             "seen": sum(n in seen or n in on_map for n in numbers),
             "on_map": sum(n in on_map for n in numbers),
