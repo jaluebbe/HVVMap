@@ -92,6 +92,7 @@ def unit_history(
     except sqlite3.OperationalError:
         return empty
     on_map = {unit for feature in current for unit in _units(feature)}
+    last_seen = {unit: seen_at for unit, seen_at, _ in rows}
     features = []
     for unit, seen_at, data_json in rows:
         if unit in on_map:
@@ -107,8 +108,13 @@ def unit_history(
                     "icon": entry["icon"],
                     "iconHeight": entry["iconHeight"],
                     "label": entry["label"],
-                    # partners running again (re-coupled) are not part of the ghost
-                    "train": [u for u in entry["train"] if u not in on_map],
+                    # partners running again or seen later elsewhere (re-coupled)
+                    # are not part of the ghost
+                    "train": [
+                        u
+                        for u in entry["train"]
+                        if u not in on_map and last_seen.get(u, seen_at) <= seen_at
+                    ],
                     "seen_at": seen_at,
                 },
             }
