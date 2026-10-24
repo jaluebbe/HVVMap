@@ -99,3 +99,18 @@ def test_fleet_without_database_counts_the_map_only():
     fleet = fleet_summary(None, [_feature("417")], 0)
 
     assert fleet["totals"]["DT5"]["seen"] == 1 and fleet["units"] == {}
+
+
+def test_ghost_lost_mid_route_moves_to_its_terminus_once_due(tmp_path):
+    conn = open_db(str(tmp_path / "units.db"))
+    feature = _feature("301")
+    feature["properties"]["journeyID"] = "21745"
+    end = {"coordinates": [9.97, 53.55], "at": 600}
+    record_unit_positions(conn, [feature], 0, {"21745": end})
+
+    before = unit_history(conn, [], 599)["features"][0]
+    after = unit_history(conn, [], 601)["features"][0]
+
+    assert before["geometry"]["coordinates"] == [10.0, 53.5]
+    assert after["geometry"]["coordinates"] == [9.97, 53.55]
+    assert after["properties"]["seen_at"] == 600

@@ -9,6 +9,7 @@ import traceback
 import sqlite3
 import time
 from datetime import datetime
+from zoneinfo import ZoneInfo
 
 from hvv_map.departures import REDIS_ANCHOR_KEY, REDIS_BY_SERVICE_KEY, berlin_now
 from hvv_map.departures_live import REDIS_LIVE_KEY
@@ -70,10 +71,22 @@ def _coordinates(
     cache: dict,
 ) -> tuple[tuple[float, float], bool] | None:
     """(point, straight): the station at a stop, a point on the segment's
-    track between stops."""
+    track between stops. A stop missing from `stations` (e.g. a platform id)
+    is placed at the end of the stored track leading to it."""
     if position.state == AT_STOP:
-        station = stations.get(ids[position.index] or "")
-        return ((station.lon, station.lat), False) if station else None
+        index = position.index
+        station = stations.get(ids[index] or "")
+        if station:
+            return (station.lon, station.lat), False
+        if index > 0 and ids[index - 1] and ids[index]:
+            track = _track(ids[index - 1], ids[index], stations, shapes_conn, cache)
+            if track:
+                return track[0][-1], track[2]
+        if index + 1 < len(ids) and ids[index] and ids[index + 1]:
+            track = _track(ids[index], ids[index + 1], stations, shapes_conn, cache)
+            if track:
+                return track[0][0], track[2]
+        return None
     start, end = ids[position.index], ids[position.end_index]
     if not start or not end:
         return None
@@ -451,6 +464,23 @@ def _refresh(redis_client, state: PositionsState) -> bool:
     return True
 
 
+def _trip_ends(table: dict, stations: dict[str, StationInfo]) -> dict[str, dict]:
+    """journeyID -> terminus coordinates and planned arrival (epoch), stored
+    with the unit positions, see unit_positions.unit_history."""
+    ends = {}
+    for row in table.get("trips", []):
+        stops = row.get("stops") or []
+        station = stations.get(stops[-1].get("station_id") or "") if stops else None
+        if station is None or not row.get("route_end"):
+            continue
+        end = datetime.fromisoformat(row["route_end"])
+        ends[row["id"]] = {
+            "coordinates": [station.lon, station.lat],
+            "at": int(end.replace(tzinfo=ZoneInfo("Europe/Berlin")).timestamp()),
+        }
+    return ends
+
+
 def run_positions(
     redis_client,
     shapes_conn: sqlite3.Connection | None,
@@ -483,13 +513,14 @@ def run_positions(
     if due or arrived:
         if state.units_conn is None:
             state.units_conn = open_units_db()
+        ends = _trip_ends(state.table, state.stations)
         if due:
             state.recorded = time.time()
             record_unit_positions(
-                state.units_conn, collection["features"], state.recorded
+                state.units_conn, collection["features"], state.recorded, ends
             )
         else:
-            record_unit_positions(state.units_conn, arrived, time.time())
+            record_unit_positions(state.units_conn, arrived, time.time(), ends)
     return len(collection["features"])
 
 
