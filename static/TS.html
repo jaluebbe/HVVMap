@@ -18,16 +18,17 @@
     <link rel="stylesheet" href="/static/maplibre-gl/maplibre-gl.css">
     <link rel="stylesheet" href="/static/maplibre_map_hvv.css">
     <style>
-        /* solid bar under the status bar: iOS blurs the map there otherwise */
+        /* solid bar under the status bar: iOS blurs the map there otherwise;
+           12px beyond the inset (0 in a browser tab), as the blur reaches past it */
         body::before {
             content: '';
             position: fixed;
             top: 0;
             left: 0;
             right: 0;
-            height: env(safe-area-inset-top, 0px);
+            height: calc(env(safe-area-inset-top, 0px) + min(env(safe-area-inset-top, 0px), 12px));
             background: #1e64a0;
-            z-index: 10;
+            z-index: 1; /* below the map controls */
         }
     </style>
 </head>
