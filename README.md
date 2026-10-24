@@ -147,8 +147,9 @@ they're built directly from the static feed on first run.
   `UNIT_POSITIONS_DB_PATH`), one row per unit without expiry, so the history
   survives Redis restarts; `/api/hvv/gtilive/unit-history.geojson` shows the
   last 3 days, older entries stay in the file. `/api/hvv/gtilive/fleet.json`
-  counts the units ever seen per series (DT4.1-DT5.2), with the missing
-  numbers; retired units (`RETIRED_UNITS`) are left out.
+  counts the units ever seen per series (DT4.1-DT5.2, a series can span
+  several number ranges), with the missing numbers; retired units
+  (`RETIRED_UNITS`) are left out.
 - `maplibre_map_hvv_sbahn.html` - the same for the S-Bahn: `gtilive` only,
   centered on Hamburg Hbf, S1-S7 toggleable individually, destination labels
   on, no unit numbers; also served at `/sbahn`.

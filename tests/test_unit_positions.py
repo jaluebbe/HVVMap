@@ -71,8 +71,9 @@ def test_fleet_counts_every_unit_ever_seen_per_series(tmp_path):
     dt41 = fleet["series"][0]
     assert dt41["series"] == "DT4.1" and dt41["seen"] == 1 and dt41["total"] == 30
     assert 101 not in dt41["missing"] and 102 in dt41["missing"]
-    dt42 = fleet["series"][1]
-    assert dt42["total"] == 20 and 150 not in dt42["missing"]  # retired
+    dt426 = fleet["series"][2]
+    assert dt426["series"] == "DT4.26" and dt426["ranges"] == [[141, 141], [143, 151]]
+    assert dt426["total"] == 9 and 150 not in dt426["missing"]  # retired
     assert fleet["totals"]["DT4"] == {"total": 125, "seen": 1, "on_map": 0}
     assert fleet["totals"]["DT5"] == {"total": 163, "seen": 2, "on_map": 2}
     assert fleet["units"]["101"]["last_seen"] == 0

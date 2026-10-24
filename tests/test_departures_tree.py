@@ -122,6 +122,9 @@ def test_station_tree_carries_delay():
 def test_ubahn_series_by_unit_number():
     assert ubahn_series("101") == "DT4.1"
     assert ubahn_series(226) == "DT4.6"
+    assert ubahn_series(142) == "DT4.2"
+    assert ubahn_series(143) == "DT4.26"
+    assert ubahn_series(210) == "DT4.56"
     assert ubahn_series("417") == "DT5.1"
     assert ubahn_series("437") == "DT5.2"
     assert ubahn_series("4711") is None
