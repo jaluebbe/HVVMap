@@ -426,9 +426,25 @@ class ModeToggleControl {
                 });
                 this._onUnitSearch(numbers.length ? new Set(numbers) : null);
             });
+            // own clear button: iOS shows the native one only while typing
+            const clear = document.createElement('button');
+            clear.type = 'button';
+            clear.className = 'hvv-mode-control-search-clear';
+            clear.textContent = '✕';
+            clear.title = 'Suche leeren';
+            clear.setAttribute('aria-label', 'Suche leeren');
+            clear.hidden = true;
+            clear.addEventListener('click', () => {
+                search.value = '';
+                search.dispatchEvent(new Event('input'));
+            });
+            search.addEventListener('input', () => { clear.hidden = !search.value; });
+            const field = document.createElement('span');
+            field.className = 'hvv-mode-control-search-field';
+            field.append(search, clear);
             const row = document.createElement('div');
             row.className = 'hvv-mode-control-search-row';
-            row.appendChild(search);
+            row.appendChild(field);
             if (this._ghostUnits) {
                 // Fills in the units of the older ghosts, see olderGhostUnits.
                 const ghosts = document.createElement('button');
