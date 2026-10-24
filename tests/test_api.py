@@ -110,6 +110,18 @@ def test_unit_history_leaves_out_units_on_the_map(client, monkeypatch, tmp_path)
     assert [f["properties"]["unit"] for f in data["features"]] == ["388"]
 
 
+def test_fleet_is_served_with_noindex(client, monkeypatch):
+    monkeypatch.setattr(api_module, "_redis_client", _FakeRedis({}))
+    monkeypatch.setattr(api_module, "_unit_positions_connection", None)
+    monkeypatch.setattr(api_module, "open_unit_positions_reader", lambda: None)
+
+    response = client.get("/api/hvv/gtilive/fleet.json")
+
+    assert response.status_code == 200
+    assert response.headers["x-robots-tag"] == "noindex, nofollow"
+    assert response.json()["totals"]["DT4"]["total"] == 125
+
+
 def test_robots_txt_excludes_api(client):
     response = client.get("/robots.txt")
     assert response.status_code == 200

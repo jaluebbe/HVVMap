@@ -9,6 +9,8 @@ import os
 import sqlite3
 from pathlib import Path
 
+from hvv_map.departures_tree import UBAHN_SERIES
+
 DEFAULT_DB_PATH = os.environ.get(
     "UNIT_POSITIONS_DB_PATH",
     os.path.join(
@@ -112,3 +114,58 @@ def unit_history(
             }
         )
     return {"type": "FeatureCollection", "features": features}
+
+
+RETIRED_UNITS = {150}  # no longer in service, left out of the fleet counts
+
+
+def fleet_summary(
+    conn: sqlite3.Connection | None, current: list[dict], now_ts: float
+) -> dict:
+    """Which U-Bahn units were ever seen (whole database), per series and in
+    total; `current` are the position features of the units on the map."""
+    try:
+        rows = (
+            conn.execute("SELECT unit, seen_at, data_json FROM unit_positions")
+            if conn
+            else []
+        )
+        seen = {unit: (seen_at, json.loads(data)) for unit, seen_at, data in rows}
+    except sqlite3.OperationalError:
+        seen = {}
+    on_map = {unit for feature in current for unit in _units(feature)}
+    series, totals, known = [], {}, set()
+    for first, last, name in UBAHN_SERIES:
+        numbers = [str(n) for n in range(first, last + 1) if n not in RETIRED_UNITS]
+        known.update(range(first, last + 1))
+        entry = {
+            "series": name,
+            "first": first,
+            "last": last,
+            "total": len(numbers),
+            "seen": sum(n in seen or n in on_map for n in numbers),
+            "on_map": sum(n in on_map for n in numbers),
+            "missing": [int(n) for n in numbers if n not in seen and n not in on_map],
+        }
+        series.append(entry)
+        family = totals.setdefault(name.split(".")[0], dict.fromkeys(("total", "seen", "on_map"), 0))
+        for key in family:
+            family[key] += entry[key]
+    units = {
+        unit: {
+            "last_seen": seen_at,
+            "line": data.get("line"),
+            "label": data.get("label"),
+            "train": data.get("train"),
+            "on_map": unit in on_map,
+        }
+        for unit, (seen_at, data) in sorted(seen.items(), key=lambda kv: kv[0])
+    }
+    return {
+        "generated_at": int(now_ts),
+        "retired": sorted(RETIRED_UNITS),
+        "totals": totals,
+        "series": series,
+        "units": units,
+        "unknown": sorted(u for u in seen if not u.isdigit() or int(u) not in known),
+    }
