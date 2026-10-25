@@ -1022,3 +1022,14 @@ def test_live_delay_carries_on_behind_the_anchor_while_the_course_is_older():
 
     assert [r["delay"] for r in stale] == [240, None, None]
     assert [r["delay"] for r in fresh] == [240, 0, 60]
+
+
+def test_in_repeated_hour_only_for_the_ambiguous_autumn_hour():
+    from datetime import datetime
+
+    from hvv_map.trips import in_repeated_hour
+
+    assert in_repeated_hour(datetime(2026, 10, 25, 2, 5))
+    assert not in_repeated_hour(datetime(2026, 10, 25, 1, 59))
+    assert not in_repeated_hour(datetime(2026, 10, 25, 3, 0))
+    assert not in_repeated_hour(datetime(2026, 3, 29, 2, 30))
