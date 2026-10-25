@@ -94,7 +94,9 @@ def test_delay_is_reported_in_minutes():
 
 
 def test_cancelled_finished_and_unknown_station_trips_have_no_vehicle():
-    assert _positions(_row(status="ausgefallen")) == []
+    cancelled = _row(status="ausgefallen")
+    cancelled["stops"] = [{**s, "cancelled": True} for s in cancelled["stops"]]
+    assert _positions(cancelled) == []
     assert _positions(_row(), datetime(2026, 10, 17, 10, 0)) == []
     row = _row()
     row["stops"][0]["station_id"] = "unknown"
@@ -506,9 +508,43 @@ def test_trip_ends_give_the_terminus_and_planned_arrival():
     from hvv_map.trip_positions import _trip_ends
 
     row = {**_row(), "route_end": "2026-10-17T09:09"}  # summer time: UTC+2
-    unknown = {**_row(id="2"), "route_end": None}
+    unknown = _row(id="2")
+    unknown["stops"] = [{**s, "station_id": "nowhere"} for s in unknown["stops"]]
 
     ends = _trip_ends({"trips": [row, unknown]}, STATIONS)
 
     at = int(datetime(2026, 10, 17, 7, 9, tzinfo=timezone.utc).timestamp())
     assert ends == {"1": {"coordinates": [2, 53.5], "at": at}}
+
+
+def test_after_a_cancelled_stop_only_known_stops_count_as_served():
+    from hvv_map.trip_positions import _served
+
+    a, b = {"station": "A", "known": True}, {"station": "B", "cancelled": True}
+    c, d = {"station": "C", "known": False}, {"station": "D", "known": False}
+
+    assert _served([a, b, c, d]) == [a]
+    assert _served([a, b, c, {**d, "known": True}]) == [a, b, c, {**d, "known": True}]
+
+
+def test_partially_cancelled_trip_runs_to_its_last_served_stop():
+    row = _row(status="ausgefallen")
+    row["stops"][-1] = {**row["stops"][-1], "cancelled": True}
+
+    [between] = _positions(row)
+    [arrived] = _positions(row, datetime(2026, 10, 17, 9, 4, 40))
+
+    assert between["properties"]["label"] == "B"
+    assert arrived["properties"]["terminus"] is True
+    assert _positions(row, datetime(2026, 10, 17, 9, 7)) == []
+
+
+def test_trip_ends_at_its_last_served_stop():
+    from hvv_map.trip_positions import _trip_ends
+
+    row = _row()
+    row["stops"][-1] = {**row["stops"][-1], "cancelled": True}
+
+    ends = _trip_ends({"trips": [row]}, STATIONS)
+
+    assert ends["1"]["coordinates"] == [1, 53.5]  # B, not the cancelled C

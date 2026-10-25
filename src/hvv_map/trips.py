@@ -151,6 +151,7 @@ def _base_stations(trip: dict, course: dict | None) -> list[dict]:
                     "dep": _hm(stop.get("dep")),
                     "platform": stop.get("platform"),
                     "cancelled": bool(stop.get("cancelled")),
+                    "known": True,  # served or not, from the course
                     "time": datetime.fromisoformat(clock) if clock else None,
                     "delay": stop["dep_delay"]
                     if stop.get("dep") and stop["dep_delay"] is not None
@@ -166,6 +167,7 @@ def _base_stations(trip: dict, course: dict | None) -> list[dict]:
             "dep": None,
             "platform": None,
             "cancelled": False,
+            "known": False,
             "time": None,
             "delay": None,
         }
@@ -245,6 +247,8 @@ def _route_rows(
             "expected": live_anchor <= stop["planned"] <= window_end,
             "cancelled": bool((match or {}).get("cancelled"))
             or bool(station and station["cancelled"]),
+            # whether a live departure or the course tells if it is served
+            "known": bool(match) or bool(station and station["known"]),
             "match": _public(stop["match"]) if stop["match"] else None,
         }
 
@@ -287,6 +291,7 @@ def _route_rows(
                 "anchor": False,
                 "expected": False,
                 "cancelled": station["cancelled"],
+                "known": station["known"],
                 "match": None,
             }
         )
