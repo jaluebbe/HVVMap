@@ -55,6 +55,8 @@ ANCHOR_STATIONS_MAIN = {
     "Iserbrook",  # only trains running on to Wedel stop here
     # U1 Großhansdorf branch, single track from Buchenkamp: the passing loops
     "Buchenkamp", "Ahrensburg West", "Schmalenbeck",
+    # S1 Blankenese-Wedel, single track: the passing loops
+    "Sülldorf", "Rissen",
 } - PSEUDO_STATIONS  # fmt: skip
 MAIN_SERVICE_TYPES = ["SBAHN", "UBAHN", "AKN", "FAEHRE"]
 
