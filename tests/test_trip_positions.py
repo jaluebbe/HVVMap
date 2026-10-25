@@ -548,3 +548,59 @@ def test_trip_ends_at_its_last_served_stop():
     ends = _trip_ends({"trips": [row]}, STATIONS)
 
     assert ends["1"]["coordinates"] == [1, 53.5]  # B, not the cancelled C
+
+
+def _listing(stop, vehicles):
+    return {**stop, "match": {"vehicles": vehicles}}
+
+
+def test_unit_missing_from_the_latest_listing_counts_as_uncoupled():
+    from hvv_map.trip_positions import _dropped_units, _unit_numbers
+
+    row = _row(vehicles="DT5.1 (332), DT5.2 (460), DT5.1 (301)")
+    row["stops"][0] = _listing(row["stops"][0], "DT5.1 (332), DT5.2 (460), DT5.1 (301)")
+    row["stops"][1] = _listing(row["stops"][1], "DT5.1 (332), DT5.2 (460)")
+
+    assert {u: s["station"] for u, s in _dropped_units(row).items()} == {"301": "A"}
+    assert _unit_numbers(row) == "332 · 460"
+
+
+def test_a_unit_on_two_trips_belongs_to_the_later_one():
+    old = _row(id="24847", vehicles="DT4.1 (112), DT4.1 (106)", route_start="09:00")
+    new = _row(
+        id="livetrip:1",
+        line="U2",  # another spot, not merged as one train
+        vehicles="DT4.1 (112), DT4.1 (106)",
+        route_start="09:01",
+    )
+
+    features = _positions_of([old, new])
+
+    assert [f["properties"]["journeyID"] for f in features] == ["livetrip:1"]
+
+
+def test_uncoupled_unit_is_recorded_once_where_it_was_last_listed(monkeypatch):
+    from hvv_map import trip_positions as module
+
+    recorded = []
+    row = _row(vehicles="DT5.1 (332), DT5.1 (301)")
+    row["stops"][0] = _listing(row["stops"][0], "DT5.1 (332), DT5.1 (301)")
+    row["stops"][1] = _listing(row["stops"][1], "DT5.1 (332)")
+    redis_client = _redis_with_source_data(module)
+    monkeypatch.setattr(module, "parse_anchor", lambda data: None)
+    monkeypatch.setattr(module, "load_stations", lambda client: list(STATIONS.values()))
+    monkeypatch.setattr(module, "build_trip_table", lambda *a: {"trips": [row]})
+    monkeypatch.setattr(module, "open_units_db", lambda: object())
+    monkeypatch.setattr(
+        module,
+        "record_unit_positions",
+        lambda conn, features, *a: recorded.append(
+            [(f["properties"]["units"], f["geometry"]["coordinates"]) for f in features]
+        ),
+    )
+    state = module.PositionsState()
+
+    module.run_positions(redis_client, None, NOW, state)  # due: all, plus 301 at A
+    module.run_positions(redis_client, None, NOW, state)  # nothing new
+
+    assert recorded == [[("332", [0.625, 53.5]), ("301", [0, 53.5])]]
