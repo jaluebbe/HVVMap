@@ -1033,3 +1033,17 @@ def test_in_repeated_hour_only_for_the_ambiguous_autumn_hour():
     assert not in_repeated_hour(datetime(2026, 10, 25, 1, 59))
     assert not in_repeated_hour(datetime(2026, 10, 25, 3, 0))
     assert not in_repeated_hour(datetime(2026, 3, 29, 2, 30))
+
+
+def test_trip_end_includes_the_delay():
+    from datetime import datetime
+
+    from hvv_map.trips import trip_end
+
+    planned = datetime(2026, 10, 25, 6, 31)
+    trip = {"stops": [{"planned": planned, "match": {"delay": 420}}]}
+    course = {"stops": [{"arr": "2026-10-25T06:31", "arr_delay": 480}]}
+
+    assert trip_end(trip, None) == datetime(2026, 10, 25, 6, 38)
+    assert trip_end(trip, course) == datetime(2026, 10, 25, 6, 39)
+    assert trip_end({"stops": [{"planned": planned, "match": None}]}, None) == planned
