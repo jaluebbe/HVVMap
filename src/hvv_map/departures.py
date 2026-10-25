@@ -53,8 +53,8 @@ ANCHOR_STATIONS_MAIN = {
     "Rübenkamp (City Nord)",  # last stop before the S1 Airport/Poppenbüttel split
     "Kornweg (Klein Borstel)",  # Poppenbüttel branch: late destination changes
     "Iserbrook",  # only trains running on to Wedel stop here
-    # U1 Großhansdorf branch, single track from Buchenkamp: the crossing points
-    "Ahrensburg West", "Schmalenbeck",
+    # U1 Großhansdorf branch, single track from Buchenkamp: the passing loops
+    "Buchenkamp", "Ahrensburg West", "Schmalenbeck",
 } - PSEUDO_STATIONS  # fmt: skip
 MAIN_SERVICE_TYPES = ["SBAHN", "UBAHN", "AKN", "FAEHRE"]
 
