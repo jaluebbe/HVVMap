@@ -98,11 +98,34 @@ def _coordinates(
     return point, straight
 
 
+def _numbers(vehicles: str | None) -> list[str]:
+    """Unit numbers from a vehicles text like "DT5.1 (388), DT5.1 (340)"."""
+    return re.findall(r"\((\d+)\)", vehicles or "")
+
+
+def _dropped_units(row: dict) -> dict[str, dict]:
+    """Units a live departure of the trip listed but its latest one no longer
+    does (uncoupled on the way): unit -> the last stop that listed it."""
+    listed = [
+        s for s in row["stops"] if _numbers((s.get("match") or {}).get("vehicles"))
+    ]
+    if len(listed) < 2:
+        return {}
+    latest = set(_numbers(listed[-1]["match"]["vehicles"]))
+    dropped = {}
+    for stop in listed[:-1]:
+        for unit in _numbers(stop["match"]["vehicles"]):
+            if unit not in latest:
+                dropped[unit] = stop
+    return dropped
+
+
 def _unit_numbers(row: dict) -> str:
-    """U-Bahn unit numbers, e.g. "388 · 340" from "DT5.1 (388), DT5.1 (340)"."""
+    """U-Bahn unit numbers, e.g. "388 · 340", without uncoupled ones."""
     if row["mode"] != "U":
         return ""
-    return " · ".join(re.findall(r"\((\d+)\)", row.get("vehicles") or ""))
+    dropped = _dropped_units(row)
+    return " · ".join(u for u in _numbers(row.get("vehicles")) if u not in dropped)
 
 
 def _feature(
@@ -414,8 +437,58 @@ def build_positions(
                 )
     return {
         "type": "FeatureCollection",
-        "features": _one_per_train(features, meta),
+        "features": _one_feature_per_unit(_one_per_train(features, meta), rows),
     }
+
+
+def _one_feature_per_unit(features: list[dict], rows: list[dict]) -> list[dict]:
+    """A unit on two trips belongs to the one that started later (e.g. turned
+    back early as an extra trip); a trip left without units of its own then
+    is no train any more."""
+    starts = {r["id"]: r.get("route_start") or "" for r in rows}
+    owner: dict[str, dict] = {}
+    for feature in features:
+        start = starts.get(feature["properties"]["journeyID"], "")
+        for unit in _units_of(feature):
+            other = owner.get(unit)
+            if other is None or start > starts.get(
+                other["properties"]["journeyID"], ""
+            ):
+                owner[unit] = feature
+    kept = []
+    for feature in features:
+        units = _units_of(feature)
+        own = [u for u in units if owner[u] is feature]
+        if units and not own:
+            continue
+        feature["properties"]["units"] = " · ".join(own)
+        kept.append(feature)
+    return kept
+
+
+def _units_of(feature: dict) -> list[str]:
+    return [u for u in (feature["properties"].get("units") or "").split(" · ") if u]
+
+
+def _dropped_features(table: dict, stations: dict[str, StationInfo]) -> list[dict]:
+    """One feature per uncoupled unit at the last stop that listed it, for the
+    unit positions (see _dropped_units)."""
+    features = []
+    for row in table.get("trips", []):
+        if row["mode"] != "U":
+            continue
+        for unit, stop in _dropped_units(row).items():
+            station = stations.get(stop.get("station_id") or "")
+            if station is None:
+                continue
+            point = (station.lon, station.lat)
+            position = Position(AT_STOP)
+            feature = _feature(row, stop["station"], position, point, None, False)
+            # no trip terminus for it (unit_history): the unit stays here
+            feature["properties"]["journeyID"] = f"{row['id']}/uncoupled"
+            feature["properties"]["units"] = unit
+            features.append(feature)
+    return features
 
 
 class PositionsState:
@@ -432,6 +505,7 @@ class PositionsState:
         self.recorded = float("-inf")  # last write of the unit positions
         self.units_conn: sqlite3.Connection | None = None  # see unit_positions
         self.at_terminus: set[str] = set()  # journeys recorded at their terminus
+        self.uncoupled: set[tuple] = set()  # (unit, journey) recorded uncoupled
 
 
 def _refresh(redis_client, state: PositionsState) -> bool:
@@ -519,6 +593,13 @@ def run_positions(
     }
     arrived = [f for jid, f in terminus.items() if jid not in state.at_terminus]
     state.at_terminus = set(terminus)
+    # uncoupled units stay where they were last listed, recorded once
+    uncoupled = {
+        (f["properties"]["units"], f["properties"]["journeyID"]): f
+        for f in _dropped_features(state.table, state.stations)
+    }
+    arrived += [f for key, f in uncoupled.items() if key not in state.uncoupled]
+    state.uncoupled = set(uncoupled)
     due = time.time() - state.recorded >= RECORD_INTERVAL
     if due or arrived:
         if state.units_conn is None:
@@ -526,9 +607,9 @@ def run_positions(
         ends = _trip_ends(state.table, state.stations)
         if due:
             state.recorded = time.time()
-            record_unit_positions(
-                state.units_conn, collection["features"], state.recorded, ends
-            )
+            # arrivals and new uncoupled units after the regular positions
+            features = collection["features"] + arrived
+            record_unit_positions(state.units_conn, features, state.recorded, ends)
         else:
             record_unit_positions(state.units_conn, arrived, time.time(), ends)
     return len(collection["features"])
