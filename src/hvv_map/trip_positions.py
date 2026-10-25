@@ -149,8 +149,15 @@ def _feature(
 
 def _served(stops: list[dict]) -> list[dict]:
     """Stops from the first to the last one the train serves; cancelled stops
-    before and after are cut, the train does not run there."""
-    kept = [i for i, stop in enumerate(stops) if not stop.get("cancelled")]
+    before and after are cut, the train does not run there. After the first
+    cancelled stop, a stop counts as served only if known to be (live or
+    course): GTI flags only the departures it lists, e.g. a short turn."""
+    first = next((i for i, s in enumerate(stops) if s.get("cancelled")), len(stops))
+    kept = [
+        i
+        for i, stop in enumerate(stops)
+        if not stop.get("cancelled") and (i < first or stop.get("known", True))
+    ]
     return stops[kept[0] : kept[-1] + 1] if kept else []
 
 
@@ -357,7 +364,8 @@ def build_positions(
     skip, hidden = _drawn_by_others(rows, now)
     meta: dict[int, tuple] = {}  # see _one_per_train
     for row in rows:
-        if row["status"] in (STATUS_CANCELLED, STATUS_MISSING) or id(row) in skip:
+        # a cancelled trip still runs its served part (partial cancellation)
+        if row["status"] == STATUS_MISSING or id(row) in skip:
             continue
         ferry = row["mode"] == "FERRY"
         stops = stops_from_row(row)
@@ -465,15 +473,17 @@ def _refresh(redis_client, state: PositionsState) -> bool:
 
 
 def _trip_ends(table: dict, stations: dict[str, StationInfo]) -> dict[str, dict]:
-    """journeyID -> terminus coordinates and planned arrival (epoch), stored
-    with the unit positions, see unit_positions.unit_history."""
+    """journeyID -> last served stop's coordinates and planned time (epoch),
+    stored with the unit positions, see unit_positions.unit_history."""
     ends = {}
     for row in table.get("trips", []):
-        stops = row.get("stops") or []
+        served = _served_row(row)
+        stops = served["stops"] if served else []
         station = stations.get(stops[-1].get("station_id") or "") if stops else None
-        if station is None or not row.get("route_end"):
+        times = [s["at"] for s in stops if s.get("at")]
+        if station is None or not times:
             continue
-        end = datetime.fromisoformat(row["route_end"])
+        end = datetime.fromisoformat(max(times))
         ends[row["id"]] = {
             "coordinates": [station.lon, station.lat],
             "at": int(end.replace(tzinfo=ZoneInfo("Europe/Berlin")).timestamp()),
