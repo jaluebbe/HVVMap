@@ -710,6 +710,16 @@ def _serialized_live_trip(trip: dict) -> dict:
     }
 
 
+def in_repeated_hour(moment: datetime) -> bool:
+    """True for a naive Berlin time the autumn DST change makes ambiguous;
+    a departureList query for it does not answer for our wall clock."""
+    tz = ZoneInfo("Europe/Berlin")
+    return (
+        moment.replace(tzinfo=tz, fold=0).utcoffset()
+        > moment.replace(tzinfo=tz, fold=1).utcoffset()  # spring gap: <
+    )
+
+
 def _is_missing(trip: dict, status: str, live_fresh: bool, memory: dict | None) -> bool:
     """A trip whose anchor stop was due in the live window but never showed
     up there while the live data is fresh; or one already judged so earlier
@@ -805,6 +815,8 @@ def build_trip_table(
     live_fresh = now is None or now - live_anchor <= timedelta(
         minutes=LIVE_FRESH_MINUTES
     )
+    # live data of the repeated autumn hour is unreliable: judge nothing missing
+    judge_missing = not in_repeated_hour(live_anchor)
     per_line: dict[str, dict] = defaultdict(
         lambda: {
             "live": 0,
@@ -950,7 +962,11 @@ def build_trip_table(
                 if expected
                 else STATUS_BETWEEN
             )
-            if not matched and _is_missing(trip, status, live_fresh, memory):
+            if (
+                judge_missing
+                and not matched
+                and _is_missing(trip, status, live_fresh, memory)
+            ):
                 status = STATUS_MISSING
         vehicles = [v for s in matched for v in s["match"]["_vehicles"]]
         unique = list({(v.get("id"), v.get("number")): v for v in vehicles}.values())
