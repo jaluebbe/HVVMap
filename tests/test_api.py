@@ -28,6 +28,7 @@ def client(tmp_path, monkeypatch):
         "<html>sbahn</html>"
     )
     (tmp_path / "static" / "TS.html").write_text("<html>ts</html>")
+    (tmp_path / "static" / "flotte.html").write_text("<html>flotte</html>")
     (tmp_path / "fonts").mkdir()
 
     conn = sqlite3.connect(osm_dir / "test.mbtiles")
@@ -84,6 +85,13 @@ def test_ts_page_is_served_with_noindex(client):
     response = client.get("/TS.html", follow_redirects=False)
     assert response.status_code == 200
     assert "<html>ts</html>" in response.text
+    assert response.headers["x-robots-tag"] == "noindex, nofollow"
+
+
+def test_fleet_page_is_served_with_noindex(client):
+    response = client.get("/flotte", follow_redirects=False)
+    assert response.status_code == 200
+    assert "<html>flotte</html>" in response.text
     assert response.headers["x-robots-tag"] == "noindex, nofollow"
 
 

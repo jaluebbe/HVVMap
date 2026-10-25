@@ -93,6 +93,14 @@ async def ts_page():
     return FileResponse("static/TS.html", headers={"X-Robots-Tag": "noindex, nofollow"})
 
 
+@app.get("/flotte", include_in_schema=False)
+async def fleet_page():
+    """Internal fleet coverage page (fleet.json), noindex like TS.html."""
+    return FileResponse(
+        "static/flotte.html", headers={"X-Robots-Tag": "noindex, nofollow"}
+    )
+
+
 @app.get("/robots.txt", include_in_schema=False)
 async def robots():
     return PlainTextResponse("User-agent: *\nDisallow: /api/\n")

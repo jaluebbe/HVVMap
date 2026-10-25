@@ -150,6 +150,10 @@ they're built directly from the static feed on first run.
   counts the units ever seen per series (DT4.1-DT5.2, a series can span
   several number ranges), with the missing numbers; retired units
   (`RETIRED_UNITS`) are left out.
+- `flotte.html` - internal fleet page at `/flotte`, not linked and marked
+  `noindex`: the U-Bahn units ever seen per series as a grid and a sortable
+  table, from `fleet.json`, refreshed every minute; the legend filters by
+  status (several at once).
 - `maplibre_map_hvv_sbahn.html` - the same for the S-Bahn: `gtilive` only,
   centered on Hamburg Hbf, S1-S7 toggleable individually, destination labels
   on, no unit numbers; also served at `/sbahn`.

@@ -1,0 +1,223 @@
+<!DOCTYPE html>
+<html lang="de">
+
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width,initial-scale=1.0,viewport-fit=cover">
+    <!-- internal page: keep out of search engines -->
+    <meta name="robots" content="noindex, nofollow">
+    <meta name="theme-color" content="#1e64a0">
+    <link rel="icon" href="/static/hvv/icons/u.svg" type="image/svg+xml">
+    <title>U-Bahn-Flotte Hamburg</title>
+<style>
+/* Layout: summary strip, then one roster block per series (unit chips), then a sortable table */
+:root {
+  --bg: #f5f7fa; --surface: #ffffff; --fg: #18202b; --muted: #5d6b7c; --line: #d7dee7;
+  --accent: #1e64a0; --live: #0a8f5a; --live-bg: #dff3ea; --seen-bg: #e3ebf4; --missing: #9aa7b6;
+  --display: system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
+  --body: system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
+  --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #0f141b; --surface: #171e27; --fg: #e6ebf1; --muted: #93a1b2; --line: #2a3442;
+  --accent: #6aa8e0; --live: #4fd39a; --live-bg: #12352a; --seen-bg: #1f2b3a; --missing: #5c6a7b; color-scheme: dark } }
+:root[data-theme="dark"] {
+  --bg: #0f141b; --surface: #171e27; --fg: #e6ebf1; --muted: #93a1b2; --line: #2a3442;
+  --accent: #6aa8e0; --live: #4fd39a; --live-bg: #12352a; --seen-bg: #1f2b3a; --missing: #5c6a7b; color-scheme: dark }
+[hidden] { display: none !important; }
+body { margin: 0; background: var(--bg); color: var(--fg); font-family: var(--body); line-height: 1.45;
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); padding-block: calc(24px + env(safe-area-inset-top, 0px)) calc(48px + env(safe-area-inset-bottom, 0px)); }
+main { max-width: 1080px; margin: 0 auto; display: grid; gap: 20px; }
+h1 { font-family: var(--display); font-weight: 800; font-size: 1.5rem; margin: 0; text-wrap: balance; letter-spacing: -0.01em; }
+h2 { font-family: var(--display); font-weight: 600; font-size: 1.05rem; margin: 0; }
+.sub { color: var(--muted); margin: 4px 0 0; }
+.totals { display: grid; grid-template-columns: auto auto auto minmax(0, 1fr); gap: 6px 12px; align-items: center; font-size: 0.9rem; }
+.totals .k { font-weight: 600; }
+.totals .n { font-family: var(--mono); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.totals .n.m { color: var(--muted); }
+.bar { height: 6px; background: var(--seen-bg); border-radius: 3px; overflow: hidden; display: flex; min-width: 0; }
+.bar i { display: block; height: 100%; }
+.legend { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.series { display: grid; gap: 18px; }
+.block { display: grid; gap: 8px; }
+.block header { display: flex; flex-wrap: wrap; gap: 4px 12px; align-items: baseline; }
+.block header .meta { color: var(--muted); font-size: 0.85rem; font-family: var(--mono); font-variant-numeric: tabular-nums; }
+.chips { display: flex; flex-wrap: wrap; gap: 4px; }
+.chip { font-family: var(--mono); font-size: 0.8rem; font-variant-numeric: tabular-nums; width: 3.1em; text-align: center;
+  padding: 3px 0; border-radius: 4px; border: 1px solid transparent; cursor: default; }
+.chip.live { background: var(--live-bg); color: var(--live); border-color: var(--live); font-weight: 600; }
+.chip.seen { background: var(--seen-bg); color: var(--fg); }
+.chip.missing { color: var(--missing); border: 1px dashed var(--missing); }
+.chip.retired { color: var(--missing); text-decoration: line-through; }
+.chip.key { width: auto; padding: 3px 10px; font-family: var(--body); font-size: 0.85rem; }
+button.chip.key { cursor: pointer; font: inherit; font-family: var(--body); font-size: 0.85rem; }
+button.chip.key[aria-pressed="true"] { outline: 2px solid var(--fg); outline-offset: 1px; }
+.legend.filtering button.chip.key[aria-pressed="false"] { opacity: 0.4; }
+button.chip.key:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.hint { color: var(--muted); font-size: 0.8rem; }
+.tools { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.tools input, .tools select { font: inherit; font-size: 16px; padding: 6px 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); color: var(--fg); }
+.tools input { flex: 1 1 180px; min-width: 0; }
+.tablewrap { overflow-x: auto; background: var(--surface); border: 1px solid var(--line); border-radius: 8px; }
+table { border-collapse: collapse; width: 100%; font-size: 0.9rem; }
+th, td { text-align: left; padding: 7px 10px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+th { font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); cursor: pointer; user-select: none; position: sticky; top: 0; background: var(--surface); }
+th:focus-visible, .chip:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+td.num { font-family: var(--mono); font-variant-numeric: tabular-nums; }
+.pill { font-size: 0.75rem; padding: 1px 8px; border-radius: 999px; }
+.pill.live { background: var(--live-bg); color: var(--live); }
+.pill.seen { background: var(--seen-bg); color: var(--fg); }
+.pill.missing { color: var(--missing); border: 1px dashed var(--missing); }
+.pill.retired { color: var(--missing); }
+footer { color: var(--muted); font-size: 0.8rem; }
+</style>
+</head>
+
+<body>
+<main>
+  <div>
+    <h1>U-Bahn-Flotte Hamburg</h1>
+    <p class="sub" id="stand"></p>
+  </div>
+  <section class="totals" id="totals"></section>
+  <div class="legend">
+    <button type="button" class="chip live key" data-status="live" aria-pressed="false">fährt gerade</button>
+    <button type="button" class="chip seen key" data-status="seen" aria-pressed="false">gesehen</button>
+    <button type="button" class="chip missing key" data-status="missing" aria-pressed="false">noch nicht gesehen</button>
+    <span class="chip retired key">ausgemustert</span>
+    <span class="hint" id="hint">Antippen filtert, mehrere möglich</span>
+  </div>
+  <section class="series" id="series"></section>
+  <section class="block">
+    <h2>Alle Einheiten</h2>
+    <div class="tools">
+      <input id="q" type="search" placeholder="Nummer, Linie oder Ziel" aria-label="Einheiten filtern">
+    </div>
+    <div class="tablewrap"><table>
+      <thead><tr>
+        <th data-k="0" tabindex="0">Nr.</th><th data-k="1" tabindex="0">Serie</th><th data-k="2" tabindex="0">Status</th>
+        <th data-k="3" tabindex="0">Zuletzt gesehen</th><th data-k="4" tabindex="0">Linie</th><th data-k="5" tabindex="0">Ziel</th><th data-k="6" tabindex="0">Zugbildung</th>
+      </tr></thead>
+      <tbody id="rows"></tbody>
+    </table></div>
+  </section>
+  <footer>Quelle: hamburg-transit.de, Fahrzeugnummern aus den GTI-Abfahrtsdaten. Aktualisiert sich jede Minute; „gesehen“ heißt: seit Beginn der Aufzeichnung mindestens einmal auf einer erkannten Fahrt.</footer>
+</main>
+<script>
+// Fleet coverage from /api/hvv/gtilive/fleet.json, refreshed every minute.
+const LABEL = { live: 'fährt gerade', seen: 'gesehen', missing: 'noch nicht gesehen', retired: 'ausgemustert' };
+const REFRESH_MS = 60000;
+const fmt = new Intl.DateTimeFormat('de-DE', { timeZone: 'Europe/Berlin', weekday: 'short', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+const when = (t) => t ? fmt.format(new Date(t * 1000)) : '';
+const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
+const totalsBox = document.getElementById('totals'), seriesBox = document.getElementById('series');
+const tbody = document.getElementById('rows'), q = document.getElementById('q');
+const legend = document.querySelector('.legend'), hint = document.getElementById('hint');
+const filter = new Set();  // selected statuses; empty = all
+const shown = (s) => !filter.size || filter.has(s);
+let rows = [], sortKey = 0, asc = true;
+
+// [number, series, status, last_seen, line, label, train] per unit
+function toRows(fleet) {
+  const out = [];
+  fleet.series.forEach((s) => s.ranges.forEach(([a, b]) => {
+    for (let n = a; n <= b; n++) {
+      const u = fleet.units[String(n)];
+      if (fleet.retired.includes(n)) out.push([n, s.series, 'retired', null, null, null, null]);
+      else if (u) out.push([n, s.series, u.on_map ? 'live' : 'seen', u.last_seen, u.line, u.label, (u.train || []).join(' · ')]);
+      else out.push([n, s.series, 'missing', null, null, null, null]);
+    }
+  }));
+  return out;
+}
+
+function renderTotals(fleet) {
+  const fam = Object.entries(fleet.totals);
+  const all = fam.reduce((a, [, v]) => ({ total: a.total + v.total, seen: a.seen + v.seen, on_map: a.on_map + v.on_map }), { total: 0, seen: 0, on_map: 0 });
+  totalsBox.replaceChildren();
+  [['Gesamt', all], ...fam].forEach(([name, v]) => {
+    totalsBox.append(el('span', 'k', name), el('span', 'n', v.seen + ' / ' + v.total + ' gesehen'), el('span', 'n m', v.on_map + ' fahren'));
+    const bar = el('div', 'bar');
+    const live = el('i'); live.style.width = (100 * v.on_map / v.total) + '%'; live.style.background = 'var(--live)';
+    const seen = el('i'); seen.style.width = (100 * (v.seen - v.on_map) / v.total) + '%'; seen.style.background = 'var(--accent)';
+    bar.append(live, seen); totalsBox.append(bar);
+  });
+}
+
+function renderSeries(fleet) {
+  seriesBox.replaceChildren(...fleet.series.map((s) => {
+    const block = el('div', 'block');
+    const head = el('header');
+    head.append(el('h2', null, s.series), el('span', 'meta', s.ranges.map(([a, b]) => a === b ? a : a + '–' + b).join(', ') + ' · ' + s.seen + '/' + s.total + ' gesehen · ' + s.on_map + ' fahren'));
+    const chips = el('div', 'chips');
+    rows.filter((r) => r[1] === s.series).forEach((r) => {
+      const c = el('span', 'chip ' + r[2], String(r[0]));
+      c.dataset.status = r[2];
+      c.title = r[0] + ': ' + LABEL[r[2]] + (r[3] ? ', zuletzt ' + when(r[3]) + ' ' + (r[4] || '') + ' → ' + (r[5] || '') : '');
+      chips.append(c);
+    });
+    block.append(head, chips);
+    return block;
+  }));
+}
+
+function renderTable() {
+  const term = q.value.trim().toLowerCase();
+  const list = rows.filter((r) => r[2] !== 'retired' && shown(r[2])
+    && (!term || [r[0], r[4], r[5], r[6]].some((v) => v != null && String(v).toLowerCase().includes(term))));
+  list.sort((a, b) => {
+    const x = a[sortKey], y = b[sortKey];
+    if (x == null && y == null) return 0; if (x == null) return 1; if (y == null) return -1;
+    return (x < y ? -1 : x > y ? 1 : 0) * (asc ? 1 : -1);
+  });
+  tbody.replaceChildren(...list.map((r) => {
+    const tr = el('tr');
+    tr.append(el('td', 'num', String(r[0])), el('td', null, r[1]));
+    const st = el('td'); st.append(el('span', 'pill ' + r[2], LABEL[r[2]])); tr.append(st);
+    tr.append(el('td', 'num', when(r[3])), el('td', null, r[4] || ''), el('td', null, r[5] || ''), el('td', 'num', r[6] || ''));
+    return tr;
+  }));
+}
+
+function applyFilter() {
+  legend.classList.toggle('filtering', filter.size > 0);
+  legend.querySelectorAll('button[data-status]').forEach((b) => b.setAttribute('aria-pressed', String(filter.has(b.dataset.status))));
+  hint.textContent = filter.size ? 'Alle abwählen zeigt wieder alles' : 'Antippen filtert, mehrere möglich';
+  seriesBox.querySelectorAll('.chips .chip').forEach((c) => { c.hidden = !shown(c.dataset.status); });
+  // a series without matching units collapses entirely
+  seriesBox.querySelectorAll('.block').forEach((b) => { b.hidden = !b.querySelector('.chips .chip:not([hidden])'); });
+  renderTable();
+}
+
+async function load() {
+  try {
+    const response = await fetch('/api/hvv/gtilive/fleet.json', { cache: 'no-store' });
+    if (!response.ok) throw new Error(response.status);
+    const fleet = await response.json();
+    rows = toRows(fleet);
+    document.getElementById('stand').textContent = 'Stand: ' + when(fleet.generated_at) + ' Uhr';
+    renderTotals(fleet);
+    renderSeries(fleet);
+    applyFilter();
+  } catch (error) {
+    document.getElementById('stand').textContent = 'Daten gerade nicht erreichbar, neuer Versuch in einer Minute.';
+  }
+}
+
+legend.querySelectorAll('button[data-status]').forEach((b) => b.addEventListener('click', () => {
+  const s = b.dataset.status;
+  if (filter.has(s)) filter.delete(s); else filter.add(s);
+  applyFilter();
+}));
+document.querySelectorAll('th').forEach((th) => {
+  const go = () => { const k = +th.dataset.k; asc = sortKey === k ? !asc : true; sortKey = k; renderTable(); };
+  th.addEventListener('click', go);
+  th.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); go(); } });
+});
+q.addEventListener('input', renderTable);
+load();
+setInterval(load, REFRESH_MS);
+</script>
+</body>
+
+</html>
