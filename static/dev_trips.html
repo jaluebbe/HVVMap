@@ -358,6 +358,8 @@
 
         const esc = s => String(s ?? '').replace(/[&<>"]/g,
             c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+        // Live-ID, vehicles and destination cells of a remembered live state.
+        const earlierCells = e => `<td class="muted">${esc((e.service_ids || []).join(', '))}</td><td class="muted">${esc(e.vehicles || '')}</td><td></td>`;
         const delayText = d => d == null ? '' : (d === 0 ? '±0' : (d > 0 ? '+' : '−') + Math.round(Math.abs(d) / 60 * 10) / 10 + ' min');
         // Index of the first stop not yet reached (planned time + delay >= now),
         // -1 if the trip has ended, -2 if it has not started yet.
@@ -558,9 +560,9 @@
                         const cells = m
                             ? `<td class="ok">${esc(m.quality)}</td><td>${esc(m.service_id)}${wing}</td><td>${esc(m.vehicles)}</td><td>${esc(m.destination)}${m.destination_changed ? ' <span class="warn">≠ Plan</span>' : ''}</td>`
                             : s.cancelled_earlier
-                            ? `<td class="late" title="früher live als ausgefallen gemeldet">ausgefallen (früher)</td><td></td><td></td><td></td>`
+                            ? `<td class="late" title="früher live als ausgefallen gemeldet">ausgefallen (früher)</td>${earlierCells(s.earlier)}`
                             : s.confirmed_earlier
-                            ? `<td class="ok" title="früher live gesehen, Verspätung ${esc(delayText(s.confirmed_delay))}">bestätigt (früher)</td><td></td><td></td><td></td>`
+                            ? `<td class="ok" title="früher live gesehen, Verspätung ${esc(delayText(s.earlier.delay))}">bestätigt (früher)</td>${earlierCells(s.earlier)}`
                             : `<td class="${s.expected ? 'warn' : 'muted'}">${s.expected ? 'erwartet, nicht gesehen' : ''}</td><td></td><td></td><td></td>`;
                         return `<tr class="${s.expected ? 'expected' : ''} ${idx === nextIdx ? 'next' : ''}"><td>${esc(s.station)}</td><td>${esc(s.arr)}</td><td>${dep}</td><td>${s.cancelled || (m && m.cancelled) ? '<span class="late">ausgefallen</span>' : delayCell(s.delay)}</td><td>${esc(s.platform)}</td>${cells}</tr>`;
                     }).join('');

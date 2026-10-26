@@ -874,12 +874,17 @@ def test_live_confirmations_stay_after_leaving_the_window():
 
     a, b = table["trips"][0]["stops"]
     assert a["match"] is None and a["confirmed_earlier"] and a["known"]
-    assert a["confirmed_delay"] == 60
+    assert a["earlier"] == {
+        "delay": 60,
+        "cancelled": False,
+        "service_ids": ["900"],
+        "vehicles": "",
+    }
     assert b["match"] and not b["confirmed_earlier"]
     assert remember_confirmed(memory, table, 2.0)
-    assert confirmed_stops(memory) == {
-        "1|A|09:02": {"delay": 60, "cancelled": False},
-        "1|B|09:06": {"delay": 120, "cancelled": False},
+    assert {k: v["delay"] for k, v in confirmed_stops(memory).items()} == {
+        "1|A|09:02": 60,
+        "1|B|09:06": 120,
     }
 
 
