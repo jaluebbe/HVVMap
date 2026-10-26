@@ -18,6 +18,7 @@ from hvv_map.departures import (
     fetch_main_departures,
     fetch_r_departures,
     fetch_sev_departures,
+    fetch_u_departures,
     group_by_service,
     merge_departures,
 )
@@ -71,6 +72,7 @@ def fetch_night(
     responses = []
     for fetch in (
         lambda: fetch_main_departures(client, anchor, minutes),
+        lambda: fetch_u_departures(client, anchor, minutes),
         lambda: fetch_r_departures(client, anchor, minutes),
         lambda: fetch_sev_departures(client, redis_client, anchor, minutes),
     ):

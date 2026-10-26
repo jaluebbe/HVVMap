@@ -29,36 +29,62 @@ PSEUDO_STATIONS = {
     "Schlump - Hauptbahnhof Süd",
 }
 
-# Stations where U/S/AKN/ferry lines start or terminate - covers every
+# Every U-Bahn station: U lines are queried at all of them, in plan and live,
+# so each stop is an anchor. Fixed list: closed stations are kept, they just
+# return no departures.
+UBAHN_STATIONS = {
+    "Ahrensburg Ost", "Ahrensburg West", "Alsterdorf", "Alter Teichweg",
+    "Barmbek", "Baumwall (Elbphilharmonie)", "Berliner Tor", "Berne",
+    "Billstedt", "Borgweg (Stadtpark)", "Buchenkamp", "Buckhorn",
+    "Burgstraße", "Christuskirche", "Dehnhaide", "Elbbrücken",
+    "Emilienstraße", "Eppendorfer Baum", "Farmsen",
+    "Feldstraße (Heiligengeistfeld)", "Fuhlsbüttel", "Fuhlsbüttel Nord",
+    "Garstedt", "Großhansdorf", "Gänsemarkt (Oper)", "Habichtstraße",
+    "HafenCity Universität", "Hagenbecks Tierpark", "Hagendeel",
+    "Hallerstraße", "Hamburger Straße", "Hammer Kirche", "Hauptbahnhof Nord",
+    "Hauptbahnhof Süd", "Hoheluftbrücke", "Hoisbüttel", "Horner Rennbahn",
+    "Hudtwalckerstraße", "Joachim-Mähl-Straße", "Jungfernstieg",
+    "Kellinghusenstraße", "Kiekut", "Kiwittsmoor", "Klein Borstel",
+    "Klosterstern", "Landungsbrücken", "Langenhorn Markt", "Langenhorn Nord",
+    "Lattenkamp (Sporthalle)", "Legienstraße", "Lohmühlenstraße",
+    "Lutterothstraße", "Lübecker Straße", "Meiendorfer Weg", "Merkenstraße",
+    "Messehallen", "Meßberg", "Mundsburg", "Mönckebergstraße",
+    "Mümmelmannsberg", "Niendorf Markt", "Niendorf Nord", "Norderstedt Mitte",
+    "Ochsenzoll", "Ohlsdorf", "Ohlstedt", "Oldenfelde", "Osterstraße",
+    "Rathaus", "Rauhes Haus", "Richtweg", "Ritterstraße", "Rödingsmarkt",
+    "Saarlandstraße", "Schippelsweg", "Schlump", "Schmalenbeck",
+    "Sengelmannstraße (City Nord)", "Sierichstraße", "St.Pauli",
+    "Steinfurther Allee", "Steinstraße", "Stephansplatz (Oper/CCH)",
+    "Sternschanze (Messe)", "Straßburger Straße", "Trabrennbahn",
+    "Uhlandstraße", "Volksdorf", "Wandsbek Markt", "Wandsbek-Gartenstadt",
+    "Wandsbeker Chaussee", "Wartenau", "Überseequartier",
+}  # fmt: skip
+U_SERVICE_TYPES = ["UBAHN"]
+U_CHUNK_STATIONS = 31  # all stations in 3 requests: 90 in one time out (504)
+
+# Stations where S/AKN/ferry lines start or terminate - covers every
 # service without querying every single stop.
 ANCHOR_STATIONS_MAIN = {
     "Norderstedt Mitte", "Neumünster", "Elmshorn", "Ulzburg Süd", "Barmstedt",
-    "Ochsenzoll", "Fuhlsbüttel Nord", "Quickborner Straße", "Kaltenkirchen",
-    "Eidelstedt",
-    "Berliner Tor", "HafenCity Universität", "Teufelsbrück",
-    "Landungsbrücken Brücke 1", "Großhansdorf", "Diebsteich", "Finkenwerder",
-    "Altona", "Elbbrücken", "Othmarschen", "Billstedt", "Bad Oldesloe",
-    "Poppenbüttel", "Stade", "Buxtehude", "Lattenkamp",
+    "Quickborner Straße", "Kaltenkirchen", "Eidelstedt",
+    "Berliner Tor", "Teufelsbrück",
+    "Landungsbrücken Brücke 1", "Diebsteich", "Finkenwerder",
+    "Altona", "Elbbrücken", "Othmarschen", "Bad Oldesloe",
+    "Poppenbüttel", "Stade", "Buxtehude",
     "Landungsbrücken Brücke 3", "Ernst-August-Schleuse",
-    "Landungsbrücken Brücke 2", "Pinneberg", "Niendorf Nord", "Burgstraße",
-    "Niendorf Markt", "Wandsbek-Gartenstadt", "Harburg Rathaus",
-    "Hauptbahnhof Süd", "Farmsen", "AIRBUS", "Volksdorf", "Steinwerder",
-    "Hagenbecks Tierpark", "Barmbek", "Schlump", "Hamburg Hbf",
-    "Jungfernstieg", "Neugraben", "Neuhof", "Kellinghusenstraße",
-    "Mümmelmannsberg", "Landungsbrücken", "Elbgaustraße",
-    "Lattenkamp (Sporthalle)", "Ohlstedt", "Bergedorf",
+    "Landungsbrücken Brücke 2", "Pinneberg", "Harburg Rathaus",
+    "AIRBUS", "Steinwerder", "Barmbek", "Hamburg Hbf",
+    "Jungfernstieg", "Neugraben", "Neuhof",
+    "Landungsbrücken", "Elbgaustraße", "Bergedorf",
     "Hamburg Airport (Flughafen)", "Elbphilharmonie", "Wedel", "Blankenese",
-    "Aumühle", "Stephansplatz (Oper/CCH)", "Ohlsdorf", "Wandsbek Markt",
-    "Saarlandstraße", "dodenhof",
+    "Aumühle", "Ohlsdorf", "dodenhof",
     "Rübenkamp (City Nord)",  # last stop before the S1 Airport/Poppenbüttel split
     "Kornweg (Klein Borstel)",  # Poppenbüttel branch: late destination changes
     "Iserbrook",  # only trains running on to Wedel stop here
-    # U1 Großhansdorf branch, single track from Buchenkamp: the passing loops
-    "Buchenkamp", "Ahrensburg West", "Schmalenbeck",
     # S1 Blankenese-Wedel, single track: the passing loops
     "Sülldorf", "Rissen",
 } - PSEUDO_STATIONS  # fmt: skip
-MAIN_SERVICE_TYPES = ["SBAHN", "UBAHN", "AKN", "FAEHRE"]
+MAIN_SERVICE_TYPES = ["SBAHN", "AKN", "FAEHRE"]
 
 # Terminal/hub and subline-disambiguating stations covering the regional
 # trains in R_BAHN_LINES (Lübeck-Kücknitz tells the RE8 shuttle variants apart;
@@ -80,7 +106,7 @@ REDIS_ANNOUNCEMENT_STATIONS_KEY = "hvv:announcement_stations"
 REDIS_DAY_KEY = "hvv:departures:day:{date}"  # merged departures of one day
 REDIS_MERGED_KEY = "hvv:departures:merged"
 REDIS_BY_SERVICE_KEY = "hvv:departures:by_service"
-# The anchor time all three snapshots were queried from - needed to turn a
+# The anchor time all snapshots were queried from - needed to turn a
 # by_service stop's timeOffset (minutes from it) back into an absolute time,
 # e.g. for a departureCourse query (see gti_shapes.py).
 REDIS_ANCHOR_KEY = "hvv:departures:anchor_start"
@@ -164,12 +190,35 @@ def _store(redis_client, key: str, data: dict) -> None:
     redis_client.set(key, payload, ex=REDIS_TTL)
 
 
+def chunked(stations: set[str], size: int) -> list[set[str]]:
+    """Stations in sorted groups of at most size."""
+    names = sorted(stations)
+    return [set(names[i : i + size]) for i in range(0, len(names), size)]
+
+
 def fetch_main_departures(
     client: GtiClient, start: datetime, minutes: int = PLAN_MINUTES
 ) -> dict:
-    """departureList across every U/S/AKN/ferry anchor station."""
+    """departureList across every S/AKN/ferry anchor station."""
     request = _build_request(ANCHOR_STATIONS_MAIN, MAIN_SERVICE_TYPES, start, minutes)
     return client.send("departureList", request)
+
+
+def fetch_u_departures(
+    client: GtiClient, start: datetime, minutes: int = PLAN_MINUTES
+) -> dict:
+    """departureList across every U-Bahn station, in U_CHUNK_STATIONS groups."""
+    responses = []
+    for number, chunk in enumerate(chunked(UBAHN_STATIONS, U_CHUNK_STATIONS)):
+        if number:
+            time.sleep(1)  # 1 req/s rate limit across all GTI endpoints
+        request = _build_request(chunk, U_SERVICE_TYPES, start, minutes)
+        response = client.send("departureList", request)
+        # a missing chunk would leave a whole day of U trips without plan stops
+        if response.get("returnCode", "OK") != "OK":
+            raise RuntimeError(f"U departures: {response.get('returnCode')}")
+        responses.append(response)
+    return {"departures": merge_departures(*responses)}
 
 
 def fetch_r_departures(
@@ -226,7 +275,7 @@ def _load_data(redis_client, key: str) -> dict:
 
 def _departure_key(departure: dict) -> tuple:
     """(station id, serviceId) identifies one physical stop event - stable
-    across our three queries since they all share the same anchor time."""
+    across our queries since they all share the same anchor time."""
     station_id = (departure.get("station") or {}).get("id", "")
     return station_id, departure.get("serviceId")
 
@@ -363,6 +412,8 @@ def _anchor_set(line: dict) -> set[str]:
     the dynamic announcement-station set, not tracked here, so no anchor
     check applies to it."""
     short_info = (line.get("type") or {}).get("shortInfo")
+    if short_info == "U":
+        return UBAHN_STATIONS
     if short_info in ("RB", "RE"):
         return ANCHOR_STATIONS_R
     if short_info == "Bus":
@@ -429,9 +480,11 @@ LATE_WINDOW_HOUR = 22  # second query on a 25-hour day, see fetch_day
 def _fetch_window(
     client: GtiClient, redis_client, day_start: datetime, start: datetime, minutes: int
 ) -> list[dict]:
-    """The three queries for one window, as wall-clock offsets from day_start."""
+    """All plan queries for one window, as wall-clock offsets from day_start."""
     main = fetch_main_departures(client, start, minutes)
     time.sleep(1)  # 1 req/s rate limit across all GTI endpoints
+    ubahn = fetch_u_departures(client, start, minutes)
+    time.sleep(1)
     regional = fetch_r_departures(client, start, minutes)
     time.sleep(1)
     sev = fetch_sev_departures(client, redis_client, start, minutes) or {}
@@ -440,12 +493,12 @@ def _fetch_window(
         {**d, "timeOffset": d["timeOffset"] + shift}
         if d.get("timeOffset") is not None
         else d
-        for d in to_wall_offsets(merge_departures(main, regional, sev), start)
+        for d in to_wall_offsets(merge_departures(main, ubahn, regional, sev), start)
     ]
 
 
 def fetch_day(client: GtiClient, redis_client, day: date) -> list[dict]:
-    """Merged departures of all three queries for one calendar day. GTI takes
+    """Merged departures of all plan queries for one calendar day. GTI takes
     at most PLAN_MINUTES (elapsed); a 25-hour day gets a second window for
     its last hours."""
     start = datetime.combine(day, dtime.min)

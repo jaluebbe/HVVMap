@@ -1,4 +1,5 @@
-"""Short-window realtime departureList over the anchor stations: delays,
+"""Short-window realtime departureList over every U-Bahn station and the
+S/AKN/ferry/regional anchor stations: delays,
 vehicle models and numbers, which the daily plan snapshot (departures.py)
 cannot carry. Stored under hvv:departures:live, independent of that snapshot.
 """
@@ -17,9 +18,13 @@ from hvv_map.departures import (
     R_SERVICE_TYPES,
     REDIS_ANNOUNCEMENT_STATIONS_KEY,
     SEV_SERVICE_TYPES,
+    U_CHUNK_STATIONS,
+    U_SERVICE_TYPES,
+    UBAHN_STATIONS,
     _is_wanted_departure,
     _store,
     berlin_now,
+    chunked,
     merge_departures,
     to_wall_offsets,
 )
@@ -33,11 +38,13 @@ LIVE_WINDOW_MINUTES = 5
 LIVE_WINDOW_LONG_MINUTES = 20  # regional trains and replacement buses stop rarely
 LIVE_MAX_LIST = 2000
 
-# One request per category, covering all of its anchor stations.
 LIVE_CATEGORIES = [
+    (UBAHN_STATIONS, U_SERVICE_TYPES),
     (ANCHOR_STATIONS_MAIN, MAIN_SERVICE_TYPES),
     (ANCHOR_STATIONS_R, R_SERVICE_TYPES),
 ]
+# Without these, U and S trips would look cancelled: a failure keeps the old snapshot.
+CORE_SERVICE_TYPES = (U_SERVICE_TYPES, MAIN_SERVICE_TYPES)
 
 
 def _live_request(
@@ -63,12 +70,9 @@ LIVE_CHUNK_STATIONS = 20  # stations per request: big requests time out (504)
 LIVE_RETRY_PAUSE = 2  # seconds before the one retry of a failed request
 
 
-def _chunks(stations: set[str]) -> list[set[str]]:
-    names = sorted(stations)
-    return [
-        set(names[i : i + LIVE_CHUNK_STATIONS])
-        for i in range(0, len(names), LIVE_CHUNK_STATIONS)
-    ]
+def _chunk_size(service_types: list[str]) -> int:
+    """U stations are small: more of them fit in one request."""
+    return U_CHUNK_STATIONS if service_types == U_SERVICE_TYPES else LIVE_CHUNK_STATIONS
 
 
 def _send(client: GtiClient, request: dict) -> tuple[dict | None, str]:
@@ -91,23 +95,20 @@ def _send(client: GtiClient, request: dict) -> tuple[dict | None, str]:
 def fetch_live_departures(
     client: GtiClient, start: datetime, sev_stations: set[str] | None = None
 ) -> dict:
-    """Realtime departures in requests of at most LIVE_CHUNK_STATIONS stations
-    per category, at 1 req/s: {"departures", "anchor", "failed_requests",
-    "errors", "complete"} with timeOffsets relative to the anchor (= start).
+    """Realtime departures in chunked requests per category (see _chunk_size),
+    at 1 req/s: {"departures", "anchor", "failed_requests", "errors",
+    "complete"} with timeOffsets relative to the anchor (= start).
     sev_stations (stations of active announcements) adds a replacement-bus
-    category. "complete" is False if a request of the main category failed:
-    without it, U and S trips would look cancelled."""
+    category. "complete" is False if a request of a CORE_SERVICE_TYPES
+    category failed."""
     categories = list(LIVE_CATEGORIES)
     if sev_stations:
         categories.append((sev_stations, SEV_SERVICE_TYPES))
     responses, errors, complete, first = [], [], True, True
     for stations, service_types in categories:
-        minutes = (
-            LIVE_WINDOW_MINUTES
-            if service_types == MAIN_SERVICE_TYPES
-            else LIVE_WINDOW_LONG_MINUTES
-        )
-        chunks = _chunks(stations)
+        core = service_types in CORE_SERVICE_TYPES
+        minutes = LIVE_WINDOW_MINUTES if core else LIVE_WINDOW_LONG_MINUTES
+        chunks = chunked(stations, _chunk_size(service_types))
         for number, chunk in enumerate(chunks, start=1):
             if not first:
                 time.sleep(1)  # 1 req/s rate limit across all GTI endpoints
@@ -119,7 +120,7 @@ def fetch_live_departures(
                 errors.append(
                     f"{'/'.join(service_types)} {number}/{len(chunks)}: {error}"
                 )
-                complete = complete and service_types != MAIN_SERVICE_TYPES
+                complete = complete and not core
                 continue
             if service_types == SEV_SERVICE_TYPES:
                 response["departures"] = [

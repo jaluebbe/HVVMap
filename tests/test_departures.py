@@ -9,6 +9,7 @@ from hvv_map.departures import (
     snapshots_stale,
     ANCHOR_STATIONS_MAIN,
     ANCHOR_STATIONS_R,
+    UBAHN_STATIONS,
     _anchor_set,
     _candidate_match_ids,
     _is_subsequence,
@@ -81,7 +82,8 @@ def test_anchor_set_by_short_info():
     # departureList reports regional trains as "RB" or "RE", never "R".
     assert _anchor_set({"type": {"shortInfo": "RB"}}) == ANCHOR_STATIONS_R
     assert _anchor_set({"type": {"shortInfo": "RE"}}) == ANCHOR_STATIONS_R
-    assert _anchor_set({"type": {"shortInfo": "U"}}) == ANCHOR_STATIONS_MAIN
+    assert _anchor_set({"type": {"shortInfo": "U"}}) == UBAHN_STATIONS
+    assert _anchor_set({"type": {"shortInfo": "S"}}) == ANCHOR_STATIONS_MAIN
     assert _anchor_set({"type": {"shortInfo": "Bus"}}) == set()
 
 
@@ -389,6 +391,7 @@ def test_fetch_day_splits_a_25_hour_day_into_two_windows(monkeypatch):
         return {"departures": [{"serviceId": str(start.hour), "timeOffset": offset}]}
 
     monkeypatch.setattr(departures, "fetch_main_departures", fake)
+    monkeypatch.setattr(departures, "fetch_u_departures", lambda *a: {})
     monkeypatch.setattr(departures, "fetch_r_departures", lambda *a: {})
     monkeypatch.setattr(departures, "fetch_sev_departures", lambda *a: None)
     monkeypatch.setattr(departures.time, "sleep", lambda s: None)
@@ -402,6 +405,43 @@ def test_fetch_day_splits_a_25_hour_day_into_two_windows(monkeypatch):
     assert sorted(d["timeOffset"] for d in result) == [1350, 1379]
 
 
+def test_fetch_u_departures_covers_every_station_in_chunks(monkeypatch):
+    from hvv_map import departures
+
+    requests = []
+
+    class _Client:
+        def send(self, endpoint, request):
+            requests.append(request)
+            name = request["stations"][0]["name"]
+            return {"departures": [{"station": {"id": name}, "serviceId": "1"}]}
+
+    monkeypatch.setattr(departures.time, "sleep", lambda s: None)
+
+    result = departures.fetch_u_departures(_Client(), datetime(2026, 10, 26), 10)
+
+    assert len(requests) == 3
+    assert all(r["serviceTypes"] == ["UBAHN"] for r in requests)
+    assert all(len(r["stations"]) <= departures.U_CHUNK_STATIONS for r in requests)
+    names = {s["name"] for r in requests for s in r["stations"]}
+    assert names == UBAHN_STATIONS
+    assert len(result["departures"]) == 3
+
+
+def test_fetch_u_departures_fails_on_a_rejected_chunk(monkeypatch):
+    import pytest
+
+    from hvv_map import departures
+
+    class _Client:
+        def send(self, endpoint, request):
+            return {"returnCode": "ERROR_TEXT"}
+
+    monkeypatch.setattr(departures.time, "sleep", lambda s: None)
+    with pytest.raises(RuntimeError):
+        departures.fetch_u_departures(_Client(), datetime(2026, 10, 26), 10)
+
+
 def test_fetch_day_queries_an_ordinary_day_once(monkeypatch):
     from datetime import date
 
@@ -413,6 +453,7 @@ def test_fetch_day_queries_an_ordinary_day_once(monkeypatch):
         "fetch_main_departures",
         lambda c, start, minutes: calls.append(minutes) or {},
     )
+    monkeypatch.setattr(departures, "fetch_u_departures", lambda *a: {})
     monkeypatch.setattr(departures, "fetch_r_departures", lambda *a: {})
     monkeypatch.setattr(departures, "fetch_sev_departures", lambda *a: None)
     monkeypatch.setattr(departures.time, "sleep", lambda s: None)
