@@ -152,6 +152,7 @@ def record(redis_client, sightings: list[dict], now: float | None = None) -> int
 
 
 JOURNEY_GAP = timedelta(hours=2)  # same serviceId this much later: another run
+MIDNIGHT_GAP = timedelta(minutes=30)  # GTI renumbers trips after midnight
 
 
 def unit_journeys(redis_client, unit: str, limit: int = 30) -> list[dict]:
@@ -213,5 +214,40 @@ def unit_journeys(redis_client, unit: str, limit: int = 30) -> list[dict]:
                 "max_delay": run["max_delay"],
             }
         )
-    journeys.sort(key=lambda j: j["first"]["planned"], reverse=True)
-    return journeys[:limit]
+    journeys.sort(key=lambda j: j["first"]["planned"])
+    return _join_midnight(journeys)[::-1][:limit]
+
+
+def _join_midnight(journeys: list[dict]) -> list[dict]:
+    """One trip renumbered by GTI at midnight is one journey: same line,
+    destination and partners, the second seen shortly after the first."""
+    joined: list[dict] = []
+    for journey in journeys:
+        previous = joined[-1] if joined else None
+        if previous and _continues(previous, journey):
+            pair = (previous["max_delay"], journey["max_delay"])
+            delays = [d for d in pair if d is not None]
+            joined[-1] = {
+                **previous,
+                "service_id": f"{previous['service_id']}+{journey['service_id']}",
+                "last": journey["last"],
+                "cancelled": previous["cancelled"] or journey["cancelled"],
+                "extra": previous["extra"] or journey["extra"],
+                "max_delay": max(delays) if delays else None,
+            }
+        else:
+            joined.append(journey)
+    return joined
+
+
+def _continues(earlier: dict, later: dict) -> bool:
+    began = datetime.fromisoformat(earlier["first"]["planned"])
+    end = datetime.fromisoformat(earlier["last"]["planned"])
+    start = datetime.fromisoformat(later["first"]["planned"])
+    return (
+        earlier["line"] == later["line"]
+        and earlier["destination"] == later["destination"]
+        and earlier["with"] == later["with"]
+        and began.date() < start.date()  # midnight in between
+        and timedelta(0) <= start - end <= MIDNIGHT_GAP
+    )
