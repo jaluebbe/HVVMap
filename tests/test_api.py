@@ -118,6 +118,16 @@ def test_unit_history_leaves_out_units_on_the_map(client, monkeypatch, tmp_path)
     assert [f["properties"]["unit"] for f in data["features"]] == ["388"]
 
 
+def test_unit_journeys_are_served_for_unit_numbers_only(client, monkeypatch):
+    monkeypatch.setattr(api_module, "unit_journeys", lambda redis, unit: [{"u": unit}])
+
+    response = client.get("/api/hvv/gtilive/unit/301/journeys.json")
+
+    assert response.json() == {"unit": "301", "journeys": [{"u": "301"}]}
+    assert response.headers["x-robots-tag"] == "noindex, nofollow"
+    assert client.get("/api/hvv/gtilive/unit/x1/journeys.json").status_code == 404
+
+
 def test_fleet_is_served_with_noindex(client, monkeypatch):
     monkeypatch.setattr(api_module, "_redis_client", _FakeRedis({}))
     monkeypatch.setattr(api_module, "_unit_positions_connection", None)
