@@ -15,7 +15,7 @@ from hvv_map.departures_tree import _is_ubahn, ubahn_series
 
 STREAM_KEY = "hvv:vehicles:sightings"
 LAST_KEY = "hvv:vehicles:last"
-STREAM_MAXLEN = 50_000
+STREAM_MAXLEN = 300_000  # some days, with every U-Bahn station live
 SEEN_PREFIX = "hvv:vehicles:seen:"
 SEEN_TTL = 3600  # an unchanged sighting is not written again within this time
 

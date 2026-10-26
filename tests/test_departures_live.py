@@ -43,24 +43,23 @@ def test_fetch_live_departures_splits_each_category_into_small_requests(monkeypa
 
     expected = []
     for stations, types in live.LIVE_CATEGORIES:
-        chunks = -(-len(stations) // live.LIVE_CHUNK_STATIONS)
+        chunks = -(-len(stations) // live._chunk_size(types))
         expected += [types] * chunks
     assert [r["serviceTypes"] for _, r in client.requests] == expected
     for endpoint, request in client.requests:
         assert endpoint == "departureList"
         assert request["useRealtime"] is True
-        assert 0 < len(request["stations"]) <= live.LIVE_CHUNK_STATIONS
+        size = live._chunk_size(request["serviceTypes"])
+        assert 0 < len(request["stations"]) <= size
         assert request["maxTimeOffset"] == (
             live.LIVE_WINDOW_MINUTES
-            if request["serviceTypes"] == live.MAIN_SERVICE_TYPES
+            if request["serviceTypes"] in live.CORE_SERVICE_TYPES
             else live.LIVE_WINDOW_LONG_MINUTES
         )
         assert request["time"] == {"date": "2026-10-17", "time": "00:20:00"}
-    main = [
-        r for _, r in client.requests if r["serviceTypes"] == live.MAIN_SERVICE_TYPES
-    ]
-    names = {s["name"] for r in main for s in r["stations"]}
-    assert names == live.LIVE_CATEGORIES[0][0]
+    for stations, types in live.LIVE_CATEGORIES:
+        sent = [r for _, r in client.requests if r["serviceTypes"] == types]
+        assert {s["name"] for r in sent for s in r["stations"]} == stations
     assert data["anchor"] == {"date": "2026-10-17", "time": "00:20:00"}
     assert data["failed_requests"] == 0 and data["complete"]
 
@@ -88,13 +87,27 @@ def test_failed_request_is_retried_once(monkeypatch):
     assert data["failed_requests"] == 0 and data["complete"]
 
 
-def test_failed_main_request_makes_the_snapshot_incomplete(monkeypatch):
+def test_all_ubahn_stations_take_three_requests():
+    assert len(live.chunked(live.UBAHN_STATIONS, live.U_CHUNK_STATIONS)) == 3
+
+
+def test_failed_ubahn_request_makes_the_snapshot_incomplete(monkeypatch):
     monkeypatch.setattr(live.time, "sleep", lambda _: None)
 
     data = fetch_live_departures(_FakeClient(fail_on={0, 1}), START)
 
     assert data["failed_requests"] == 1 and not data["complete"]
-    assert data["errors"][0].startswith("SBAHN/UBAHN/AKN/FAEHRE 1/")
+    assert data["errors"][0].startswith("UBAHN 1/3")
+
+
+def test_failed_main_request_makes_the_snapshot_incomplete(monkeypatch):
+    monkeypatch.setattr(live.time, "sleep", lambda _: None)
+
+    # the U category takes the first three requests
+    data = fetch_live_departures(_FakeClient(fail_on={3, 4}), START)
+
+    assert data["failed_requests"] == 1 and not data["complete"]
+    assert data["errors"][0].startswith("SBAHN/AKN/FAEHRE 1/")
 
 
 def test_failed_regional_request_keeps_the_rest(monkeypatch):
