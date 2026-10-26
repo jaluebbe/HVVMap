@@ -40,7 +40,12 @@ from hvv_map.stations import by_id, load_stations
 from hvv_map.unit_positions import open_reader as open_unit_positions_reader
 from hvv_map.unit_positions import fleet_summary, unit_history
 from hvv_map.vehicle_sightings import unit_journeys
-from hvv_map.trips import REDIS_VEHICLES_KEY, berlin_now, build_trip_table
+from hvv_map.trips import (
+    REDIS_VEHICLES_KEY,
+    berlin_now,
+    build_trip_table,
+    confirmed_stops,
+)
 
 mimetypes.add_type("text/javascript", ".cjs")
 
@@ -366,6 +371,15 @@ def get_trips():
         plan, _read_anchor(), live_payload["data"], courses, memory, berlin_now()
     )
     return {"fetched_at": live_payload.get("fetched_at"), **table}
+
+
+@app.get("/api/hvv/live/confirmed-stops.json", tags=["hvv_live"])
+def get_confirmed_stops():
+    """Stops each trip was seen at live, kept after they left the live
+    window: "serviceId|station id|HH:MM" -> delay."""
+    raw_vehicles = _redis_client.get(REDIS_VEHICLES_KEY)
+    memory = json.loads(raw_vehicles)["data"] if raw_vehicles else {}
+    return confirmed_stops(memory)
 
 
 @app.get("/api/hvv/live/course-log.json", tags=["hvv_live"])

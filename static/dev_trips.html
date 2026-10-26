@@ -557,6 +557,10 @@
                             ? ' <span class="muted">+ ' + esc(m.aliases.map(a => a.service_id).join(', ')) + '</span>' : '';
                         const cells = m
                             ? `<td class="ok">${esc(m.quality)}</td><td>${esc(m.service_id)}${wing}</td><td>${esc(m.vehicles)}</td><td>${esc(m.destination)}${m.destination_changed ? ' <span class="warn">≠ Plan</span>' : ''}</td>`
+                            : s.cancelled_earlier
+                            ? `<td class="late" title="früher live als ausgefallen gemeldet">ausgefallen (früher)</td><td></td><td></td><td></td>`
+                            : s.confirmed_earlier
+                            ? `<td class="ok" title="früher live gesehen, Verspätung ${esc(delayText(s.confirmed_delay))}">bestätigt (früher)</td><td></td><td></td><td></td>`
                             : `<td class="${s.expected ? 'warn' : 'muted'}">${s.expected ? 'erwartet, nicht gesehen' : ''}</td><td></td><td></td><td></td>`;
                         return `<tr class="${s.expected ? 'expected' : ''} ${idx === nextIdx ? 'next' : ''}"><td>${esc(s.station)}</td><td>${esc(s.arr)}</td><td>${dep}</td><td>${s.cancelled || (m && m.cancelled) ? '<span class="late">ausgefallen</span>' : delayCell(s.delay)}</td><td>${esc(s.platform)}</td>${cells}</tr>`;
                     }).join('');

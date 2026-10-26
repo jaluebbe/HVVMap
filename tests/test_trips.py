@@ -859,6 +859,48 @@ def test_missing_trip_seen_live_after_all_is_forgotten():
     assert list(memory) == ["missing:1@2026-10-17T09:02"]
 
 
+def test_live_confirmations_stay_after_leaving_the_window():
+    from hvv_map.trips import confirmed_stops, remember_confirmed
+
+    live = {"anchor": LIVE_ANCHOR, "departures": [_live("U1", "A", 2, 6, delay=60)]}
+    memory: dict = {}
+    assert remember_confirmed(memory, build_trip_table(PLAN, PLAN_ANCHOR, live), 1.0)
+
+    later = {
+        "anchor": {"date": "2026-10-17", "time": "09:05:00"},
+        "departures": [_live("U1", "B", 1, 6, delay=120)],
+    }
+    table = build_trip_table(PLAN, PLAN_ANCHOR, later, None, memory)
+
+    a, b = table["trips"][0]["stops"]
+    assert a["match"] is None and a["confirmed_earlier"] and a["known"]
+    assert a["confirmed_delay"] == 60
+    assert b["match"] and not b["confirmed_earlier"]
+    assert remember_confirmed(memory, table, 2.0)
+    assert confirmed_stops(memory) == {
+        "1|A|09:02": {"delay": 60, "cancelled": False},
+        "1|B|09:06": {"delay": 120, "cancelled": False},
+    }
+
+
+def test_cancelled_stops_stay_cancelled_and_old_ones_expire():
+    from hvv_map.trips import CONFIRMED_MEMORY_SECONDS, remember_confirmed
+
+    cancelled = _live("U1", "A", 2, 6, cancelled=True)
+    live = {"anchor": LIVE_ANCHOR, "departures": [cancelled]}
+    memory: dict = {}
+    assert remember_confirmed(memory, build_trip_table(PLAN, PLAN_ANCHOR, live), 1)
+
+    later = {"anchor": {"date": "2026-10-17", "time": "09:05:00"}, "departures": []}
+    table = build_trip_table(PLAN, PLAN_ANCHOR, later, None, memory)
+
+    a = table["trips"][0]["stops"][0]
+    assert a["cancelled_earlier"] and a["cancelled"] and a["known"]
+    assert not a["confirmed_earlier"]
+    assert remember_confirmed(memory, {"trips": []}, 2.0 + CONFIRMED_MEMORY_SECONDS)
+    assert memory == {}
+
+
 def test_api_module_imports_without_the_gti_client_dependency():
     import subprocess
     import sys
