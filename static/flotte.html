@@ -69,6 +69,22 @@ td.num { font-family: var(--mono); font-variant-numeric: tabular-nums; }
 .pill.seen { background: var(--seen-bg); color: var(--fg); }
 .pill.missing { color: var(--missing); border: 1px dashed var(--missing); }
 .pill.retired { color: var(--missing); }
+.chip.pick { cursor: pointer; }
+.chip.pick:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.chip.open { outline: 2px solid var(--fg); outline-offset: 1px; }
+.detail { background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; display: grid; gap: 8px; }
+.detail header { display: flex; gap: 8px; align-items: baseline; justify-content: space-between; }
+.detail h3 { margin: 0; font-size: 1rem; }
+.detail .close { font: inherit; border: none; background: none; color: var(--muted); cursor: pointer; font-size: 1.1rem; padding: 0 4px; }
+.detail .empty { color: var(--muted); margin: 0; }
+.journeys { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.journeys li { display: grid; gap: 2px; padding-top: 8px; border-top: 1px solid var(--line); }
+.journeys li:first-child { border-top: none; padding-top: 0; }
+.jtop { display: flex; flex-wrap: wrap; gap: 4px 8px; align-items: baseline; }
+.jsub { color: var(--muted); font-size: 0.85rem; }
+.flag { font-size: 0.75rem; padding: 0 6px; border-radius: 999px; background: var(--seen-bg); margin-right: 4px; }
+.flag.bad { color: #b3261e; }
+td.unitlink { cursor: pointer; text-decoration: underline dotted; }
 footer { color: var(--muted); font-size: 0.8rem; }
 </style>
 </head>
@@ -154,6 +170,13 @@ function renderSeries(fleet) {
       const c = el('span', 'chip ' + r[2], String(r[0]));
       c.dataset.status = r[2];
       c.title = r[0] + ': ' + LABEL[r[2]] + (r[3] ? ', zuletzt ' + when(r[3]) + ' ' + (r[4] || '') + ' → ' + (r[5] || '') : '');
+      if (r[2] === 'live' || r[2] === 'seen') {
+        c.classList.add('pick');
+        c.tabIndex = 0;
+        c.setAttribute('role', 'button');
+        c.addEventListener('click', () => toggleUnit(String(r[0])));
+        c.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleUnit(String(r[0])); } });
+      }
       chips.append(c);
     });
     block.append(head, chips);
@@ -172,7 +195,13 @@ function renderTable() {
   });
   tbody.replaceChildren(...list.map((r) => {
     const tr = el('tr');
-    tr.append(el('td', 'num', String(r[0])), el('td', null, r[1]));
+    const num = el('td', 'num', String(r[0]));
+    if (r[2] === 'live' || r[2] === 'seen') {
+      num.classList.add('unitlink');
+      num.title = 'Letzte Fahrten zeigen';
+      num.addEventListener('click', () => { toggleUnit(String(r[0]), true); });
+    }
+    tr.append(num, el('td', null, r[1]));
     const st = el('td'); st.append(el('span', 'pill ' + r[2], LABEL[r[2]])); tr.append(st);
     tr.append(el('td', 'num', when(r[3])), el('td', null, r[4] || ''), el('td', null, r[5] || ''), el('td', 'num', r[6] || ''));
     return tr;
@@ -189,6 +218,67 @@ function applyFilter() {
   renderTable();
 }
 
+// Recent trips of one unit, below its series grid.
+let openUnit = null, openData = null;
+const dayFmt = new Intl.DateTimeFormat('de-DE', { day: '2-digit', month: '2-digit' });
+function clock(iso) {
+  const today = new Date().toLocaleDateString('sv-SE', { timeZone: 'Europe/Berlin' });
+  const day = iso.slice(0, 10) === today ? '' : dayFmt.format(new Date(iso)) + ' ';
+  return day + iso.slice(11, 16);
+}
+async function toggleUnit(unit, scroll = false) {
+  if (openUnit === unit) { openUnit = null; openData = null; placeDetail(); return; }
+  openUnit = unit; openData = null; placeDetail();
+  try {
+    const response = await fetch('/api/hvv/gtilive/unit/' + unit + '/journeys.json', { cache: 'no-store' });
+    if (!response.ok) throw new Error(response.status);
+    const data = await response.json();
+    if (openUnit === unit) { openData = data; placeDetail(); }
+  } catch (error) {
+    if (openUnit === unit) { openData = { unit, error: true }; placeDetail(); }
+  }
+  if (scroll) seriesBox.querySelector('.detail')?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+}
+function placeDetail() {
+  seriesBox.querySelectorAll('.detail').forEach((d) => d.remove());
+  seriesBox.querySelectorAll('.chip.open').forEach((c) => c.classList.remove('open'));
+  if (!openUnit) return;
+  const chip = [...seriesBox.querySelectorAll('.chip')].find((c) => c.textContent === openUnit);
+  if (!chip) return;
+  chip.classList.add('open');
+  const block = chip.closest('.block');
+  block.hidden = false;
+  const box = el('div', 'detail');
+  const head = el('header');
+  const close = el('button', 'close', '✕');
+  close.type = 'button'; close.title = 'Schließen'; close.setAttribute('aria-label', 'Schließen');
+  close.addEventListener('click', () => toggleUnit(openUnit));
+  head.append(el('h3', null, 'Letzte Fahrten von ' + openUnit), close);
+  box.append(head);
+  if (!openData) box.append(el('p', 'empty', 'Lädt …'));
+  else if (openData.error) box.append(el('p', 'empty', 'Fahrten gerade nicht abrufbar.'));
+  else if (!openData.journeys.length) box.append(el('p', 'empty', 'Keine Sichtungen mehr gespeichert.'));
+  else {
+    const list = el('ol', 'journeys');
+    openData.journeys.forEach((j) => {
+      const item = el('li');
+      const top = el('div', 'jtop');
+      top.append(el('span', 'num', clock(j.first.planned)), el('b', null, j.line), el('span', null, '→ ' + (j.destination || '')));
+      if (j.extra) top.append(el('span', 'flag', 'Sonderfahrt'));
+      if (j.cancelled) top.append(el('span', 'flag bad', 'Ausfall'));
+      if (j.max_delay >= 120) top.append(el('span', 'flag bad', '+' + Math.round(j.max_delay / 60) + ' min'));
+      const route = j.first.station === j.last.station
+        ? j.first.station + ' ' + j.first.planned.slice(11, 16)
+        : j.first.station + ' ' + j.first.planned.slice(11, 16) + ' → ' + j.last.station + ' ' + j.last.planned.slice(11, 16);
+      const sub = el('div', 'jsub', route + (j.with.length ? ' · mit ' + j.with.join(' · ') : ''));
+      item.append(top, sub);
+      list.append(item);
+    });
+    box.append(list);
+  }
+  block.append(box);
+}
+
 async function load() {
   try {
     const response = await fetch('/api/hvv/gtilive/fleet.json', { cache: 'no-store' });
@@ -198,6 +288,7 @@ async function load() {
     document.getElementById('stand').textContent = 'Stand: ' + when(fleet.generated_at) + ' Uhr';
     renderTotals(fleet);
     renderSeries(fleet);
+    placeDetail();
     applyFilter();
   } catch (error) {
     document.getElementById('stand').textContent = 'Daten gerade nicht erreichbar, neuer Versuch in einer Minute.';

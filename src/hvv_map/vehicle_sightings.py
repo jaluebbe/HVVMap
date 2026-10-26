@@ -149,3 +149,69 @@ def record(redis_client, sightings: list[dict], now: float | None = None) -> int
         pipe.hset(LAST_KEY, vehicle, value)
     pipe.execute()
     return len(changed)
+
+
+JOURNEY_GAP = timedelta(hours=2)  # same serviceId this much later: another run
+
+
+def unit_journeys(redis_client, unit: str, limit: int = 30) -> list[dict]:
+    """The unit's recent trips from the sightings stream, newest first: per
+    run of one serviceId its first and last station seen (planned times),
+    line, destination, partners and whether a stop was cancelled, the trip
+    an extra one or late."""
+    runs: list[dict] = []
+    needle = json.dumps({"vehicle": unit})[1:-1]  # cheap pre-filter
+    for _, fields in redis_client.xrange(STREAM_KEY):
+        if needle not in fields["data"]:
+            continue
+        s = json.loads(fields["data"])
+        if s["vehicle"] != unit or not s.get("planned"):
+            continue
+        planned = datetime.fromisoformat(s["planned"])
+        run = next(
+            (
+                r
+                for r in reversed(runs)
+                if r["service_id"] == str(s["service_id"])
+                and abs(planned - r["_last"]) <= JOURNEY_GAP
+            ),
+            None,
+        )
+        if run is None:
+            run = {
+                "service_id": str(s["service_id"]),
+                "line": s["line"],
+                "stops": {},
+                "with": set(),
+                "cancelled": False,
+                "extra": False,
+                "max_delay": None,
+                "_last": planned,
+            }
+            runs.append(run)
+        run["_last"] = max(run["_last"], planned)
+        run["destination"] = s["destination"]
+        run["stops"][s["station"]] = s["planned"]
+        run["with"].update(s.get("with") or [])
+        run["cancelled"] |= bool(s.get("cancelled"))
+        run["extra"] |= bool(s.get("extra"))
+        if s.get("delay") is not None:
+            run["max_delay"] = max(run["max_delay"] or 0, s["delay"])
+    journeys = []
+    for run in runs:
+        stops = sorted(run["stops"].items(), key=lambda item: item[1])
+        journeys.append(
+            {
+                "service_id": run["service_id"],
+                "line": run["line"],
+                "destination": run["destination"],
+                "first": {"station": stops[0][0], "planned": stops[0][1]},
+                "last": {"station": stops[-1][0], "planned": stops[-1][1]},
+                "with": sorted(run["with"], key=lambda u: (len(u), u)),
+                "cancelled": run["cancelled"],
+                "extra": run["extra"],
+                "max_delay": run["max_delay"],
+            }
+        )
+    journeys.sort(key=lambda j: j["first"]["planned"], reverse=True)
+    return journeys[:limit]

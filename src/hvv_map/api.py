@@ -39,6 +39,7 @@ from hvv_map.response_cache import CachedJsonResponse
 from hvv_map.stations import by_id, load_stations
 from hvv_map.unit_positions import open_reader as open_unit_positions_reader
 from hvv_map.unit_positions import fleet_summary, unit_history
+from hvv_map.vehicle_sightings import unit_journeys
 from hvv_map.trips import REDIS_VEHICLES_KEY, berlin_now, build_trip_table
 
 mimetypes.add_type("text/javascript", ".cjs")
@@ -443,6 +444,17 @@ def get_unit_history():
     raw = _redis_client.get(REDIS_POSITIONS_KEY)
     current = json.loads(raw)["data"]["features"] if raw else []
     return unit_history(_unit_positions_connection, current, time.time())
+
+
+@app.get("/api/hvv/gtilive/unit/{unit}/journeys.json", tags=["hvv_gtilive"])
+def get_unit_journeys(unit: str):
+    """A U-Bahn unit's recent trips from the vehicle sightings, for /flotte."""
+    if not unit.isdigit():
+        raise HTTPException(status_code=404, detail="unknown unit")
+    return JSONResponse(
+        {"unit": unit, "journeys": unit_journeys(_redis_client, unit)},
+        headers={"X-Robots-Tag": "noindex, nofollow"},
+    )
 
 
 @app.get("/api/hvv/gtilive/fleet.json", tags=["hvv_gtilive"])

@@ -114,3 +114,31 @@ def test_course_sightings_take_the_vehicles_of_the_whole_course():
     assert first["planned"] == "2026-10-20T15:46" and first["service_id"] == 24598
     assert second["vehicle"] == "215"
     assert course_sightings(request, {"courseElements": []}) == []
+
+
+def test_unit_journeys_group_sightings_per_trip_newest_first(redis_client):
+    from hvv_map.vehicle_sightings import record, unit_journeys
+
+    def sighting(service_id, station, planned, others=(), **extra):
+        return {
+            "vehicle": "301", "with": list(others), "line": "U3",
+            "destination": "St.Pauli", "station": station, "station_id": None,
+            "planned": f"2026-10-24T{planned}", "delay": extra.get("delay", 0),
+            "platform": None, "service_id": service_id, "number": 301, "id": None,
+            "series": None, "cancelled": False, "extra": extra.get("extra", False),
+            "source": "departureList",
+        }  # fmt: skip
+
+    record(redis_client, [sighting(20905, "Saarlandstraße", "10:29", ["460"])], 1)
+    record(redis_client, [sighting(20905, "Kellinghusenstraße", "10:34", ["460"])], 2)
+    record(redis_client, [sighting(20918, "Barmbek", "11:32", ["332", "460"])], 3)
+
+    journeys = unit_journeys(redis_client, "301")
+
+    assert [j["service_id"] for j in journeys] == ["20918", "20905"]
+    older = journeys[1]
+    assert older["first"]["station"] == "Saarlandstraße"
+    assert older["first"]["planned"] == "2026-10-24T10:29"
+    assert older["last"]["station"] == "Kellinghusenstraße"
+    assert journeys[0]["with"] == ["332", "460"]
+    assert unit_journeys(redis_client, "999") == []
