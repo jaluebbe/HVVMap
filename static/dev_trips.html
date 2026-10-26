@@ -492,7 +492,7 @@
             const stat = (v, l, title) => `<div class="stat"${title ? ` title="${esc(title)}"` : ''}><b>${v}</b><span>${l}</span></div>`;
             document.getElementById('summary').innerHTML =
                 stat(s.live_total ?? 0, 'Live-Abfahrten') +
-                stat(`${s.live_matched ?? 0} (${rate} %)`, 'gepaart', 'einem Plan-Halt zugeordnet, Flügelzeilen eingeschlossen') +
+                stat(`${s.live_matched ?? 0} (${rate} %)`, 'zugeordnet', 'einem Plan-Halt zugeordnet, Flügelzeilen eingeschlossen') +
                 stat(s.live_unmatched ?? 0, 'Plan-ID ohne Zuordnung', 'Live-Abfahrt mit einer serviceId aus dem Plan, aber ohne Plan-Partner') +
                 stat(s.trips ?? 0, 'Fahrten') +
                 stat(data.trips.filter(t => t.live_only).length, 'nur live') +
