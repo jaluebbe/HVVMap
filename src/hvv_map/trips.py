@@ -766,15 +766,18 @@ def _stop_key(stop: dict) -> str:
 
 
 def remember_confirmed(memory: dict, table: dict, now_ts: float) -> bool:
-    """Remember the stops each trip was seen at live (not cancelled), with
-    their delay, so they stay confirmed after leaving the live window.
-    True if `memory` changed."""
+    """Remember the stops each trip was seen at live, with delay and whether
+    cancelled, so they stay known after leaving the live window; the latest
+    live state of a stop wins. True if `memory` changed."""
     changed = False
     for row in table["trips"]:
         seen = {
-            _stop_key(s): s["match"].get("delay")
+            _stop_key(s): {
+                "delay": s["match"].get("delay"),
+                "cancelled": bool(s["match"].get("cancelled")),
+            }
             for s in row["stops"]
-            if s.get("match") and not s["match"].get("cancelled")
+            if s.get("match")
         }
         if not seen:
             continue
@@ -798,26 +801,32 @@ def remember_confirmed(memory: dict, table: dict, now_ts: float) -> bool:
     return changed
 
 
-def confirmed_stops(memory: dict) -> dict[str, int | None]:
-    """"serviceId|station id|HH:MM" -> delay of every remembered
-    confirmation, for static/dev_trips_departures.html."""
+def confirmed_stops(memory: dict) -> dict[str, dict]:
+    """"serviceId|station id|HH:MM" -> {"delay", "cancelled"} of every
+    remembered live state, for static/dev_trips_departures.html."""
     return {
-        f"{entry['service_id']}|{stop.replace('@', '|', 1)}": delay
+        f"{entry['service_id']}|{stop.replace('@', '|', 1)}": state
         for key, entry in memory.items()
         if key.startswith(CONFIRMED_PREFIX)
-        for stop, delay in entry["stops"].items()
+        for stop, state in entry["stops"].items()
     }
 
 
 def _mark_confirmed(stops: list[dict], confirmed: dict | None) -> None:
     """Rows without a current live match but seen live earlier get
-    "confirmed_delay" and count as known (served)."""
+    "confirmed_earlier" (served, with "confirmed_delay") or "cancelled_earlier"
+    (also marked cancelled); both count as known."""
     seen = (confirmed or {}).get("stops", {})
     for row in stops:
-        row["confirmed_earlier"] = not row["match"] and _stop_key(row) in seen
-        if row["confirmed_earlier"]:
-            row["confirmed_delay"] = seen[_stop_key(row)]
+        state = None if row["match"] else seen.get(_stop_key(row))
+        row["confirmed_earlier"] = bool(state) and not state["cancelled"]
+        row["cancelled_earlier"] = bool(state) and state["cancelled"]
+        if state:
             row["known"] = True
+        if row["confirmed_earlier"]:
+            row["confirmed_delay"] = state["delay"]
+        if row["cancelled_earlier"]:
+            row["cancelled"] = True
 
 
 LIVE_IDS_PREFIX = "ids:"  # memory key prefix, see remember_live_ids

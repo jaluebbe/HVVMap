@@ -877,21 +877,26 @@ def test_live_confirmations_stay_after_leaving_the_window():
     assert a["confirmed_delay"] == 60
     assert b["match"] and not b["confirmed_earlier"]
     assert remember_confirmed(memory, table, 2.0)
-    assert confirmed_stops(memory) == {"1|A|09:02": 60, "1|B|09:06": 120}
+    assert confirmed_stops(memory) == {
+        "1|A|09:02": {"delay": 60, "cancelled": False},
+        "1|B|09:06": {"delay": 120, "cancelled": False},
+    }
 
 
-def test_cancelled_stops_are_not_confirmed_and_old_ones_expire():
+def test_cancelled_stops_stay_cancelled_and_old_ones_expire():
     from hvv_map.trips import CONFIRMED_MEMORY_SECONDS, remember_confirmed
 
     cancelled = _live("U1", "A", 2, 6, cancelled=True)
     live = {"anchor": LIVE_ANCHOR, "departures": [cancelled]}
     memory: dict = {}
-    assert not remember_confirmed(memory, build_trip_table(PLAN, PLAN_ANCHOR, live), 1)
+    assert remember_confirmed(memory, build_trip_table(PLAN, PLAN_ANCHOR, live), 1)
 
-    live = {"anchor": LIVE_ANCHOR, "departures": [_live("U1", "A", 2, 6)]}
-    table = build_trip_table(PLAN, PLAN_ANCHOR, live)
-    remember_confirmed(memory, table, 1.0)
-    assert memory
+    later = {"anchor": {"date": "2026-10-17", "time": "09:05:00"}, "departures": []}
+    table = build_trip_table(PLAN, PLAN_ANCHOR, later, None, memory)
+
+    a = table["trips"][0]["stops"][0]
+    assert a["cancelled_earlier"] and a["cancelled"] and a["known"]
+    assert not a["confirmed_earlier"]
     assert remember_confirmed(memory, {"trips": []}, 2.0 + CONFIRMED_MEMORY_SECONDS)
     assert memory == {}
 

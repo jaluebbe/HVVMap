@@ -330,7 +330,7 @@
 
         let plan = null;
         let live = null;
-        let confirmed = {};       // "serviceId|station id|HH:MM" -> delay seen live earlier
+        let confirmed = {};       // "serviceId|station id|HH:MM" -> {delay, cancelled} seen live earlier
         const open = new Set();   // keys of expanded trips
         let courses = {};         // live serviceId -> known departureCourse
         let coursesRequested = '';
@@ -544,15 +544,16 @@
             }
             const delay = el('td');
             const key = lives.length ? null : confirmedKey(anchor);
-            const earlier = key !== null && key in confirmed;
+            const earlier = key !== null ? confirmed[key] : undefined;
             const text = lives[0] ? liveDelay(lives[0])
-                : earlier ? delayText(confirmed[key]) : delayText(courseDelay(stop));
+                : earlier ? liveDelay(earlier) : delayText(courseDelay(stop));
             if (text) delay.append(text);
             tr.append(delay);
             tr.append(el('td', null, anchor ? (anchor.plan ? anchor.plan.platform || ''
                 : unique(lives.map(l => l.planned_platform ?? l.platform))) : ''),
                 el('td', null, unique(lives.map(l => l.realtime_platform)) || stop.platform || ''),
-                earlier ? el('td', 'muted', 'früher live bestätigt')
+                earlier ? el('td', 'muted', earlier.cancelled ? 'früher live: ausgefallen'
+                    : 'früher live bestätigt')
                     : el('td', null, lives.map(l => l.direction).join(' / ')),
                 el('td', 'muted', lives.map(l => l.service_id).join(' / ')),
                 el('td', null, unique(lives.map(l => l.vehicle_numbers))));
