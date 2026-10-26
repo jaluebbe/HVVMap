@@ -811,7 +811,7 @@ def remember_confirmed(memory: dict, table: dict, now_ts: float) -> bool:
 
 
 def confirmed_stops(memory: dict) -> dict[str, dict]:
-    """"serviceId|station id|HH:MM" -> {"delay", "cancelled", "service_ids",
+    """ "serviceId|station id|HH:MM" -> {"delay", "cancelled", "service_ids",
     "vehicles"} of every remembered live state, for static/dev_trips_departures.html."""
     return {
         f"{entry['service_id']}|{stop.replace('@', '|', 1)}": state
@@ -984,7 +984,7 @@ def build_trip_table(
             entry, planned = lives[l]
             live_found.append((entry, station_id, planned))
             if not entry["extra"] and str(entry["service_id"]) in by_service:
-                live_only.append({**_public(entry), "reason": "Plan-ID ohne Paarung"})
+                live_only.append({**_public(entry), "reason": "Plan-ID ohne Zuordnung"})
 
     # Live departures without a plan partner become trips of their own,
     # unless their serviceId now belongs to a plan trip (also as wing part).

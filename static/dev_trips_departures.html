@@ -51,6 +51,13 @@
             color: var(--muted);
         }
 
+        .meta-row {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            flex-wrap: wrap;
+        }
+
         .toolbar {
             display: flex;
             flex-wrap: wrap;
@@ -149,16 +156,12 @@
             font-weight: 600;
         }
 
-        .delay.on-time {
+        .delay.ok {
             color: var(--ok);
         }
 
         .delay.late {
             color: var(--late);
-        }
-
-        .delay.early {
-            color: var(--accent);
         }
 
         .muted {
@@ -264,7 +267,10 @@
 <body>
     <header>
         <h1>Fahrten aus Abfahrten: Plan gegen Live</h1>
-        <div class="meta" id="meta">Lade ...</div>
+        <div class="meta-row">
+            <div class="meta" id="meta">Lade ...</div>
+            <label><input type="checkbox" id="auto" checked> alle 30 s aktualisieren</label>
+        </div>
         <div class="toolbar">
             <label>Verkehrsträger
                 <select id="mode"></select>
@@ -304,10 +310,10 @@
                         <th id="start-title">Start</th>
                         <th>Ziel</th>
                         <th>Ziel laut Kurs</th>
-                        <th>Plan-ServiceId</th>
+                        <th>Plan-serviceId</th>
                         <th>Live</th>
                         <th>Verspätung</th>
-                        <th>Live-ServiceId</th>
+                        <th>Live-serviceId</th>
                         <th>Fahrzeuge</th>
                     </tr>
                 </thead>
@@ -322,7 +328,8 @@
         const URL_LIVE = '/api/hvv/live/departures-live.json';
         const URL_COURSES = '/api/hvv/live/courses.json';
         const URL_CONFIRMED = '/api/hvv/live/confirmed-stops.json';
-        const LIVE_REFRESH_MS = 30000;
+        const REFRESH_MS = 30000;
+        const CLOCK_TICK_MS = 60000;
         const MODE_LABELS = {
             U: 'U-Bahn', S: 'S-Bahn', AKN: 'AKN', R: 'Regionalzüge',
             FERRY: 'Fähren', OTHER: 'Sonstige',
@@ -480,12 +487,14 @@
             return last.plan ? last.plan.direction : last.lives[0].direction;
         }
 
+        const LATE_SECONDS = 180;  // keep in sync with dev_trips.html's delay wording/threshold
+
         function delayText(seconds) {
-            if (seconds === null || seconds === undefined) return null;
-            const minutes = Math.round(seconds / 60);
-            const kind = minutes > 0 ? 'late' : minutes < 0 ? 'early' : 'on-time';
-            return el('span', 'delay ' + kind,
-                minutes === 0 ? 'pünktlich' : (minutes > 0 ? '+' : '') + minutes + ' min');
+            if (seconds == null) return null;
+            const text = seconds === 0 ? '±0'
+                : (seconds > 0 ? '+' : '−') + Math.round(Math.abs(seconds) / 60 * 10) / 10 + ' min';
+            const kind = seconds >= LATE_SECONDS ? ' late' : seconds > 0 ? '' : ' ok';
+            return el('span', 'delay' + kind, text);
         }
 
         const liveDelay = live => live.cancelled
@@ -552,18 +561,17 @@
             tr.append(el('td', null, anchor ? (anchor.plan ? anchor.plan.platform || ''
                 : unique(lives.map(l => l.planned_platform ?? l.platform))) : ''),
                 el('td', null, unique(lives.map(l => l.realtime_platform)) || stop.platform || ''),
-                earlier ? el('td', 'muted', earlier.cancelled ? 'früher live: ausgefallen'
-                    : 'früher live bestätigt')
-                    : el('td', null, lives.map(l => l.direction).join(' / ')),
                 el('td', 'muted', earlier ? (earlier.service_ids || []).join(' / ')
                     : lives.map(l => l.service_id).join(' / ')),
                 earlier ? el('td', 'muted', earlier.vehicles || '')
-                    : el('td', null, unique(lives.map(l => l.vehicle_numbers))));
+                    : el('td', null, unique(lives.map(l => l.vehicles))),
+                // no destination is remembered for stops only confirmed earlier, so this stays empty
+                el('td', null, lives.map(l => l.direction).join(' / ')));
             return tr;
         }
 
         const STOP_TITLES = ['Halt', 'Geplant', 'Verspätung', 'Gleis geplant',
-            'Gleis Echtzeit', 'Live-Ziel', 'Live-ServiceId', 'Fahrzeuge'];
+            'Gleis Echtzeit', 'serviceId', 'Fahrzeuge', 'Live-Ziel'];
 
         // Course stops of a trip; anchor stops (from the departures) are
         // marked and carry the departure data.
@@ -578,7 +586,7 @@
                 const className = index ? 'part-b' : 'part-a';
                 const label = el('tr', 'branch ' + className);
                 const td = el('td', null, '→ ' + branch.stops[branch.stops.length - 1].name +
-                    ' (Live-ServiceId ' + branch.id + ')');
+                    ' (serviceId ' + branch.id + ')');
                 td.colSpan = STOP_TITLES.length;
                 label.append(td);
                 table.append(label);
@@ -615,17 +623,21 @@
                 const tr = el('tr', (stop === next ? 'next' : '') +
                     (stop.stationId === sel.station.value ? ' chosen' : ''));
                 const lives = stop.lives;
+                const key = lives.length ? null : confirmedKey(stop);
+                const earlier = key !== null ? confirmed[key] : undefined;
                 tr.append(el('td', null, stop.station), plannedCell(stop));
                 const delay = el('td');
-                const first = lives[0] ? liveDelay(lives[0]) : null;
+                const first = lives[0] ? liveDelay(lives[0]) : earlier ? liveDelay(earlier) : null;
                 if (first) delay.append(first);
                 tr.append(delay);
                 tr.append(el('td', null, stop.plan ? stop.plan.platform || ''
                     : unique(lives.map(l => l.planned_platform ?? l.platform))),
                     el('td', null, unique(lives.map(l => l.realtime_platform))),
-                    el('td', null, lives.map(l => l.direction).join(' / ')),
-                    el('td', 'muted', lives.map(l => l.service_id).join(' / ')),
-                    el('td', null, unique(lives.map(l => l.vehicle_numbers))));
+                    el('td', 'muted', earlier ? (earlier.service_ids || []).join(' / ')
+                        : lives.map(l => l.service_id).join(' / ')),
+                    earlier ? el('td', 'muted', earlier.vehicles || '')
+                        : el('td', null, unique(lives.map(l => l.vehicles))),
+                    el('td', null, lives.map(l => l.direction).join(' / ')));
                 table.append(tr);
             }
             return table;
@@ -746,7 +758,11 @@
                     ? unique(shown.lives.map(l => l.realtime_platform ?? l.platform)) : shown.station));
                 tr.append(delay);
                 tr.append(el('td', 'muted', liveIds.join(' / ')));
-                tr.append(el('td', null, unique(group.lives.map(l => l.vehicle_numbers))));
+                const ownVehicles = unique(group.lives.map(l => l.vehicles));
+                // no live vehicles for this trip right now: fall back to the last confirmed ones
+                const earlierVehicles = !ownVehicles
+                    && trip.stops.map(s => confirmed[confirmedKey(s)]?.vehicles).find(Boolean);
+                tr.append(el('td', ownVehicles ? null : 'muted', ownVehicles || earlierVehicles || ''));
                 body.append(tr);
                 if (open.has(group.key)) {
                     const detail = el('tr', 'stops');
@@ -817,25 +833,28 @@
             }
             renderMeta();
             const saved = new URLSearchParams(location.search);
+            if (saved.get('past')) sel.past.value = saved.get('past');
+            if (saved.get('range')) sel.range.value = saved.get('range');
             fillModes();
             if (saved.get('mode')) { sel.mode.value = saved.get('mode'); fillLines(); }
             if (saved.get('line')) { sel.line.value = saved.get('line'); fillStations(); }
             if (saved.get('station')) { sel.station.value = saved.get('station'); render(); }
-            setInterval(refreshLive, LIVE_REFRESH_MS);
-            setInterval(render, 60000);
+            setInterval(() => document.getElementById('auto').checked && refreshLive(), REFRESH_MS);
+            setInterval(render, CLOCK_TICK_MS);
         }
 
-        function remember() {
+        function rememberFilters() {
             history.replaceState(null, '', '?' + new URLSearchParams({
                 mode: sel.mode.value, line: sel.line.value, station: sel.station.value,
+                past: sel.past.value, range: sel.range.value,
             }));
         }
 
-        sel.mode.addEventListener('change', () => { fillLines(); remember(); });
-        sel.line.addEventListener('change', () => { fillStations(); remember(); });
-        sel.station.addEventListener('change', () => { render(); remember(); });
-        sel.past.addEventListener('change', render);
-        sel.range.addEventListener('change', render);
+        sel.mode.addEventListener('change', () => { fillLines(); rememberFilters(); });
+        sel.line.addEventListener('change', () => { fillStations(); rememberFilters(); });
+        sel.station.addEventListener('change', () => { render(); rememberFilters(); });
+        sel.past.addEventListener('change', () => { render(); rememberFilters(); });
+        sel.range.addEventListener('change', () => { render(); rememberFilters(); });
         start();
     </script>
 </body>

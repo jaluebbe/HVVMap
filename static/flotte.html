@@ -31,6 +31,7 @@ main { max-width: 1080px; margin: 0 auto; display: grid; gap: 20px; }
 h1 { font-family: var(--display); font-weight: 800; font-size: 1.5rem; margin: 0; text-wrap: balance; letter-spacing: -0.01em; }
 h2 { font-family: var(--display); font-weight: 600; font-size: 1.05rem; margin: 0; }
 .sub { color: var(--muted); margin: 4px 0 0; }
+.stand-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .totals { display: grid; grid-template-columns: auto auto auto minmax(0, 1fr); gap: 6px 12px; align-items: center; font-size: 0.9rem; }
 .totals .k { font-weight: 600; }
 .totals .n { font-family: var(--mono); font-variant-numeric: tabular-nums; white-space: nowrap; }
@@ -93,7 +94,10 @@ footer { color: var(--muted); font-size: 0.8rem; }
 <main>
   <div>
     <h1>U-Bahn-Flotte Hamburg</h1>
-    <p class="sub" id="stand"></p>
+    <p class="sub stand-row">
+      <span id="stand"></span>
+      <label><input type="checkbox" id="auto" checked> alle 60 s aktualisieren</label>
+    </p>
   </div>
   <section class="totals" id="totals"></section>
   <div class="legend">
@@ -307,7 +311,7 @@ document.querySelectorAll('th').forEach((th) => {
 });
 q.addEventListener('input', renderTable);
 load();
-setInterval(load, REFRESH_MS);
+setInterval(() => document.getElementById('auto').checked && load(), REFRESH_MS);
 </script>
 </body>
 

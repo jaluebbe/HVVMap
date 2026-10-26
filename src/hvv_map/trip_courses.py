@@ -231,7 +231,9 @@ def course_jobs(live: dict | None, cached: dict, now: datetime, now_ts: float):
             else (
                 REASON_REGIONAL
                 if regional
-                else REASON_DELAYED if delayed else REASON_AGE
+                else REASON_DELAYED
+                if delayed
+                else REASON_AGE
             )
         )
         order = (not (regional or delayed), entry["fetched_at"])
