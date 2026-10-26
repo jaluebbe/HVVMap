@@ -267,10 +267,10 @@ function placeDetail() {
       if (j.extra) top.append(el('span', 'flag', 'Sonderfahrt'));
       if (j.cancelled) top.append(el('span', 'flag bad', 'Ausfall'));
       if (j.max_delay >= 120) top.append(el('span', 'flag bad', '+' + Math.round(j.max_delay / 60) + ' min'));
-      const route = j.first.station === j.last.station
-        ? j.first.station + ' ' + j.first.planned.slice(11, 16)
-        : j.first.station + ' ' + j.first.planned.slice(11, 16) + ' → ' + j.last.station + ' ' + j.last.planned.slice(11, 16);
-      const sub = el('div', 'jsub', route + (j.with.length ? ' · mit ' + j.with.join(' · ') : ''));
+      // stations where the trip was seen, not its start and end
+      const seen = j.first.station + ' ' + j.first.planned.slice(11, 16)
+        + (j.first.station === j.last.station ? '' : ' … ' + j.last.station + ' ' + j.last.planned.slice(11, 16));
+      const sub = el('div', 'jsub', 'gesehen: ' + seen + (j.with.length ? ' · mit ' + j.with.join(' · ') : ''));
       item.append(top, sub);
       list.append(item);
     });

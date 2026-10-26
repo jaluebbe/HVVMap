@@ -142,3 +142,31 @@ def test_unit_journeys_group_sightings_per_trip_newest_first(redis_client):
     assert older["last"]["station"] == "Kellinghusenstraße"
     assert journeys[0]["with"] == ["332", "460"]
     assert unit_journeys(redis_client, "999") == []
+
+
+def test_unit_journeys_join_a_trip_renumbered_at_midnight(redis_client):
+    from hvv_map.vehicle_sightings import record, unit_journeys
+
+    def sighting(service_id, station, planned, destination="Norderstedt Mitte"):
+        return {
+            "vehicle": "210", "with": ["216"], "line": "U1",
+            "destination": destination, "station": station, "station_id": None,
+            "planned": planned, "delay": 0, "platform": None,
+            "service_id": service_id, "number": 210, "id": None, "series": None,
+            "cancelled": False, "extra": False, "source": "departureList",
+        }  # fmt: skip
+
+    record(redis_client, [sighting(1, "Ohlstedt", "2026-10-25T23:00")], 1)
+    record(redis_client, [sighting(1, "Fuhlsbüttel Nord", "2026-10-26T00:01")], 2)
+    record(redis_client, [sighting(2, "Ochsenzoll", "2026-10-26T00:09")], 3)
+    record(
+        redis_client,
+        [sighting(3, "Norderstedt Mitte", "2026-10-26T00:26", "Ochsenzoll")],
+        4,
+    )
+
+    journeys = unit_journeys(redis_client, "210")
+
+    assert [j["service_id"] for j in journeys] == ["3", "1+2"]
+    assert journeys[1]["first"]["station"] == "Ohlstedt"
+    assert journeys[1]["last"]["station"] == "Ochsenzoll"
