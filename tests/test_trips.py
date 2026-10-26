@@ -788,7 +788,7 @@ def test_unpaired_departure_with_a_plan_service_id_is_reported():
     table = build_trip_table(plan, PLAN_ANCHOR, live)
 
     assert [t["service_id"] for t in table["trips"] if t["live_only"]] == ["77"]
-    assert [e["reason"] for e in table["live_only"]] == ["Plan-ID ohne Paarung"]
+    assert [e["reason"] for e in table["live_only"]] == ["Plan-ID ohne Zuordnung"]
 
 
 def _missing_plan():

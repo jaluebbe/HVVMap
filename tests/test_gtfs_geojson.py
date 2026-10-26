@@ -426,4 +426,3 @@ def test_straight_run_stays_when_the_real_track_is_elsewhere():
     lines = build_lines_geojson(schedule, reference_date=date(2025, 6, 2))["features"]
 
     assert sorted(f["properties"]["straight"] for f in lines) == [False, True]
-

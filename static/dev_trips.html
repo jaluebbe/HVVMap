@@ -50,6 +50,13 @@
             color: var(--muted);
         }
 
+        .meta-row {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            flex-wrap: wrap;
+        }
+
         .toolbar {
             display: flex;
             flex-wrap: wrap;
@@ -329,11 +336,14 @@
 <body>
     <header>
         <h1>Fahrten: Plan gegen Echtzeit</h1>
-        <div class="meta" id="meta">lade …</div>
+        <div class="meta-row">
+            <div class="meta" id="meta">lade …</div>
+            <label><input type="checkbox" id="auto" checked> alle 30 s aktualisieren</label>
+        </div>
         <div class="toolbar">
             <span class="tabs">
                 <button data-tab="trips" class="active">Fahrten</button>
-                <button data-tab="live_only" title="Live-Abfahrten mit Plan-serviceId ohne Plan-Partner">Ungepaart</button>
+                <button data-tab="live_only" title="Live-Abfahrten mit Plan-serviceId ohne Plan-Partner">Nicht zugeordnet</button>
             </span>
             <select id="mode"></select>
             <select id="line"></select>
@@ -342,7 +352,6 @@
             <input type="search" id="q" placeholder="Suche (Ziel, Haltestelle, ID) …">
             <input type="search" id="vehicle" class="narrow" placeholder="Fahrzeug …">
             <label><input type="checkbox" id="running"> nur laufende Fahrten (±<input type="number" id="buffer" value="5" min="0" max="60" style="width:3.2em"> min)</label>
-            <label><input type="checkbox" id="auto" checked> alle 30 s</label>
         </div>
     </header>
     <main>
@@ -352,13 +361,15 @@
     </main>
     <script>
         const ENDPOINT = '/api/hvv/live/trips.json';
+        const REFRESH_MS = 30000;
         let data = null;
         let tab = 'trips';
         const open = new Set();
+        let filtersRestored = false;
 
         const esc = s => String(s ?? '').replace(/[&<>"]/g,
             c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
-        // Live-ID, vehicles and destination cells of a remembered live state.
+        // serviceId, vehicles and destination cells of a remembered live state.
         const earlierCells = e => `<td class="muted">${esc((e.service_ids || []).join(', '))}</td><td class="muted">${esc(e.vehicles || '')}</td><td></td>`;
         const delayText = d => d == null ? '' : (d === 0 ? '±0' : (d > 0 ? '+' : '−') + Math.round(Math.abs(d) / 60 * 10) / 10 + ' min');
         // Index of the first stop not yet reached (planned time + delay >= now),
@@ -383,6 +394,7 @@
                 const res = await fetch(ENDPOINT);
                 if (!res.ok) throw new Error('HTTP ' + res.status);
                 data = await res.json();
+                if (!filtersRestored) { filtersRestored = true; restoreFilters(); }
                 render();
             } catch (e) {
                 document.getElementById('content').innerHTML =
@@ -433,6 +445,27 @@
             setOptions('dest', 'Alle Ziele', [...new Set(dests.filter(Boolean))].sort(byName));
         }
 
+        // Dropdown selections survive a reload via the URL (mode cascades to line to dest).
+        function restoreFilters() {
+            const saved = new URLSearchParams(location.search);
+            fillSelects();
+            if (saved.get('mode')) document.getElementById('mode').value = saved.get('mode');
+            fillDependentSelects();
+            if (saved.get('line')) document.getElementById('line').value = saved.get('line');
+            fillDependentSelects();
+            if (saved.get('dest')) document.getElementById('dest').value = saved.get('dest');
+            if (saved.get('status')) document.getElementById('status').value = saved.get('status');
+        }
+
+        function rememberFilters() {
+            history.replaceState(null, '', '?' + new URLSearchParams({
+                mode: document.getElementById('mode').value,
+                line: document.getElementById('line').value,
+                dest: document.getElementById('dest').value,
+                status: document.getElementById('status').value,
+            }));
+        }
+
         function renderWarnings() {
             const warnings = [];
             const s = data.summary || {};
@@ -460,7 +493,7 @@
             document.getElementById('summary').innerHTML =
                 stat(s.live_total ?? 0, 'Live-Abfahrten') +
                 stat(`${s.live_matched ?? 0} (${rate} %)`, 'gepaart', 'einem Plan-Halt zugeordnet, Flügelzeilen eingeschlossen') +
-                stat(s.live_unmatched ?? 0, 'Plan-ID ohne Paarung', 'Live-Abfahrt mit einer serviceId aus dem Plan, aber ohne Plan-Partner') +
+                stat(s.live_unmatched ?? 0, 'Plan-ID ohne Zuordnung', 'Live-Abfahrt mit einer serviceId aus dem Plan, aber ohne Plan-Partner') +
                 stat(s.trips ?? 0, 'Fahrten') +
                 stat(data.trips.filter(t => t.live_only).length, 'nur live') +
                 stat(s.confirmed ?? 0, 'bestätigt') +
@@ -469,7 +502,7 @@
                 stat(s.cancelled ?? 0, 'ausgefallen') +
                 stat(s.missing ?? 0, 'vermutlich ausgefallen', 'erwartet, nie gesehen') +
                 stat(s.extra ?? 0, 'Zusatzfahrten') +
-                stat(q, 'Paarung');
+                stat(q, 'Zuordnung');
             document.getElementById('meta').textContent =
                 `Live-Anker ${s.live_anchor || '?'} · Plan-Anker ${s.plan_anchor || '?'}` +
                 (data.fetched_at ? ` · Live-Stand ${new Date(data.fetched_at * 1000).toLocaleTimeString('de-DE')}` : '');
@@ -492,7 +525,7 @@
             if (a.shared_until) parts.push(`identisch bis ${esc(a.shared_until)}`);
             if (a.shared_from) parts.push(`identisch ab ${esc(a.shared_from)}`);
             const note = parts.join(', ') || 'nicht vergleichbar';
-            return `<div class="alias"><h4>Live-ID ${esc(a.service_id)} → ${esc(a.destination)} <span class="muted">(${note})</span>${asOf(a.fetched_at)}${a.vehicles ? ' <span class="muted">· ' + esc(a.vehicles) + '</span>' : ''}</h4>` +
+            return `<div class="alias"><h4>Live-serviceId ${esc(a.service_id)} → ${esc(a.destination)} <span class="muted">(${note})</span>${asOf(a.fetched_at)}${a.vehicles ? ' <span class="muted">· ' + esc(a.vehicles) + '</span>' : ''}</h4>` +
                 `<table class="inner small"><tr><th>Halt</th><th>an</th><th>ab</th><th>Verspätung</th><th>Gleis</th></tr>${rows}</table></div>`;
         }
 
@@ -521,9 +554,9 @@
         function idLine(t) {
             const parts = [];
             parts.push(t.live_only ? 'nur live' : `Plan-ID <b>${esc(t.service_id)}</b>`);
-            if ((t.primary_ids || []).length) parts.push(`Live-ID <b>${esc(t.primary_ids.join(', '))}</b>`);
+            if ((t.primary_ids || []).length) parts.push(`Live-serviceId <b>${esc(t.primary_ids.join(', '))}</b>`);
             if ((t.aliases || []).length) parts.push(`Flügel-ID <b>${esc(t.aliases.map(a => a.service_id).join(', '))}</b>`);
-            if (t.course_id) parts.push(`Verlauf von Live-ID <b>${esc(t.course_id)}</b>${t.course_failed ? failedAt(t.course_fetched_at) : asOf(t.course_fetched_at)}`);
+            if (t.course_id) parts.push(`Verlauf von Live-serviceId <b>${esc(t.course_id)}</b>${t.course_failed ? failedAt(t.course_fetched_at) : asOf(t.course_fetched_at)}`);
             else parts.push('<span class="muted">kein Fahrtverlauf, Zeiten zwischen Ankern interpoliert</span>');
             if (t.destination_announced && t.destination_announced !== t.destination) {
                 parts.push(`<span class="warn">angekündigt: ${esc(t.destination_announced)}</span>`);
@@ -566,7 +599,7 @@
                             : `<td class="${s.expected ? 'warn' : 'muted'}">${s.expected ? 'erwartet, nicht gesehen' : ''}</td><td></td><td></td><td></td>`;
                         return `<tr class="${s.expected ? 'expected' : ''} ${idx === nextIdx ? 'next' : ''}"><td>${esc(s.station)}</td><td>${esc(s.arr)}</td><td>${dep}</td><td>${s.cancelled || (m && m.cancelled) ? '<span class="late">ausgefallen</span>' : delayCell(s.delay)}</td><td>${esc(s.platform)}</td>${cells}</tr>`;
                     }).join('');
-                    html += `<tr class="detail"><td colspan="7">${idLine(t)}<div class="cols"><div class="alias"><table class="inner small"><tr><th>Halt</th><th>an</th><th>ab</th><th>Verspätung</th><th>Gleis</th><th>Paarung</th><th>Live-ID</th><th>Fahrzeuge</th><th>Live-Ziel</th></tr>${stops}</table></div>${(t.alias_courses || []).map(aliasTable).join('')}</div><div class="muted small">~ interpoliert zwischen Ankern · grau: gemeinsamer Abschnitt der Flügelteile</div></td></tr>`;
+                    html += `<tr class="detail"><td colspan="7">${idLine(t)}<div class="cols"><div class="alias"><table class="inner small"><tr><th>Halt</th><th>an</th><th>ab</th><th>Verspätung</th><th>Gleis</th><th>Zuordnung</th><th>serviceId</th><th>Fahrzeuge</th><th>Live-Ziel</th></tr>${stops}</table></div>${(t.alias_courses || []).map(aliasTable).join('')}</div><div class="muted small">~ interpoliert zwischen Ankern · grau: gemeinsamer Abschnitt der Flügelteile</div></td></tr>`;
                 }
                 return html;
             }).join('');
@@ -595,7 +628,7 @@
                     (!dest || e.destination === dest) &&
                     (!q || [e.destination, e.station, e.service_id].join(' ').toLowerCase().includes(q)) &&
                     (!vehicle || (e.vehicles || '').toLowerCase().includes(vehicle)));
-                box.innerHTML = `<div class="scroll"><table><tr><th>Plan</th><th>Linie</th><th>Halt</th><th>Ziel</th><th>Gleis</th><th>Verspätung</th><th>Fahrzeuge</th><th>Grund</th><th>Live-ID</th></tr>` +
+                box.innerHTML = `<div class="scroll"><table><tr><th>Plan</th><th>Linie</th><th>Halt</th><th>Ziel</th><th>Gleis</th><th>Verspätung</th><th>Fahrzeuge</th><th>Grund</th><th>serviceId</th></tr>` +
                     rows.map(e => `<tr><td>${esc(e.planned)}</td><td><b>${esc(e.line)}</b></td><td>${esc(e.station)}</td><td>${esc(e.destination)}</td><td>${esc(e.platform)}</td><td>${esc(delayText(e.delay))}</td><td>${esc(e.vehicles)}</td><td class="warn">${esc(e.reason)}</td><td class="muted">${esc(e.service_id)}</td></tr>`).join('') +
                     '</table></div>' + (rows.length ? '' : '<div class="err muted">Keine Einträge.</div>');
                 return;
@@ -644,7 +677,8 @@
         window.addEventListener('resize', setHeadHeight);
         setHeadHeight();
         ['mode', 'line', 'dest', 'status', 'q', 'vehicle', 'running', 'buffer'].forEach(id => document.getElementById(id).addEventListener('input', () => data && render()));
-        setInterval(() => document.getElementById('auto').checked && load(), 30000);
+        ['mode', 'line', 'dest', 'status'].forEach(id => document.getElementById(id).addEventListener('input', rememberFilters));
+        setInterval(() => document.getElementById('auto').checked && load(), REFRESH_MS);
         load();
     </script>
 </body>
