@@ -321,6 +321,7 @@
         const URL_PLAN = '/api/hvv/live/departures-by-station.json';
         const URL_LIVE = '/api/hvv/live/departures-live.json';
         const URL_COURSES = '/api/hvv/live/courses.json';
+        const URL_CONFIRMED = '/api/hvv/live/confirmed-stops.json';
         const LIVE_REFRESH_MS = 30000;
         const MODE_LABELS = {
             U: 'U-Bahn', S: 'S-Bahn', AKN: 'AKN', R: 'Regionalzüge',
@@ -329,6 +330,7 @@
 
         let plan = null;
         let live = null;
+        let confirmed = {};       // "serviceId|station id|HH:MM" -> delay seen live earlier
         const open = new Set();   // keys of expanded trips
         let courses = {};         // live serviceId -> known departureCourse
         let coursesRequested = '';
@@ -489,6 +491,10 @@
         const liveDelay = live => live.cancelled
             ? el('span', 'delay late', 'ausgefallen') : delayText(live.delay);
 
+        // Key of a plan stop in `confirmed`, or null without plan departure.
+        const confirmedKey = stop => stop?.plan
+            ? `${stop.plan.service_id}|${stop.stationId}|${stop.plan.time}` : null;
+
         const unique = values => [...new Set(values.filter(Boolean))].join(' / ');
 
         // One planned time per stop: the live planned time, with the plan time
@@ -537,13 +543,17 @@
                 tr.append(el('td', anchor ? 'time' : '', courseTime(stop)));
             }
             const delay = el('td');
-            const text = lives[0] ? liveDelay(lives[0]) : delayText(courseDelay(stop));
+            const key = lives.length ? null : confirmedKey(anchor);
+            const earlier = key !== null && key in confirmed;
+            const text = lives[0] ? liveDelay(lives[0])
+                : earlier ? delayText(confirmed[key]) : delayText(courseDelay(stop));
             if (text) delay.append(text);
             tr.append(delay);
             tr.append(el('td', null, anchor ? (anchor.plan ? anchor.plan.platform || ''
                 : unique(lives.map(l => l.planned_platform ?? l.platform))) : ''),
                 el('td', null, unique(lives.map(l => l.realtime_platform)) || stop.platform || ''),
-                el('td', null, lives.map(l => l.direction).join(' / ')),
+                earlier ? el('td', 'muted', 'früher live bestätigt')
+                    : el('td', null, lives.map(l => l.direction).join(' / ')),
                 el('td', 'muted', lives.map(l => l.service_id).join(' / ')),
                 el('td', null, unique(lives.map(l => l.vehicle_numbers))));
             return tr;
@@ -775,9 +785,18 @@
             return response.json();
         }
 
+        // Remembered confirmations are a bonus: the page works without them.
+        async function loadConfirmed() {
+            try {
+                confirmed = await load(URL_CONFIRMED);
+            } catch (error) {
+                confirmed = {};
+            }
+        }
+
         async function refreshLive() {
             try {
-                live = await load(URL_LIVE);
+                [live] = await Promise.all([load(URL_LIVE), loadConfirmed()]);
                 coursesRequested = '';
                 renderMeta();
                 render();
@@ -788,7 +807,7 @@
 
         async function start() {
             try {
-                [plan, live] = await Promise.all([load(URL_PLAN), load(URL_LIVE)]);
+                [plan, live] = await Promise.all([load(URL_PLAN), load(URL_LIVE), loadConfirmed()]);
             } catch (error) {
                 document.getElementById('meta').textContent = String(error);
                 return;

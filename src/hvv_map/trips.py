@@ -757,6 +757,69 @@ def remember_missing(memory: dict, table: dict, now_ts: float) -> bool:
     return changed
 
 
+CONFIRMED_PREFIX = "confirmed:"  # memory key prefix, see remember_confirmed
+CONFIRMED_MEMORY_SECONDS = 3 * 3600
+
+
+def _stop_key(stop: dict) -> str:
+    return f"{stop.get('station_id')}@{stop.get('planned')}"
+
+
+def remember_confirmed(memory: dict, table: dict, now_ts: float) -> bool:
+    """Remember the stops each trip was seen at live (not cancelled), with
+    their delay, so they stay confirmed after leaving the live window.
+    True if `memory` changed."""
+    changed = False
+    for row in table["trips"]:
+        seen = {
+            _stop_key(s): s["match"].get("delay")
+            for s in row["stops"]
+            if s.get("match") and not s["match"].get("cancelled")
+        }
+        if not seen:
+            continue
+        key = CONFIRMED_PREFIX + row["course_key"]
+        entry = memory.get(key) or {
+            "service_id": str(row.get("service_id")),
+            "stops": {},
+        }
+        stops = {**entry["stops"], **seen}
+        if stops != entry["stops"]:
+            memory[key] = {**entry, "stops": stops, "seen_at": now_ts}
+            changed = True
+    for key in [
+        key
+        for key, entry in memory.items()
+        if key.startswith(CONFIRMED_PREFIX)
+        and now_ts - entry["seen_at"] > CONFIRMED_MEMORY_SECONDS
+    ]:
+        del memory[key]
+        changed = True
+    return changed
+
+
+def confirmed_stops(memory: dict) -> dict[str, int | None]:
+    """"serviceId|station id|HH:MM" -> delay of every remembered
+    confirmation, for static/dev_trips_departures.html."""
+    return {
+        f"{entry['service_id']}|{stop.replace('@', '|', 1)}": delay
+        for key, entry in memory.items()
+        if key.startswith(CONFIRMED_PREFIX)
+        for stop, delay in entry["stops"].items()
+    }
+
+
+def _mark_confirmed(stops: list[dict], confirmed: dict | None) -> None:
+    """Rows without a current live match but seen live earlier get
+    "confirmed_delay" and count as known (served)."""
+    seen = (confirmed or {}).get("stops", {})
+    for row in stops:
+        row["confirmed_earlier"] = not row["match"] and _stop_key(row) in seen
+        if row["confirmed_earlier"]:
+            row["confirmed_delay"] = seen[_stop_key(row)]
+            row["known"] = True
+
+
 LIVE_IDS_PREFIX = "ids:"  # memory key prefix, see remember_live_ids
 
 
@@ -990,6 +1053,7 @@ def build_trip_table(
             or trip["stops"]
         )
         stops, outside = _route_rows(trip, live_anchor, window_end, course)
+        _mark_confirmed(stops, memory.get(CONFIRMED_PREFIX + course_key(trip)))
         carry_live_delay(stops, course, live_anchor)
         alias_courses = _alias_courses(trip, aliases, course, courses, live_anchor)
         rows.append(

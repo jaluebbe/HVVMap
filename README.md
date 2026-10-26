@@ -174,7 +174,8 @@ Debug pages (`noindex`, only linked from `index.html`):
   planned trips with status, live ids, courses and vehicles.
 - `dev_trips_departures.html` - planned against live departures per line or
   station, paired with the rules of `departure_pairing.js`, with the known
-  courses of each trip and wing trains.
+  courses of each trip and wing trains. Stops seen live earlier stay marked
+  (`/api/hvv/live/confirmed-stops.json`, kept 3 h after a trip was last seen).
 - `dev_gtilive_map.html` - gti-live lines and stops with debug properties.
 - `dev_courses.html` - all `departureCourse` calls (trip courses, subline
   tracks, `hvvmap-course`) from the Redis log `hvv:courses:log` (last 5000
