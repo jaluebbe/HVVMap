@@ -192,6 +192,24 @@ def test_vector_style_rewrites_source_url_sprite_and_glyphs(client):
     assert style["glyphs"] == "http://testserver/fonts/{fontstack}/{range}.pbf"
 
 
+def test_basemap_allows_configured_origin(client):
+    origin = "https://ts.hamburg-transit.de"
+    for path in ("/api/vector/style/basic.json", "/api/vector/tiles/5/10/11.pbf"):
+        response = client.get(path, headers={"Origin": origin})
+        assert response.headers["access-control-allow-origin"] == origin
+
+
+def test_basemap_cors_not_for_other_origins_or_paths(client):
+    response = client.get(
+        "/api/vector/style/basic.json", headers={"Origin": "https://example.com"}
+    )
+    assert "access-control-allow-origin" not in response.headers
+    response = client.get(
+        "/robots.txt", headers={"Origin": "https://ts.hamburg-transit.de"}
+    )
+    assert "access-control-allow-origin" not in response.headers
+
+
 def test_vector_style_404_for_unknown_style(client):
     response = client.get("/api/vector/style/unknown.json")
     assert response.status_code == 404

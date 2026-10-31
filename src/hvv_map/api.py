@@ -11,6 +11,7 @@ Needs only Redis and the mounted .mbtiles file - no GTI credentials.
 
 import json
 import mimetypes
+import os
 import sqlite3
 import threading
 import time
@@ -51,6 +52,27 @@ mimetypes.add_type("text/javascript", ".cjs")
 
 app = FastAPI()
 app.add_middleware(GZipMiddleware, minimum_size=1024)
+
+# Other sites may use the basemap (style, tiles, glyphs, sprites); the live
+# layers stay same-origin. Comma-separated origins.
+BASEMAP_CORS_ORIGINS = {
+    origin.strip()
+    for origin in os.environ.get(
+        "BASEMAP_CORS_ORIGINS", "https://ts.hamburg-transit.de"
+    ).split(",")
+    if origin.strip()
+}
+BASEMAP_PATHS = ("/api/vector/", "/fonts/", "/static/sprites/")
+
+
+@app.middleware("http")
+async def basemap_cors(request: Request, call_next):
+    response = await call_next(request)
+    origin = request.headers.get("origin")
+    if origin in BASEMAP_CORS_ORIGINS and request.url.path.startswith(BASEMAP_PATHS):
+        response.headers["Access-Control-Allow-Origin"] = origin
+        response.headers.append("Vary", "Origin")
+    return response
 
 
 class CachedStaticFiles(StaticFiles):
