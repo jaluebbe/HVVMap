@@ -461,3 +461,37 @@ def test_fetch_day_queries_an_ordinary_day_once(monkeypatch):
     departures.fetch_day(None, None, date(2026, 10, 24))
 
     assert calls == [departures.PLAN_MINUTES]
+
+
+def test_fetch_sev_departures_queries_the_stations_in_chunks(monkeypatch):
+    import json
+
+    from hvv_map import departures
+
+    names = [f"Halt {i:03d}" for i in range(45)]
+
+    class _Redis:
+        def get(self, key):
+            return json.dumps({"data": names})
+
+    requests = []
+
+    class _Client:
+        def send(self, endpoint, request):
+            requests.append(request)
+            first = request["stations"][0]["name"]
+            line = {"name": "A1-SEV", "type": {"simpleType": "BUS"}}
+            return {
+                "departures": [
+                    {"station": {"id": first}, "serviceId": first, "line": line}
+                ]
+            }
+
+    monkeypatch.setattr(departures.time, "sleep", lambda s: None)
+
+    result = departures.fetch_sev_departures(_Client(), _Redis(), datetime(2026, 11, 4))
+
+    assert len(requests) == 3
+    assert all(len(r["stations"]) <= departures.SEV_CHUNK_STATIONS for r in requests)
+    assert {s["name"] for r in requests for s in r["stations"]} == set(names)
+    assert len(result["departures"]) == 3

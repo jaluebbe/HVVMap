@@ -60,6 +60,7 @@ UBAHN_STATIONS = {
     "Wandsbeker Chaussee", "Wartenau", "Überseequartier",
 }  # fmt: skip
 U_SERVICE_TYPES = ["UBAHN"]
+SEV_CHUNK_STATIONS = 20  # a day of buses per station: big requests hit maxList
 U_CHUNK_STATIONS = 31  # all stations in 3 requests: 90 in one time out (504)
 
 # Stations where S/AKN/ferry lines start or terminate - covers every
@@ -260,12 +261,18 @@ def fetch_sev_departures(
     station_names = json.loads(payload)["data"] if payload else []
     if not station_names:
         return None
-    request = _build_request(set(station_names), SEV_SERVICE_TYPES, start, minutes)
-    response = client.send("departureList", request)
-    response["departures"] = [
-        d for d in response.get("departures", []) if _is_wanted_departure(d)
-    ]
-    return response
+    responses = []
+    for number, chunk in enumerate(chunked(set(station_names), SEV_CHUNK_STATIONS)):
+        if number:
+            time.sleep(1)  # 1 req/s rate limit across all GTI endpoints
+        response = client.send(
+            "departureList", _build_request(chunk, SEV_SERVICE_TYPES, start, minutes)
+        )
+        response["departures"] = [
+            d for d in response.get("departures", []) if _is_wanted_departure(d)
+        ]
+        responses.append(response)
+    return {"departures": merge_departures(*responses)}
 
 
 def _load_data(redis_client, key: str) -> dict:
