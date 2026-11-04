@@ -32,7 +32,11 @@ from hvv_map.trip_positions import run_loop as run_trip_positions_loop
 from hvv_map.gti_client import GtiClient
 from hvv_map.gti_shapes import open_db as open_shapes_db
 from hvv_map.gti_shapes import run_update as run_gti_shapes_update
-from hvv_map.lines import ANNOUNCEMENT_FILTER_NAMES, update_sublines_cache
+from hvv_map.lines import (
+    ANNOUNCEMENT_FILTER_NAMES,
+    load_sublines_cache,
+    update_sublines_cache,
+)
 from hvv_map.redis_client import get_redis_client
 from hvv_map.stations import by_id, fetch_stations, load_stations, store_stations
 
@@ -73,7 +77,10 @@ def fetch_announcements() -> None:
 
     # Extra departureList lookup targets, beyond the fixed anchor stations -
     # raw station names only, no id resolution, no reason stored.
-    station_names = extract_announcement_station_names(response)
+    _, sublines_cache = load_sublines_cache(redis_client)
+    station_names = extract_announcement_station_names(
+        response, sublines_cache=sublines_cache
+    )
     _store("hvv:announcement_stations", station_names, ANNOUNCEMENTS_TTL)
 
 
