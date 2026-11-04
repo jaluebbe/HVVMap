@@ -131,19 +131,6 @@ class UnitToggleControl {
     }
 }
 
-// "vor 5 min", "vor 3 h", "vor 2 Tagen"
-function ageText(seconds) {
-    const minutes = Math.max(1, Math.round(seconds / 60));
-    if (minutes < 60) {
-        return `vor ${minutes} min`;
-    }
-    const hours = Math.round(minutes / 60);
-    if (hours < 48) {
-        return `vor ${hours} h`;
-    }
-    return `vor ${Math.round(hours / 24)} Tagen`;
-}
-
 // Keeps the screen awake via the Screen Wake Lock API. The browser releases
 // the lock once the tab is backgrounded - re-acquired on return, unless the
 // user had turned it off themselves first.
@@ -282,10 +269,7 @@ map.on('movestart', hideInfoPanel);
 map.on('zoomstart', hideInfoPanel);
 
 const HVV_POLL_INTERVAL_MS = 1_000;
-const HISTORY_ENDPOINT = '/api/hvv/gtilive/unit-history.geojson';
-const HISTORY_POLL_INTERVAL_MS = 60_000;
-const HISTORY_RECENT_SECONDS = 20 * 60; // older history markers show only when searched
-const HISTORY_GROUP_METERS = 100;
+
 const REFERENCE_POLL_INTERVAL_MS = 600_000;
 const DISRUPTIONS_POLL_INTERVAL_MS = 60_000;
 
@@ -340,11 +324,8 @@ function buildIconNode(icon) {
 
 // One checkbox per mode + disruption category; collapsible on narrow/short screens.
 class ModeToggleControl {
-    constructor(onModeToggle, categories, onCategoryToggle, sourceConfig, onLineToggle, extraToggles, onUnitSearch,
-        ghostUnits) {
+    constructor(onModeToggle, categories, onCategoryToggle, sourceConfig, onLineToggle, extraToggles) {
         this._extraToggles = extraToggles || [];
-        this._onUnitSearch = onUnitSearch || null;
-        this._ghostUnits = ghostUnits || null;
         this._onModeToggle = onModeToggle;
         this._onLineToggle = onLineToggle;
         this._categories = categories || [];
@@ -407,64 +388,6 @@ class ModeToggleControl {
                 this._appendItem(items, m.key, m.name, m.icon, true, this._onModeToggle);
             }
         });
-
-        if (this._onUnitSearch) {
-            const searchDivider = document.createElement('div');
-            searchDivider.className = 'hvv-mode-control-divider';
-            const search = document.createElement('input');
-            search.type = 'search';
-            search.className = 'hvv-mode-control-unit-search';
-            search.placeholder = 'Fzg.-Nr.';
-            search.title = 'Eine oder mehrere Nummern, z. B. 388, 417';
-            search.setAttribute('aria-label', 'Fahrzeugnummern suchen');
-            search.autocomplete = 'off';
-            // While numbers are entered, only their trips show and the checkboxes do not apply.
-            search.addEventListener('input', () => {
-                const numbers = search.value.split(/[\s,;]+/).filter((n) => /^\d+$/.test(n));
-                items.querySelectorAll('input[type=checkbox]').forEach((box) => {
-                    box.disabled = numbers.length > 0;
-                });
-                this._onUnitSearch(numbers.length ? new Set(numbers) : null);
-            });
-            // own clear button: iOS shows the native one only while typing
-            const clear = document.createElement('button');
-            clear.type = 'button';
-            clear.className = 'hvv-mode-control-search-clear';
-            clear.textContent = '✕';
-            clear.title = 'Suche leeren';
-            clear.setAttribute('aria-label', 'Suche leeren');
-            clear.hidden = true;
-            clear.addEventListener('click', () => {
-                search.value = '';
-                search.dispatchEvent(new Event('input'));
-            });
-            search.addEventListener('input', () => { clear.hidden = !search.value; });
-            const field = document.createElement('span');
-            field.className = 'hvv-mode-control-search-field';
-            field.append(search, clear);
-            const row = document.createElement('div');
-            row.className = 'hvv-mode-control-search-row';
-            row.appendChild(field);
-            if (this._ghostUnits) {
-                // Fills in the units of the older ghosts, see olderGhostUnits.
-                const ghosts = document.createElement('button');
-                ghosts.type = 'button';
-                ghosts.className = 'hvv-mode-control-ghosts';
-                ghosts.title = 'Fahrzeuge suchen, die seit über 20 Minuten nicht mehr fahren';
-                ghosts.textContent = '👻';
-                ghosts.addEventListener('click', () => {
-                    const units = this._ghostUnits();
-                    search.value = units.join(', ');
-                    search.dispatchEvent(new Event('input'));
-                    if (!units.length) {
-                        search.placeholder = 'keine Geister';
-                        setTimeout(() => { search.placeholder = 'Fzg.-Nr.'; }, 3000);
-                    }
-                });
-                row.appendChild(ghosts);
-            }
-            items.append(searchDivider, row);
-        }
 
         this._categoriesSection = document.createElement('div');
         this._categoriesSection.className = 'hvv-mode-control-categories';
@@ -692,7 +615,7 @@ const SOURCES = (PAGE_CONFIG.sourceKeys
 // labels shown last time are placed first, so labels do not flicker.
 const LABEL_PADDING_PX = 2;
 
-function placeVehicleLabels(mapInstance, markers, ghosts = []) {
+function placeVehicleLabels(mapInstance, markers) {
     const container = mapInstance.getContainer();
     const labelsOn = !container.classList.contains('hvv-labels-hidden');
     const unitsOn = container.classList.contains('hvv-units-visible');
@@ -762,40 +685,6 @@ function placeVehicleLabels(mapInstance, markers, ghosts = []) {
             item.element.classList.toggle('hvv-label-collided', !free);
         });
     }
-
-    // Ghost labels (history markers) come after the vehicles and also give
-    // way to every icon; a collided ghost keeps only its icon.
-    const ghostItems = [];
-    ghosts.forEach((marker) => {
-        const point = onScreen(marker);
-        if (!point) {
-            return;
-        }
-        const element = marker.getElement();
-        const label = element.querySelector('.hvv-history-label');
-        const iconHeight = parseFloat(element.querySelector('img').style.height) || 20;
-        ghostItems.push({
-            element,
-            icon: [point.x - iconHeight, point.y - iconHeight / 2, point.x + 18, point.y + iconHeight / 2],
-            box: label.offsetWidth ? [
-                point.x + 20, point.y - label.offsetHeight / 2,
-                point.x + 20 + label.offsetWidth, point.y + label.offsetHeight / 2,
-            ] : null,
-        });
-    });
-    ghostItems.sort((a, b) => (Number(b.element.hvvLabelShown || false) - Number(a.element.hvvLabelShown || false))
-        || (a.icon[1] - b.icon[1]));
-    ghostItems.forEach((ghost) => {
-        const free = ghost.box
-            && !items.some((item) => overlaps(ghost.box, item.icon))
-            && !ghostItems.some((other) => other !== ghost && overlaps(ghost.box, other.icon))
-            && !placed.some((box) => overlaps(ghost.box, box));
-        if (free) {
-            placed.push(ghost.box);
-        }
-        ghost.element.hvvLabelShown = Boolean(free);
-        ghost.element.classList.toggle('hvv-history-collided', !free);
-    });
 }
 
 // initialSourceKey defaults to the first source when omitted or unknown.
@@ -820,13 +709,9 @@ function initHvvVehicleLayers(initialSourceKey) {
     // Last fetched lines/stops, re-filtered on line toggle.
     const referenceData = {};
 
-    // Unit numbers searched for (see ModeToggleControl), null without a search.
-    let unitFilter = null;
-
-    // Modes without line toggles and features without line info always pass,
-    // as does everything during a unit search.
+    // Modes without line toggles and features without line info always pass.
     function linesVisible(modeKey, lineNames) {
-        if (unitFilter || !LINE_TOGGLES[modeKey] || !lineNames || lineNames.length === 0) {
+        if (!LINE_TOGGLES[modeKey] || !lineNames || lineNames.length === 0) {
             return true;
         }
         return lineNames.some((name) => activeLines.has(baseLineName(name)));
@@ -834,9 +719,6 @@ function initHvvVehicleLayers(initialSourceKey) {
 
     // Vehicles on a straight station-to-station segment follow the straight-line toggle.
     function markerVisible(modeKey, marker) {
-        if (unitFilter) {
-            return marker.hvvUnits.some((number) => unitFilter.has(number));
-        }
         return activeModes.has(modeKey)
             && linesVisible(modeKey, [marker.hvvLine])
             && (showStraight || !marker.hvvStraight);
@@ -847,7 +729,7 @@ function initHvvVehicleLayers(initialSourceKey) {
         if (labelFrame === null) {
             labelFrame = requestAnimationFrame(() => {
                 labelFrame = null;
-                placeVehicleLabels(map, [...positionEntries.values()].map((entry) => entry.marker), historyMarkers);
+                placeVehicleLabels(map, [...positionEntries.values()].map((entry) => entry.marker));
             });
         }
     }
@@ -861,108 +743,6 @@ function initHvvVehicleLayers(initialSourceKey) {
                 marker.getElement().style.display = markerVisible(m.key, marker) ? '' : 'none';
             });
         });
-        historyMarkers.forEach(updateHistoryMarker);
-    }
-
-    // Last known positions of units not on the map (PAGE_CONFIG.unitHistory),
-    // one marker per place listing its trains: those of the last
-    // HISTORY_RECENT_SECONDS, or during a unit search the ones searched for.
-    const historyMarkers = [];
-
-    function shownTrains(marker) {
-        if (unitFilter) {
-            return marker.hvvTrains.filter((t) => t.units.some((number) => unitFilter.has(number)));
-        }
-        const modeKey = Object.keys(LINE_TOGGLES)[0] || MODES[0].key;
-        const nowSeconds = Date.now() / 1000;
-        return marker.hvvTrains.filter((t) => linesVisible(modeKey, [t.line])
-            && nowSeconds - t.seenAt <= HISTORY_RECENT_SECONDS);
-    }
-
-    // Units of the ghosts no longer shown without a search, for the ghost button.
-    function olderGhostUnits() {
-        const nowSeconds = Date.now() / 1000;
-        const units = historyMarkers.flatMap((marker) => marker.hvvTrains
-            .filter((t) => nowSeconds - t.seenAt > HISTORY_RECENT_SECONDS)
-            .flatMap((t) => t.units));
-        return [...new Set(units)].sort((a, b) => a - b);
-    }
-
-    function historyVisible(marker) {
-        return shownTrains(marker).length > 0;
-    }
-
-    function updateHistoryMarker(marker) {
-        const trains = shownTrains(marker);
-        const element = marker.getElement();
-        element.style.display = trains.length ? '' : 'none';
-        const nowSeconds = Date.now() / 1000;
-        // Shown via CSS content: browsers' data detectors would link plain digits.
-        // Places with several lines name the line of each train.
-        const mixed = new Set(marker.hvvTrains.map((t) => t.line)).size > 1;
-        const text = trains
-            .map((t) => `${mixed ? `${t.line} ` : ''}${t.units.join(' · ')} ${ageText(nowSeconds - t.seenAt)}`)
-            .join('\n');
-        const label = element.querySelector('.hvv-history-label');
-        if (label.dataset.text !== text) {
-            label.dataset.text = text;
-        }
-    }
-
-    function buildHistoryElement(properties) {
-        const element = document.createElement('div');
-        element.className = 'hvv-history-marker';
-        const img = document.createElement('img');
-        img.src = properties.icon;
-        img.alt = '';
-        img.style.height = `${properties.iconHeight || 20}px`;
-        const label = document.createElement('div');
-        label.className = 'hvv-history-label';
-        element.append(img, label);
-        return element;
-    }
-
-    async function refreshHistory() {
-        try {
-            const response = await fetch(HISTORY_ENDPOINT, { cache: 'no-store' });
-            if (!response.ok) {
-                throw new Error(`HTTP ${response.status}`);
-            }
-            const data = await response.json();
-            // One marker per place: ghosts within HISTORY_GROUP_METERS of the
-            // first one of a place (e.g. two platforms of one station) join it.
-            const places = new Map();
-            data.features.forEach((f) => {
-                const lngLat = maplibregl.LngLat.convert(f.geometry.coordinates);
-                const place = [...places.keys()].find((p) => p.distanceTo(lngLat) <= HISTORY_GROUP_METERS);
-                if (place) {
-                    places.get(place).push(f);
-                } else {
-                    places.set(lngLat, [f]);
-                }
-            });
-            historyMarkers.splice(0).forEach((marker) => marker.remove());
-            places.forEach((features) => {
-                const marker = new maplibregl.Marker({ element: buildHistoryElement(features[0].properties), anchor: 'top-left' })
-                    .setLngLat(features[0].geometry.coordinates)
-                    .addTo(map);
-                const trains = new Map();
-                features.forEach((f) => {
-                    trains.set(f.properties.train.join(' · '), {
-                        units: f.properties.train,
-                        seenAt: f.properties.seen_at,
-                        line: f.properties.line,
-                    });
-                });
-                marker.hvvTrains = [...trains.values()].sort((a, b) => b.seenAt - a.seenAt);
-                marker.hvvUnits = features.map((f) => f.properties.unit);
-                historyMarkers.push(marker);
-            });
-            updateMarkerVisibility();
-            schedulePlaceLabels();
-        } catch (error) {
-            console.warn('Failed to load vehicle history:', error);
-        }
     }
 
     // Restricted pages hide disruptions without a mode.
@@ -1002,38 +782,6 @@ function initHvvVehicleLayers(initialSourceKey) {
         renderReferenceLayer('hvv-lines');
         renderReferenceLayer('hvv-stops');
         renderDisruptionLayers();
-    }
-
-    // Moves the map to the found vehicles, zooming out only as far as needed.
-    function showFoundVehicles() {
-        const found = [...positionEntries.values()]
-            .filter((entry) => markerVisible(entry.modeKey, entry.marker))
-            .map((entry) => entry.marker.getLngLat())
-            .concat(historyMarkers.filter(historyVisible).map((marker) => marker.getLngLat()));
-        if (found.length === 0) {
-            return;
-        }
-        const bounds = found.reduce((b, lngLat) => b.extend(lngLat), new maplibregl.LngLatBounds(found[0], found[0]));
-        const camera = map.cameraForBounds(bounds, { padding: 80 });
-        map.easeTo({
-            center: bounds.getCenter(),
-            zoom: camera ? Math.min(map.getZoom(), camera.zoom) : map.getZoom(),
-        });
-    }
-
-    let unitSearchTimer = null;
-    function setUnitFilter(numbers) {
-        unitFilter = numbers;
-        updateMarkerVisibility();
-        renderReferenceLayer('hvv-lines');
-        renderReferenceLayer('hvv-stops');
-        renderDisruptionLayers();
-        schedulePlaceLabels();
-        clearTimeout(unitSearchTimer);
-        if (numbers) {
-            // Wait for the typing to pause before moving the map.
-            unitSearchTimer = setTimeout(showFoundVehicles, 600);
-        }
     }
 
     function setStraightVisibility(_key, visible) {
@@ -1224,8 +972,6 @@ function initHvvVehicleLayers(initialSourceKey) {
             { sources: SOURCES, initialKey: currentSource.key, onSourceChange: switchSource },
             setLineVisibility,
             [{ key: 'straight', name: 'Luftlinien', icon: '⋯', checked: false, onToggle: setStraightVisibility }],
-            PAGE_CONFIG.unitSearch ? setUnitFilter : null,
-            PAGE_CONFIG.unitHistory ? olderGhostUnits : null,
         );
         map.addControl(modeToggleControl, 'top-right');
         modeToggleControl.setCategoriesVisible(!!currentSource.disruptionsEndpoint);
@@ -1233,10 +979,6 @@ function initHvvVehicleLayers(initialSourceKey) {
         map.addControl(new LabelToggleControl(), 'top-right');
         if (PAGE_CONFIG.unitNumbers) {
             map.addControl(new UnitToggleControl(), 'top-right');
-        }
-        if (PAGE_CONFIG.unitHistory) {
-            refreshHistory();
-            setInterval(refreshHistory, HISTORY_POLL_INTERVAL_MS);
         }
         map.addControl(new WakeLockControl(), 'top-right');
     }
@@ -1338,7 +1080,6 @@ function initHvvVehicleLayers(initialSourceKey) {
                         .setLngLat(feature.geometry.coordinates)
                         .addTo(map);
                     marker.hvvLine = properties.line;
-                    marker.hvvUnits = (properties.units || '').split(' · ').filter(Boolean);
                     entry = { marker, look, modeKey };
                     positionEntries.set(key, entry);
                     if (properties.text) {
