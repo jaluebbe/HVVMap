@@ -159,12 +159,43 @@ def build_disruptions_geojson(
     return {"type": "FeatureCollection", "features": features}
 
 
+SEV_SUFFIX = "-SEV"
+
+
+def _announced_line_names(announcements_data: dict, now: datetime) -> set[str]:
+    return {
+        _location_line_name(location)
+        for announcement in announcements_data.get("announcements", [])
+        if is_currently_valid(announcement, now)
+        for location in announcement.get("locations", [])
+    } - {""}
+
+
+def sev_line_station_names(sublines_cache: dict, line_names: set[str]) -> set[str]:
+    """Stop names of the replacement-bus lines ("A1-SEV") of announced
+    U/S/AKN base lines; their bus stops are named in no announcement."""
+    wanted = {
+        name + SEV_SUFFIX for name in line_names if BASE_LINE_MODE.get(name)
+    }
+    return {
+        stop["name"]
+        for entry in sublines_cache.values()
+        if entry.get("line_name") in wanted
+        for sub in entry.get("sublines", [])
+        for stop in sub.get("stations", [])
+        if stop.get("name")
+    }
+
+
 def extract_announcement_station_names(
-    announcements_data: dict, now: datetime | None = None
+    announcements_data: dict,
+    now: datetime | None = None,
+    sublines_cache: dict | None = None,
 ) -> list[str]:
     """Distinct station names mentioned in currently-valid announcements'
     locations, taken as-is from the API (location.begin/end.name) - no id
-    resolution against stations_by_id. Used to widen ad-hoc departureList
+    resolution against stations_by_id. With sublines_cache, the stops of the
+    matching "-SEV" lines are added. Used to widen ad-hoc departureList
     lookups (including buses) beyond the fixed anchor stations."""
     if now is None:
         now = datetime.now(timezone.utc)
@@ -177,4 +208,8 @@ def extract_announcement_station_names(
                 name = (location.get(key) or {}).get("name")
                 if name:
                     names.add(name)
+    if sublines_cache:
+        names |= sev_line_station_names(
+            sublines_cache, _announced_line_names(announcements_data, now)
+        )
     return sorted(names)

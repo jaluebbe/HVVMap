@@ -1,7 +1,10 @@
 from datetime import datetime, timezone
 
 from hvv_map.announcement_categories import CATEGORY_SPERRUNG
-from hvv_map.disruptions import build_disruptions_geojson
+from hvv_map.disruptions import (
+    build_disruptions_geojson,
+    extract_announcement_station_names,
+)
 from hvv_map.stations import StationInfo
 
 NOW = datetime(2026, 9, 2, 12, 0, tzinfo=timezone.utc)
@@ -202,3 +205,26 @@ def test_build_disruptions_geojson_resolves_global_station_ids():
     }
     result = build_disruptions_geojson(data, STATIONS, now=NOW)
     assert len(result["features"]) == 2
+
+
+def test_station_names_include_stops_of_announced_sev_lines_only():
+    cache = {
+        "a1": {
+            "line_name": "A1-SEV",
+            "sublines": [
+                {"stations": [{"name": "A Quickborn"}, {"name": "A Tanneneck"}]}
+            ],
+        },
+        "u3": {
+            "line_name": "U3-SEV",
+            "sublines": [{"stations": [{"name": "Finkenau"}]}],
+        },
+    }
+    data = {
+        "announcements": [
+            _announcement("Ersatzverkehr", "", "Master:1", "Master:2", "A1")
+        ]
+    }
+    names = extract_announcement_station_names(data, NOW, cache)
+    assert names == ["A Quickborn", "A Tanneneck", "x", "y"]
+    assert extract_announcement_station_names(data, NOW) == ["x", "y"]
