@@ -495,3 +495,36 @@ def test_fetch_sev_departures_queries_the_stations_in_chunks(monkeypatch):
     assert all(len(r["stations"]) <= departures.SEV_CHUNK_STATIONS for r in requests)
     assert {s["name"] for r in requests for s in r["stations"]} == set(names)
     assert len(result["departures"]) == 3
+
+
+def test_ensure_day_refetches_only_when_announcements_add_sev_stations(monkeypatch):
+    from datetime import date
+
+    from hvv_map import departures
+
+    calls = []
+    monkeypatch.setattr(
+        departures,
+        "fetch_day",
+        lambda client, redis_client, day: calls.append(day) or [],
+    )
+    monkeypatch.setattr(departures.time, "sleep", lambda _: None)
+
+    def announced(names):
+        return json.dumps({"data": names})
+
+    redis_client = _StoreRedis(
+        {departures.REDIS_ANNOUNCEMENT_STATIONS_KEY: announced(["A", "B"])}
+    )
+    day = date(2026, 11, 4)
+
+    departures._ensure_day(None, redis_client, day)  # not stored yet
+    departures._ensure_day(None, redis_client, day)  # same stations
+    redis_client.data[departures.REDIS_ANNOUNCEMENT_STATIONS_KEY] = announced(["A"])
+    departures._ensure_day(None, redis_client, day)  # station removed
+    redis_client.data[departures.REDIS_ANNOUNCEMENT_STATIONS_KEY] = announced(
+        ["A", "C"]
+    )
+    departures._ensure_day(None, redis_client, day)  # station added
+
+    assert len(calls) == 2

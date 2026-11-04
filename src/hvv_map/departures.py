@@ -520,15 +520,24 @@ def fetch_day(client: GtiClient, redis_client, day: date) -> list[dict]:
     return merge_departures({"departures": departures})
 
 
+def _announcement_stations(redis_client) -> list[str]:
+    payload = redis_client.get(REDIS_ANNOUNCEMENT_STATIONS_KEY)
+    return json.loads(payload)["data"] if payload else []
+
+
 def _ensure_day(client: GtiClient, redis_client, day: date) -> list[dict]:
-    """The stored departures of a day, fetched first if missing."""
+    """The stored departures of a day, fetched first if missing or if
+    announcements added SEV stations since it was fetched."""
     key = _day_key(day)
-    if not redis_client.get(key):
+    stored = _load_data(redis_client, key)
+    sev_stations = _announcement_stations(redis_client)
+    if not stored or not set(sev_stations) <= set(stored.get("sev_stations", [])):
         departures = fetch_day(client, redis_client, day)
-        _store(redis_client, key, {"departures": departures})
+        stored = {"departures": departures, "sev_stations": sev_stations}
+        _store(redis_client, key, stored)
         print(f"{len(departures)} departures ({key})")
         time.sleep(1)
-    return _load_data(redis_client, key).get("departures", [])
+    return stored.get("departures", [])
 
 
 def _shifted(departures: list[dict], minutes: int, limit: int) -> list[dict]:
