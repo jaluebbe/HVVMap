@@ -288,7 +288,7 @@ const ALL_MODES = [
     { key: 'S', name: 'S-Bahn', icon: '/static/hvv/icons/s.svg' },
     { key: 'AKN', name: 'AKN', icon: '/static/hvv/icons/akn.svg' },
     { key: 'FERRY', name: 'Fähre', icon: '/static/hvv/icons/ferry.svg' },
-    { key: 'R', name: 'Regio', icon: '/static/hvv/icons/r.svg' },
+    { key: 'R', name: 'Regio', icon: '/static/hvv/icons/r.svg', startsHidden: true },
 ];
 const MODES = PAGE_CONFIG.modes ? ALL_MODES.filter((m) => PAGE_CONFIG.modes.includes(m.key)) : ALL_MODES;
 // Map layers bottom to top: rapid transit above regional trains and ferries.
@@ -385,7 +385,7 @@ class ModeToggleControl {
                 // Icon already names the line.
                 lineToggles.forEach((l) => this._appendItem(items, l.key, '', l.icon, true, this._onLineToggle));
             } else {
-                this._appendItem(items, m.key, m.name, m.icon, true, this._onModeToggle);
+                this._appendItem(items, m.key, m.name, m.icon, !m.startsHidden, this._onModeToggle);
             }
         });
 
@@ -691,7 +691,7 @@ function placeVehicleLabels(mapInstance, markers) {
 function initHvvVehicleLayers(initialSourceKey) {
     // Single shared popup (vehicles/stops/disruptions); anchor:'bottom' points its tip straight down.
     const hoverPopup = new maplibregl.Popup({ closeButton: false, closeOnClick: false, anchor: 'bottom' });
-    const activeModes = new Set(MODES.map((m) => m.key));
+    const activeModes = new Set(MODES.filter((m) => !m.startsHidden).map((m) => m.key));
     const activeCategories = new Set(DISRUPTION_CATEGORIES.filter((c) => c.visible).map((c) => c.key));
     const positionMarkersByMode = {};
     MODES.forEach((m) => { positionMarkersByMode[m.key] = []; });
@@ -760,7 +760,12 @@ function initHvvVehicleLayers(initialSourceKey) {
         } else {
             activeModes.delete(modeKey);
         }
-        const visibility = visible ? 'visible' : 'none';
+        applyModeVisibility(modeKey);
+        renderDisruptionLayers();
+    }
+
+    function applyModeVisibility(modeKey) {
+        const visibility = activeModes.has(modeKey) ? 'visible' : 'none';
         map.setLayoutProperty(`hvv-lines-layer-${modeKey}`, 'visibility', visibility);
         map.setLayoutProperty(`hvv-lines-layer-${modeKey}-replacement`, 'visibility', visibility);
         map.setLayoutProperty(`hvv-lines-layer-${modeKey}-straight`, 'visibility', visibility);
@@ -769,7 +774,6 @@ function initHvvVehicleLayers(initialSourceKey) {
         positionMarkersByMode[modeKey].forEach((marker) => {
             marker.getElement().style.display = markerVisible(modeKey, marker) ? '' : 'none';
         });
-        renderDisruptionLayers();
     }
 
     function setLineVisibility(lineKey, visible) {
@@ -964,6 +968,8 @@ function initHvvVehicleLayers(initialSourceKey) {
                 }
             });
         });
+
+        MODES.filter((m) => m.startsHidden).forEach((m) => applyModeVisibility(m.key));
 
         modeToggleControl = new ModeToggleControl(
             setModeVisibility,
