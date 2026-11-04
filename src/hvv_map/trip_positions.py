@@ -9,7 +9,6 @@ import traceback
 import sqlite3
 import time
 from datetime import datetime
-from zoneinfo import ZoneInfo
 
 from hvv_map.departures import REDIS_ANCHOR_KEY, REDIS_BY_SERVICE_KEY, berlin_now
 from hvv_map.departures_live import REDIS_LIVE_KEY
@@ -22,8 +21,6 @@ from hvv_map.lines import replacement_bus_mode
 from hvv_map.redis_client import get_redis_client
 from hvv_map.stations import StationInfo, by_id, load_stations
 from hvv_map.trip_courses import REDIS_COURSES_KEY
-from hvv_map.unit_positions import RECORD_INTERVAL, record_unit_positions
-from hvv_map.unit_positions import open_db as open_units_db
 from hvv_map.trip_position import AT_STOP, BETWEEN, Position, locate, stops_from_row
 from hvv_map.trips import (
     COMBINED_DESTINATION,
@@ -471,27 +468,6 @@ def _units_of(feature: dict) -> list[str]:
     return [u for u in (feature["properties"].get("units") or "").split(" · ") if u]
 
 
-def _dropped_features(table: dict, stations: dict[str, StationInfo]) -> list[dict]:
-    """One feature per uncoupled unit at the last stop that listed it, for the
-    unit positions (see _dropped_units)."""
-    features = []
-    for row in table.get("trips", []):
-        if row["mode"] != "U":
-            continue
-        for unit, stop in _dropped_units(row).items():
-            station = stations.get(stop.get("station_id") or "")
-            if station is None:
-                continue
-            point = (station.lon, station.lat)
-            position = Position(AT_STOP)
-            feature = _feature(row, stop["station"], position, point, None, False)
-            # no trip terminus for it (unit_history): the unit stays here
-            feature["properties"]["journeyID"] = f"{row['id']}/uncoupled"
-            feature["properties"]["units"] = unit
-            features.append(feature)
-    return features
-
-
 class PositionsState:
     """Trip table and segment tracks, rebuilt only when the source data in
     Redis has changed (checked every RELOAD_INTERVAL)."""
@@ -503,10 +479,6 @@ class PositionsState:
         self.stations: dict[str, StationInfo] = {}
         self.tracks: dict = {}
         self.memory: dict | None = None  # trip vehicles, see trips.remember_vehicles
-        self.recorded = float("-inf")  # last write of the unit positions
-        self.units_conn: sqlite3.Connection | None = None  # see unit_positions
-        self.at_terminus: set[str] = set()  # journeys recorded at their terminus
-        self.uncoupled: set[tuple] = set()  # (unit, journey) recorded uncoupled
 
 
 def _refresh(redis_client, state: PositionsState) -> bool:
@@ -548,25 +520,6 @@ def _refresh(redis_client, state: PositionsState) -> bool:
     return True
 
 
-def _trip_ends(table: dict, stations: dict[str, StationInfo]) -> dict[str, dict]:
-    """journeyID -> last served stop's coordinates and planned time (epoch),
-    stored with the unit positions, see unit_positions.unit_history."""
-    ends = {}
-    for row in table.get("trips", []):
-        served = _served_row(row)
-        stops = served["stops"] if served else []
-        station = stations.get(stops[-1].get("station_id") or "") if stops else None
-        times = [s["at"] for s in stops if s.get("at")]
-        if station is None or not times:
-            continue
-        end = datetime.fromisoformat(max(times))
-        ends[row["id"]] = {
-            "coordinates": [station.lon, station.lat],
-            "at": int(end.replace(tzinfo=ZoneInfo("Europe/Berlin")).timestamp()),
-        }
-    return ends
-
-
 def run_positions(
     redis_client,
     shapes_conn: sqlite3.Connection | None,
@@ -586,34 +539,6 @@ def run_positions(
         json.dumps({"fetched_at": int(time.time()), "data": collection}),
         ex=POSITIONS_TTL,
     )
-    # the terminus dwell can be shorter than RECORD_INTERVAL: record arrivals
-    # there at once, so the last known position is the terminus
-    terminus = {
-        f["properties"]["journeyID"]: f
-        for f in collection["features"]
-        if f["properties"].get("terminus")
-    }
-    arrived = [f for jid, f in terminus.items() if jid not in state.at_terminus]
-    state.at_terminus = set(terminus)
-    # uncoupled units stay where they were last listed, recorded once
-    uncoupled = {
-        (f["properties"]["units"], f["properties"]["journeyID"]): f
-        for f in _dropped_features(state.table, state.stations)
-    }
-    arrived += [f for key, f in uncoupled.items() if key not in state.uncoupled]
-    state.uncoupled = set(uncoupled)
-    due = time.time() - state.recorded >= RECORD_INTERVAL
-    if due or arrived:
-        if state.units_conn is None:
-            state.units_conn = open_units_db()
-        ends = _trip_ends(state.table, state.stations)
-        if due:
-            state.recorded = time.time()
-            # arrivals and new uncoupled units after the regular positions
-            features = collection["features"] + arrived
-            record_unit_positions(state.units_conn, features, state.recorded, ends)
-        else:
-            record_unit_positions(state.units_conn, arrived, time.time(), ends)
     return len(collection["features"])
 
 

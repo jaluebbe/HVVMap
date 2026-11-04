@@ -478,45 +478,6 @@ def test_vehicle_at_its_last_stop_is_flagged_terminus():
     assert arrived["properties"]["terminus"] is True
 
 
-def test_arrival_at_the_terminus_is_recorded_at_once(monkeypatch):
-    from hvv_map import trip_positions as module
-
-    recorded = []
-    row = _row(vehicles="DT5.1 (417)")
-    redis_client = _redis_with_source_data(module)
-    monkeypatch.setattr(module, "parse_anchor", lambda data: None)
-    monkeypatch.setattr(module, "load_stations", lambda client: list(STATIONS.values()))
-    monkeypatch.setattr(module, "build_trip_table", lambda *a: {"trips": [row]})
-    monkeypatch.setattr(module, "open_units_db", lambda: object())
-    monkeypatch.setattr(
-        module, "record_unit_positions", lambda conn, f, *a: recorded.append(len(f))
-    )
-    state = module.PositionsState()
-    arrival = datetime(2026, 10, 17, 9, 9, 10)
-
-    module.run_positions(redis_client, None, NOW, state)  # due: first write
-    module.run_positions(redis_client, None, NOW, state)  # not due, not arrived
-    module.run_positions(redis_client, None, arrival, state)  # arrived
-    module.run_positions(redis_client, None, arrival, state)  # already recorded
-
-    assert recorded == [1, 1]
-
-
-def test_trip_ends_give_the_terminus_and_planned_arrival():
-    from datetime import timezone
-
-    from hvv_map.trip_positions import _trip_ends
-
-    row = {**_row(), "route_end": "2026-10-17T09:09"}  # summer time: UTC+2
-    unknown = _row(id="2")
-    unknown["stops"] = [{**s, "station_id": "nowhere"} for s in unknown["stops"]]
-
-    ends = _trip_ends({"trips": [row, unknown]}, STATIONS)
-
-    at = int(datetime(2026, 10, 17, 7, 9, tzinfo=timezone.utc).timestamp())
-    assert ends == {"1": {"coordinates": [2, 53.5], "at": at}}
-
-
 def test_after_a_cancelled_stop_only_known_stops_count_as_served():
     from hvv_map.trip_positions import _served
 
@@ -537,17 +498,6 @@ def test_partially_cancelled_trip_runs_to_its_last_served_stop():
     assert between["properties"]["label"] == "B"
     assert arrived["properties"]["terminus"] is True
     assert _positions(row, datetime(2026, 10, 17, 9, 7)) == []
-
-
-def test_trip_ends_at_its_last_served_stop():
-    from hvv_map.trip_positions import _trip_ends
-
-    row = _row()
-    row["stops"][-1] = {**row["stops"][-1], "cancelled": True}
-
-    ends = _trip_ends({"trips": [row]}, STATIONS)
-
-    assert ends["1"]["coordinates"] == [1, 53.5]  # B, not the cancelled C
 
 
 def _listing(stop, vehicles):
@@ -577,30 +527,3 @@ def test_a_unit_on_two_trips_belongs_to_the_later_one():
     features = _positions_of([old, new])
 
     assert [f["properties"]["journeyID"] for f in features] == ["livetrip:1"]
-
-
-def test_uncoupled_unit_is_recorded_once_where_it_was_last_listed(monkeypatch):
-    from hvv_map import trip_positions as module
-
-    recorded = []
-    row = _row(vehicles="DT5.1 (332), DT5.1 (301)")
-    row["stops"][0] = _listing(row["stops"][0], "DT5.1 (332), DT5.1 (301)")
-    row["stops"][1] = _listing(row["stops"][1], "DT5.1 (332)")
-    redis_client = _redis_with_source_data(module)
-    monkeypatch.setattr(module, "parse_anchor", lambda data: None)
-    monkeypatch.setattr(module, "load_stations", lambda client: list(STATIONS.values()))
-    monkeypatch.setattr(module, "build_trip_table", lambda *a: {"trips": [row]})
-    monkeypatch.setattr(module, "open_units_db", lambda: object())
-    monkeypatch.setattr(
-        module,
-        "record_unit_positions",
-        lambda conn, features, *a: recorded.append(
-            [(f["properties"]["units"], f["geometry"]["coordinates"]) for f in features]
-        ),
-    )
-    state = module.PositionsState()
-
-    module.run_positions(redis_client, None, NOW, state)  # due: all, plus 301 at A
-    module.run_positions(redis_client, None, NOW, state)  # nothing new
-
-    assert recorded == [[("332", [0.625, 53.5]), ("301", [0, 53.5])]]

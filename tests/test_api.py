@@ -27,8 +27,6 @@ def client(tmp_path, monkeypatch):
     (tmp_path / "static" / "maplibre_map_hvv_sbahn.html").write_text(
         "<html>sbahn</html>"
     )
-    (tmp_path / "static" / "TS.html").write_text("<html>ts</html>")
-    (tmp_path / "static" / "flotte.html").write_text("<html>flotte</html>")
     (tmp_path / "fonts").mkdir()
 
     conn = sqlite3.connect(osm_dir / "test.mbtiles")
@@ -79,65 +77,6 @@ def test_sbahn_shortcut_serves_the_sbahn_map(client):
     response = client.get("/sbahn", follow_redirects=False)
     assert response.status_code == 200
     assert "<html>sbahn</html>" in response.text
-
-
-def test_ts_page_is_served_with_noindex(client):
-    response = client.get("/TS.html", follow_redirects=False)
-    assert response.status_code == 200
-    assert "<html>ts</html>" in response.text
-    assert response.headers["x-robots-tag"] == "noindex, nofollow"
-
-
-def test_fleet_page_is_served_with_noindex(client):
-    response = client.get("/flotte", follow_redirects=False)
-    assert response.status_code == 200
-    assert "<html>flotte</html>" in response.text
-    assert response.headers["x-robots-tag"] == "noindex, nofollow"
-
-
-def test_unit_history_leaves_out_units_on_the_map(client, monkeypatch, tmp_path):
-    from hvv_map.unit_positions import open_db, open_reader, record_unit_positions
-
-    path = str(tmp_path / "units.db")
-    on_map = {
-        "type": "Feature",
-        "geometry": {"type": "Point", "coordinates": [10.0, 53.5]},
-        "properties": {"units": "417"},
-    }
-    record_unit_positions(
-        open_db(path),
-        [on_map, {**on_map, "properties": {"units": "388"}}],
-        api_module.time.time(),
-    )
-    fake = _FakeRedis({"hvv:positions_gtilive": {"data": {"features": [on_map]}}})
-    monkeypatch.setattr(api_module, "_redis_client", fake)
-    monkeypatch.setattr(api_module, "_unit_positions_connection", open_reader(path))
-
-    data = client.get("/api/hvv/gtilive/unit-history.geojson").json()
-
-    assert [f["properties"]["unit"] for f in data["features"]] == ["388"]
-
-
-def test_unit_journeys_are_served_for_unit_numbers_only(client, monkeypatch):
-    monkeypatch.setattr(api_module, "unit_journeys", lambda redis, unit: [{"u": unit}])
-
-    response = client.get("/api/hvv/gtilive/unit/301/journeys.json")
-
-    assert response.json() == {"unit": "301", "journeys": [{"u": "301"}]}
-    assert response.headers["x-robots-tag"] == "noindex, nofollow"
-    assert client.get("/api/hvv/gtilive/unit/x1/journeys.json").status_code == 404
-
-
-def test_fleet_is_served_with_noindex(client, monkeypatch):
-    monkeypatch.setattr(api_module, "_redis_client", _FakeRedis({}))
-    monkeypatch.setattr(api_module, "_unit_positions_connection", None)
-    monkeypatch.setattr(api_module, "open_unit_positions_reader", lambda: None)
-
-    response = client.get("/api/hvv/gtilive/fleet.json")
-
-    assert response.status_code == 200
-    assert response.headers["x-robots-tag"] == "noindex, nofollow"
-    assert response.json()["totals"]["DT4"]["total"] == 125
 
 
 def test_robots_txt_excludes_api(client):

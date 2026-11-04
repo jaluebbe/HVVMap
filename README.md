@@ -14,8 +14,7 @@ one Redis instance:
   `hvv:disruptions`, `hvv:departures:*`, `hvv:trips:courses`,
   `hvv:courses:log`, `hvv:stations`, `hvv:sublines`. A second thread (`hvv_map.trip_positions`) computes the
   vehicle positions once per second from that data and writes
-  `hvv:positions_gtilive` and the last known unit positions
-  (`unit_positions.db`, next to `GTI_SHAPES_DB_PATH`). Needs GTI credentials, no web-facing port.
+  `hvv:positions_gtilive`. Needs GTI credentials, no web-facing port.
 - **gtfs-fetcher** (`hvv_map.gtfs_fetcher`) - background loop building the
   same kind of layers purely from a static GTFS feed on disk - no GTI
   credentials, no live API, no disruptions (a static feed has none). Writes
@@ -137,24 +136,6 @@ they're built directly from the static feed on first run.
   vehicle icons (off by default); also served at `/ubahn`.
   Page options are set via `window.HVV_PAGE_CONFIG` (see
   `maplibre_map_hvv_base.js`).
-- `TS.html` - internal U-Bahn page at `/TS.html`, not linked and marked
-  `noindex`: unit numbers on and destination labels off by default, a search
-  for unit numbers with a 👻 button for the older ghosts, no "Luftlinien" toggle and
-  no disruptions. Units not on the map show as grey "ghosts" at their last
-  known position for 20 minutes, older ones only when searched for. The
-  positions loop writes them every 30 s to the SQLite file
-  `unit_positions.db` next to `GTI_SHAPES_DB_PATH` (override with
-  `UNIT_POSITIONS_DB_PATH`), one row per unit without expiry, so the history
-  survives Redis restarts; `/api/hvv/gtilive/unit-history.geojson` shows the
-  last 3 days, older entries stay in the file. `/api/hvv/gtilive/fleet.json`
-  counts the units ever seen per series (DT4.1-DT5.2, a series can span
-  several number ranges), with the missing numbers; retired units
-  (`RETIRED_UNITS`) are left out.
-- `flotte.html` - internal fleet page at `/flotte`, not linked and marked
-  `noindex`: the U-Bahn units ever seen per series as a grid and a sortable
-  table, from `fleet.json`, refreshed every minute; the legend filters by
-  status (several at once). Tapping a unit lists its recent trips from the
-  vehicle sightings (`/api/hvv/gtilive/unit/{unit}/journeys.json`).
 - `maplibre_map_hvv_sbahn.html` - the same for the S-Bahn: `gtilive` only,
   centered on Hamburg Hbf, S1-S7 toggleable individually, destination labels
   on, no unit numbers; also served at `/sbahn`.

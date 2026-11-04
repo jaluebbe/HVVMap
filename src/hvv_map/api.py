@@ -19,7 +19,7 @@ from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.middleware.gzip import GZipMiddleware
-from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse
+from fastapi.responses import FileResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 
 from hvv_map.announcement_categories import classify_category
@@ -38,9 +38,6 @@ from hvv_map.gtilive_geojson import (
 from hvv_map.redis_client import get_redis_client
 from hvv_map.response_cache import CachedJsonResponse
 from hvv_map.stations import by_id, load_stations
-from hvv_map.unit_positions import open_reader as open_unit_positions_reader
-from hvv_map.unit_positions import fleet_summary, unit_history
-from hvv_map.vehicle_sightings import unit_journeys
 from hvv_map.trips import (
     REDIS_VEHICLES_KEY,
     berlin_now,
@@ -112,21 +109,6 @@ async def ubahn():
 @app.get("/sbahn", include_in_schema=False)
 async def sbahn():
     return FileResponse("static/maplibre_map_hvv_sbahn.html")
-
-
-@app.get("/TS.html", include_in_schema=False)
-async def ts_page():
-    """Internal U-Bahn page; noindex instead of a robots.txt block, so
-    crawlers can see it."""
-    return FileResponse("static/TS.html", headers={"X-Robots-Tag": "noindex, nofollow"})
-
-
-@app.get("/flotte", include_in_schema=False)
-async def fleet_page():
-    """Internal fleet coverage page (fleet.json), noindex like TS.html."""
-    return FileResponse(
-        "static/flotte.html", headers={"X-Robots-Tag": "noindex, nofollow"}
-    )
 
 
 @app.get("/robots.txt", include_in_schema=False)
@@ -465,46 +447,6 @@ def get_known_courses(service_ids: str):
 def get_gtilive_positions():
     """Vehicle positions computed from the trip table (trip_positions.py)."""
     return _read_cached_json(REDIS_POSITIONS_KEY)
-
-
-_unit_positions_connection: sqlite3.Connection | None = None
-
-
-@app.get("/api/hvv/gtilive/unit-history.geojson", tags=["hvv_gtilive"])
-def get_unit_history():
-    """Last known position of the U-Bahn units not on the map now, for
-    static/TS.html."""
-    global _unit_positions_connection
-    if _unit_positions_connection is None:
-        _unit_positions_connection = open_unit_positions_reader()
-    raw = _redis_client.get(REDIS_POSITIONS_KEY)
-    current = json.loads(raw)["data"]["features"] if raw else []
-    return unit_history(_unit_positions_connection, current, time.time())
-
-
-@app.get("/api/hvv/gtilive/unit/{unit}/journeys.json", tags=["hvv_gtilive"])
-def get_unit_journeys(unit: str):
-    """A U-Bahn unit's recent trips from the vehicle sightings, for /flotte."""
-    if not unit.isdigit():
-        raise HTTPException(status_code=404, detail="unknown unit")
-    return JSONResponse(
-        {"unit": unit, "journeys": unit_journeys(_redis_client, unit)},
-        headers={"X-Robots-Tag": "noindex, nofollow"},
-    )
-
-
-@app.get("/api/hvv/gtilive/fleet.json", tags=["hvv_gtilive"])
-def get_fleet():
-    """U-Bahn units ever seen, per series (see unit_positions.fleet_summary)."""
-    global _unit_positions_connection
-    if _unit_positions_connection is None:
-        _unit_positions_connection = open_unit_positions_reader()
-    raw = _redis_client.get(REDIS_POSITIONS_KEY)
-    current = json.loads(raw)["data"]["features"] if raw else []
-    return JSONResponse(
-        fleet_summary(_unit_positions_connection, current, time.time()),
-        headers={"X-Robots-Tag": "noindex, nofollow"},
-    )
 
 
 @app.get("/api/hvv/gtilive/stops.geojson", tags=["hvv_gtilive"])
