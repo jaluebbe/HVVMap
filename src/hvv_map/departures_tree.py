@@ -99,6 +99,20 @@ def vehicles_text(vehicles, ubahn: bool = False) -> str:
     return ", ".join(parts)
 
 
+# U-Bahn vehicle id: FzgID_<Zugnummer>_<day of month>_<unit>; the Zugnummer
+# is the start station number (2 digits) and the planned start time HHMM.
+_FZG_ID = re.compile(r"^FzgID_(\d{6})_\d{1,2}_\d+$")
+
+
+def train_number(vehicles) -> str:
+    """Hochbahn Zugnummer from the first vehicle id that carries one."""
+    for vehicle in vehicles or []:
+        match = _FZG_ID.match(str(vehicle.get("id") or ""))
+        if match:
+            return match.group(1)
+    return ""
+
+
 def vehicle_numbers_text(vehicles) -> str:
     """Unit numbers only ("417, 418"), the id where a vehicle has no number."""
     parts = [

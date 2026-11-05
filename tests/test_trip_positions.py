@@ -61,6 +61,16 @@ def test_vehicle_between_stops_is_placed_on_the_segment():
     assert feature["properties"]["text"] == "D<br>DT5"
 
 
+def test_ubahn_tooltip_shows_the_train_number():
+    [plain] = _positions(_row(train_number="012326"))
+    [in_path] = _positions(_row(train_number="019326"))
+
+    assert plain["properties"]["text"] == "D<br>DT5<br>Zugnr. 012326"
+    assert in_path["properties"]["text"].endswith(
+        "Zugnr. 019326 (in der Lage von 012326)"
+    )
+
+
 def test_vehicle_at_a_stop_sits_on_the_station():
     [feature] = _positions(_row(), datetime(2026, 10, 17, 9, 4, 40))
 

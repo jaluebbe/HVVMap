@@ -126,6 +126,21 @@ def _unit_numbers(row: dict) -> str:
     return " · ".join(u for u in _numbers(row.get("vehicles")) if u not in dropped)
 
 
+# Zugnummer + IN_PATH_OFFSET: the train runs in another train's path,
+# swapped in or turned back (Hochbahn practice, per Jan).
+IN_PATH_OFFSET = 7000
+
+
+def _train_number_text(number: str) -> str:
+    """ "Zugnr. 012326", noting the path it runs in for +7000 numbers."""
+    if not number:
+        return ""
+    text = f"Zugnr. {number}"
+    if int(number) % 10000 >= IN_PATH_OFFSET:
+        text += f" (in der Lage von {int(number) - IN_PATH_OFFSET:06d})"
+    return text
+
+
 def _feature(
     row: dict,
     destination: str,
@@ -141,6 +156,8 @@ def _feature(
     # second line: the U-Bahn units if known, else the vehicle model
     detail = (row.get("vehicles") if row["mode"] == "U" else None) or row.get("model")
     text = f"{destination}<br>{detail}" if detail else destination
+    if row["mode"] == "U" and row.get("train_number"):
+        text = f"{text}<br>{_train_number_text(row['train_number'])}"
     if minutes > 0:
         text = f"{text}<br>+{minutes} Minuten"
     icon = (
