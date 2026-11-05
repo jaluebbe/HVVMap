@@ -91,12 +91,13 @@ class _Client:
 
 
 LINE = {"name": "U1", "dlid": "de:hvv:U1:", "type": {"shortInfo": "U"}}
+S_LINE = {"name": "S1", "dlid": "de:hvv:S1:", "type": {"shortInfo": "S"}}
 NOW = datetime(2026, 10, 17, 9, 0)
 
 
-def _dep(service_id, station="A", offset=2):
+def _dep(service_id, station="A", offset=2, line=LINE):
     return {
-        "line": {**LINE, "direction": "Z"},
+        "line": {**line, "direction": "Z"},
         "station": {"id": station, "combinedName": station.lower(), "name": station},
         "timeOffset": offset,
         "directionId": 6,
@@ -278,7 +279,7 @@ def test_running_course_is_refreshed_with_its_stored_request_between_anchors():
 def test_missing_courses_come_before_old_ones():
     live = {
         "anchor": {"date": "2026-10-17", "time": "09:00:00"},
-        "departures": [_dep(5), _dep(6)],
+        "departures": [_dep(5, line=S_LINE), _dep(6)],
     }
     jobs = trip_courses.course_jobs(
         live, _cached(5, age=3600), NOW, trip_courses.time.time()
@@ -313,7 +314,7 @@ def test_refresh_alternates_between_anchors_and_live_then_delayed_first():
     now = datetime(2026, 10, 17, 9, 10)
     live = {
         "anchor": {"date": "2026-10-17", "time": "09:00:00"},
-        "departures": [_dep(5, offset=10)],
+        "departures": [_dep(5, offset=10, line=S_LINE)],
     }
     cached = {
         **_between(5, 4000),  # live, oldest
@@ -374,3 +375,74 @@ def test_cache_summary_counts_live_ids_and_trips_between_anchors():
     assert (summary["total"]["ok"], summary["total"]["missing"]) == (1, 1)
     assert summary["total"]["stale"] == 1
     assert summary["between"]["count"] == 1
+
+
+LIVE_TS = datetime(2026, 10, 17, 9, 0, tzinfo=trip_courses.BERLIN_TZ).timestamp()
+
+
+def _u_live(*departures):
+    return {
+        "anchor": {"date": "2026-10-17", "time": "09:00:00"},
+        "departures": list(departures),
+    }
+
+
+def _u_cached(age):
+    """U-Bahn course fetched age seconds before the live snapshot."""
+    cached = _between(5, 0)
+    cached["live:5"].update(fetched_at=LIVE_TS - age, mode="U")
+    return cached
+
+
+def _u_jobs(live, cached, since_live=60):
+    now = datetime(2026, 10, 17, 9, 10)
+    jobs = trip_courses.course_jobs(live, cached, now, LIVE_TS + since_live)
+    return [(key, reason) for key, _, reason in jobs]
+
+
+def test_u_bahn_course_is_not_refreshed_by_age_alone():
+    cached = _u_cached(4000)
+    live = _u_live({**_dep(5, offset=0), "delay": 0})
+
+    assert _u_jobs(live, cached) == []
+    assert _u_jobs(None, cached) == []  # nor between its anchors
+
+
+def test_u_bahn_course_is_refetched_when_a_live_departure_is_cancelled():
+    cached = _u_cached(5)  # no cooldown for a cancellation
+    live = _u_live(_dep(5, offset=0), {**_dep(5, "B", 30), "cancelled": True})
+
+    assert _u_jobs(live, cached, since_live=10) == [("live:5", "cancelled")]
+
+
+def test_fully_cancelled_u_bahn_trip_refetches_its_course():
+    live = _u_live({**_dep(5, offset=0), "cancelled": True})
+
+    assert _u_jobs(live, _u_cached(600)) == [("live:5", "cancelled")]
+
+
+def test_u_bahn_course_is_refetched_when_the_live_delay_jumps():
+    on_time = _u_live({**_dep(5, "B", 30), "delay": 60})
+    jumped = _u_live({**_dep(5, "B", 30), "delay": 240})
+
+    assert _u_jobs(on_time, _u_cached(600)) == []
+    assert _u_jobs(jumped, _u_cached(600)) == [("live:5", "delay_jump")]
+
+
+def test_u_bahn_course_is_refetched_when_a_cancelled_stop_runs_again():
+    cached = _u_cached(600)
+    cached["live:5"]["stops"][1]["cancelled"] = True
+    live = _u_live({**_dep(5, "B", 30), "delay": 0})
+
+    assert _u_jobs(live, cached) == [("live:5", "running")]
+
+
+def test_u_bahn_change_waits_for_the_cooldown_and_newer_live_data():
+    live = _u_live({**_dep(5, "B", 30), "delay": 240})
+
+    assert _u_jobs(live, _u_cached(30)) == []  # within the cooldown
+    newer_course = _u_cached(-10)  # fetched after the snapshot
+    assert _u_jobs(live, newer_course, since_live=600) == []
+    newer_cancel = _u_cached(-10)
+    cancelled = _u_live({**_dep(5, "B", 30), "cancelled": True})
+    assert _u_jobs(cancelled, newer_cancel) == []
