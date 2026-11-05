@@ -10,6 +10,7 @@ import requests
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
+from hvv_map import gti_archive
 from hvv_map.course_log import KIND_TRIP, call_entry, log_calls
 from hvv_map.departures import berlin_now
 from hvv_map.gti_client import GtiClient
@@ -398,10 +399,19 @@ def run_trip_courses(client: GtiClient, redis_client, now: datetime | None = Non
         str(dep["serviceId"]): mode_for_line(dep.get("line") or {})
         for dep in (live or {}).get("departures", [])
     }
+    # departureList line per serviceId, kept with the course for the archive
+    lines = {
+        str(dep["serviceId"]): {
+            k: dep["line"].get(k) for k in ("id", "name", "origin", "direction")
+        }
+        for dep in (live or {}).get("departures", [])
+        if dep.get("line")
+    }
     calls = []
     for key, request, reason in jobs[:COURSE_MAX_CALLS]:
         started = time.time()
-        result = "ok"
+        sent_at = gti_archive.now_iso()
+        result, http_status = "ok", 200
         try:
             response = client.send("departureCourse", request)
         except requests.RequestException as error:
@@ -409,6 +419,7 @@ def run_trip_courses(client: GtiClient, redis_client, now: datetime | None = Non
             response = {}
             status = getattr(getattr(error, "response", None), "status_code", None)
             result = f"HTTP {status}" if status else type(error).__name__
+            http_status = status or 0
         stops = parse_course(response)
         if stops is None and result == "ok":
             result = "no course"
@@ -423,6 +434,19 @@ def run_trip_courses(client: GtiClient, redis_client, now: datetime | None = Non
         if stops is not None:
             sightings += course_sightings(request, response)
         previous = cached.get(key) or {}
+        line = lines.get(str(request["serviceId"])) or previous.get("line")
+        gti_archive.record_query(
+            endpoint="departureCourse",
+            group_name=(line or {}).get("name"),
+            sent_at=sent_at,
+            query_time=request.get("time"),
+            status=http_status,
+            duration_s=round(time.time() - started, 3),
+            n_departures=len(response.get("courseElements") or []),
+            error=None if result == "ok" else result,
+        )
+        if stops is not None and line:
+            gti_archive.record_course(request, response, line, sent_at, reason)
         calls.append(
             call_entry(
                 KIND_TRIP,
@@ -444,6 +468,7 @@ def run_trip_courses(client: GtiClient, redis_client, now: datetime | None = Non
             "station_id": by_name.get(request["station"]["name"]),
             "request": request,
             "mode": modes.get(str(request["serviceId"])) or previous.get("mode"),
+            "line": line,
             "vehicles": (response.get("vehicles") or []) if stops else [],
         }
         if stops is None:

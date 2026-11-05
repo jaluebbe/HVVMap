@@ -73,6 +73,12 @@ real one:
 export GTI_SHAPES_DB_PATH=/absolute/path/to/gti_shapes.db
 ```
 
+The fetcher also archives every departureList and departureCourse answer in
+`gti_live.sqlite` next to that database (tables `departures`, `courses`,
+`queries`, the format of ubahnkarte's `live.sqlite`), kept for
+`GTI_ARCHIVE_KEEP_DAYS` operating days (default 4). `GTI_ARCHIVE_DB_PATH`
+sets another file; an empty value turns the archive off.
+
 Run the GTFS fetcher (needs a static GTFS feed - `agency.txt`, `routes.txt`,
 `trips.txt`, `stop_times.txt`, `stops.txt`, `calendar.txt`/
 `calendar_dates.txt`, `shapes.txt` - unzipped into one directory):
