@@ -32,6 +32,11 @@ COURSE_RUNNING_SLACK_MINUTES = 2
 COURSE_DELAYED_SECONDS = 120  # delayed trains are refreshed first
 COURSE_END_SKIP_MINUTES = 5  # a course ending sooner is not refreshed
 COURSE_TIME_TOLERANCE_MINUTES = 10  # requested time vs. the course's own times
+# U-Bahn: every station is in the live departures, which carry the delays;
+# a course is refetched only when they contradict it (as ubahnkarte).
+ON_CHANGE_MODES = {"U"}
+COURSE_DELAY_JUMP_SECONDS = 180  # live vs. course delay at the same stop
+COURSE_CHANGE_COOLDOWN_SECONDS = 120  # not for a new cancellation
 
 
 def _parse_time(value: str | None) -> str | None:
@@ -158,6 +163,34 @@ REASON_BETWEEN = "between"  # running between anchors, no live departure
 REASON_REGIONAL = "regional"
 REASON_DELAYED = "delayed"
 REASON_AGE = "age"
+REASON_CANCELLED = "cancelled"  # live cancelled where the course runs
+REASON_RUNNING = "running"  # live runs where the course is cancelled
+REASON_DELAY_JUMP = "delay_jump"  # live delay differs from the course
+
+
+def course_change(entry: dict, deps: list[dict]) -> str | None:
+    """Reason to refetch an ON_CHANGE_MODES course: a live departure
+    (cancelled ones included) contradicts it at a station it has."""
+    stops = {stop["id"]: stop for stop in entry["stops"] if stop.get("id")}
+    reason = None
+    for dep in deps:
+        stop = stops.get(dep["station"]["id"])
+        if stop is None:
+            continue
+        cancelled = bool(dep.get("cancelled"))
+        if cancelled and not stop.get("cancelled"):
+            return REASON_CANCELLED
+        if not cancelled and stop.get("cancelled"):
+            reason = reason or REASON_RUNNING
+        live, course = dep.get("delay"), stop.get("dep_delay")
+        if (
+            not cancelled
+            and live is not None
+            and course is not None
+            and abs(live - course) >= COURSE_DELAY_JUMP_SECONDS
+        ):
+            reason = reason or REASON_DELAY_JUMP
+    return reason
 
 
 def course_jobs(live: dict | None, cached: dict, now: datetime, now_ts: float):
@@ -167,18 +200,22 @@ def course_jobs(live: dict | None, cached: dict, now: datetime, now_ts: float):
     running, is older than COURSE_REFRESH_SECONDS. These first; the old ones
     alternate between trips without a live departure (between anchors) and
     those with one, each delayed and regional trains first, then the oldest;
-    a course ending soon is not refreshed. Cancelled departures are
-    ignored."""
+    a course ending soon is not refreshed. ON_CHANGE_MODES courses are
+    instead refetched only when the live departures (cancelled ones
+    included) contradict them."""
     by_id: dict[str, list] = defaultdict(list)
+    all_by_id: dict[str, list] = defaultdict(list)  # cancelled ones too
     if live:
         for dep in live["departures"]:
             if (
                 _is_trip_line(dep.get("line") or {})
                 and dep.get("timeOffset") is not None
-                and not dep.get("cancelled")
             ):
-                by_id[str(dep["serviceId"])].append(dep)
+                all_by_id[str(dep["serviceId"])].append(dep)
+                if not dep.get("cancelled"):
+                    by_id[str(dep["serviceId"])].append(dep)
     start = _live_start(live) if live else None
+    live_ts = start.replace(tzinfo=BERLIN_TZ).timestamp() if start else 0
     urgent, stale = [], []
     for service_id, deps in by_id.items():
         deps.sort(key=lambda dep: dep["timeOffset"])
@@ -200,13 +237,33 @@ def course_jobs(live: dict | None, cached: dict, now: datetime, now_ts: float):
                 if dep["station"]["id"] not in known
                 and dep["station"]["id"] != entry.get("station_id")
             ]
+            on_change = mode_for_line(deps[0].get("line") or {}) in ON_CHANGE_MODES
             if outside:
                 urgent.append((key, _dep_request(start, outside[0]), REASON_STATION))
+            elif on_change:
+                job = _change_job(
+                    key, entry, all_by_id[service_id], live_ts, now_ts, request
+                )
+                if job:
+                    urgent.append(job)
             elif now_ts - entry["fetched_at"] >= COURSE_REFRESH_SECONDS:
                 regional = mode_for_line(deps[0].get("line") or {}) == "R"
                 stale.append(
                     (True, entry, regional, key, entry.get("request") or request)
                 )
+    # all live departures cancelled: the course may still show them running
+    for service_id, deps in all_by_id.items():
+        key = alias_course_key(service_id)
+        entry = cached.get(key)
+        if (
+            service_id not in by_id
+            and entry
+            and entry.get("stops")
+            and mode_for_line(deps[0].get("line") or {}) in ON_CHANGE_MODES
+        ):
+            job = _change_job(key, entry, deps, live_ts, now_ts, None)
+            if job and job[1]:
+                urgent.append(job)
     # running trips between their anchors: refresh with the stored request
     for key, entry in cached.items():
         if (
@@ -215,6 +272,7 @@ def course_jobs(live: dict | None, cached: dict, now: datetime, now_ts: float):
             and entry.get("stops")
             and entry.get("request")
             and now_ts - entry["fetched_at"] >= COURSE_REFRESH_SECONDS
+            and entry.get("mode") not in ON_CHANGE_MODES
             and _is_running(entry, now)
         ):
             stale.append(
@@ -242,6 +300,22 @@ def course_jobs(live: dict | None, cached: dict, now: datetime, now_ts: float):
     between = [job[2:] for job in refresh if not job[0]]
     seen = [job[2:] for job in refresh if job[0]]
     return urgent + _alternate(between, seen)
+
+
+def _change_job(key, entry, deps, live_ts, now_ts, request):
+    """Refetch job if the live departures, taken after the course was
+    fetched, contradict it; a cancellation skips the cooldown."""
+    if entry["fetched_at"] >= live_ts:
+        return None
+    reason = course_change(entry, deps)
+    if reason is None:
+        return None
+    if (
+        reason != REASON_CANCELLED
+        and now_ts - entry["fetched_at"] < COURSE_CHANGE_COOLDOWN_SECONDS
+    ):
+        return None
+    return (key, entry.get("request") or request, reason)
 
 
 def _alternate(first: list, second: list) -> list:
