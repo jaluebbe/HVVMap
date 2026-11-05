@@ -221,16 +221,23 @@ def course_jobs(live: dict | None, cached: dict, now: datetime, now_ts: float):
         deps.sort(key=lambda dep: dep["timeOffset"])
         key = alias_course_key(service_id)
         entry = cached.get(key)
-        request = _dep_request(start, deps[0])
+        # GTI fails at some stations (e.g. where a train turns): request
+        # at the trip's next live departure instead
+        failed = set((entry or {}).get("failed_stations") or [])
+        first = next((d for d in deps if d["station"]["id"] not in failed), deps[0])
+        request = _dep_request(start, first)
         if entry is None:
             urgent.append((key, request, REASON_NEW))
         elif entry["stops"] is None:
-            if _retry_due(entry, now_ts):
+            if first["station"]["id"] != entry.get("station_id") or _retry_due(
+                entry, now_ts
+            ):
                 urgent.append((key, request, REASON_RETRY))
         elif not course_fits_request(entry["stops"], request):
             urgent.append((key, request, REASON_OTHER_RUN))
         else:
             known = {stop["id"] for stop in entry["stops"]}
+            known |= failed
             outside = [
                 dep
                 for dep in deps
@@ -436,12 +443,19 @@ def run_trip_courses(client: GtiClient, redis_client, now: datetime | None = Non
         )
         time.sleep(1)  # 1 req/s rate limit across all GTI endpoints
         attempts = 0 if stops else previous.get("attempts", 0) + 1
+        station_id = by_name.get(request["station"]["name"])
+        failed_stations = set(previous.get("failed_stations") or [])
+        if stops is None and station_id:
+            failed_stations.add(station_id)
+        elif stops is not None:
+            failed_stations -= {stop["id"] for stop in stops}
         cached[key] = {
             "fetched_at": int(time.time()),
             "attempts": attempts,
             "stops": stops,
             "service_id": str(request["serviceId"]),
-            "station_id": by_name.get(request["station"]["name"]),
+            "station_id": station_id,
+            "failed_stations": sorted(failed_stations),
             "request": request,
             "mode": modes.get(str(request["serviceId"])) or previous.get("mode"),
             "vehicles": (response.get("vehicles") or []) if stops else [],

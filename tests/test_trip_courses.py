@@ -245,6 +245,33 @@ def test_http_error_for_one_id_does_not_abort_the_run(monkeypatch):
     assert stored["live:2"]["stops"] is not None
 
 
+def test_fetch_failing_at_a_station_moves_on_to_the_next_live_departure(
+    monkeypatch,
+):
+    import requests
+
+    monkeypatch.setattr(trip_courses.time, "sleep", lambda _: None)
+    redis = _redis([_dep(7, "A", 2), _dep(7, "B", 4)])
+
+    class _FailingAtA(_Client):
+        def send(self, endpoint, request):
+            super().send(endpoint, request)
+            if request["station"]["name"] == "a":
+                raise requests.HTTPError("500")
+            response = _response()
+            response["courseElements"] = response["courseElements"][1:]  # from B
+            return response
+
+    client = _FailingAtA()
+    for _ in range(3):  # no waiting between the runs
+        run_trip_courses(client, redis, NOW)
+
+    assert [r["station"]["name"] for _, r in client.requests] == ["a", "b"]
+    stored = _stored(redis)["live:7"]
+    assert [s["id"] for s in stored["stops"]] == ["B", "C"]
+    assert stored["failed_stations"] == ["A"]
+
+
 def test_course_vehicles_are_recorded_as_sightings(monkeypatch):
     monkeypatch.setattr(trip_courses.time, "sleep", lambda _: None)
     recorded = []
