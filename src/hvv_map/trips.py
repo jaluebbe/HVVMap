@@ -17,6 +17,7 @@ from hvv_map.departures_tree import (
     _station_name,
     parse_anchor,
     refined_model,
+    train_number,
     vehicles_text,
 )
 
@@ -418,6 +419,7 @@ def _vehicle_fields(
     if text:
         return {
             "vehicles": text,
+            "train_number": train_number(unique),
             "model": refined_model(trip["line_obj"], unique),
             "vehicles_remembered": False,
             "vehicles_from_course": False,
@@ -426,6 +428,7 @@ def _vehicle_fields(
     if from_course:
         return {
             "vehicles": vehicles_text(from_course, ubahn),
+            "train_number": train_number(from_course),
             "model": refined_model(trip["line_obj"], from_course),
             "vehicles_remembered": False,
             "vehicles_from_course": True,
@@ -434,12 +437,14 @@ def _vehicle_fields(
     if remembered:
         return {
             "vehicles": remembered["vehicles"],
+            "train_number": remembered.get("train_number", ""),
             "model": remembered["model"],
             "vehicles_remembered": True,
             "vehicles_from_course": False,
         }
     return {
         "vehicles": "",
+        "train_number": "",
         "model": refined_model(trip["line_obj"], unique),
         "vehicles_remembered": False,
         "vehicles_from_course": False,
@@ -597,12 +602,14 @@ def remember_vehicles(memory: dict, table: dict, now_ts: float) -> bool:
         if not row["vehicles"] or row["vehicles_remembered"]:
             continue
         entry = memory.get(row["course_key"])
-        if not entry or (entry["vehicles"], entry["model"]) != (
-            row["vehicles"],
-            row["model"],
-        ):
+        if not entry or (
+            entry["vehicles"],
+            entry["model"],
+            entry.get("train_number", ""),
+        ) != (row["vehicles"], row["model"], row.get("train_number", "")):
             memory[row["course_key"]] = {
                 "vehicles": row["vehicles"],
+                "train_number": row.get("train_number", ""),
                 "model": row["model"],
                 "seen_at": now_ts,
             }

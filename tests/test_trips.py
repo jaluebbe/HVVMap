@@ -629,6 +629,19 @@ def test_vehicles_are_remembered_while_the_trip_has_no_live_entry():
     assert later["vehicles_remembered"] is True
 
 
+def test_train_number_is_kept_with_the_remembered_vehicles():
+    from hvv_map.trips import remember_vehicles
+
+    memory = {}
+    live = _vehicle_table([{"id": "FzgID_012326_17_417", "number": "417"}])
+    remember_vehicles(memory, live, 1000)
+
+    later = _vehicle_table([], memory, live_departures=False)["trips"][0]
+
+    assert live["trips"][0]["train_number"] == "012326"
+    assert later["train_number"] == "012326"
+
+
 def test_live_vehicles_win_over_the_memory_and_are_not_flagged():
     from hvv_map.trips import remember_vehicles
 

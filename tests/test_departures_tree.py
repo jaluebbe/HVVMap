@@ -5,6 +5,7 @@ from hvv_map.departures_tree import (
     build_station_tree,
     parse_anchor,
     refined_model,
+    train_number,
     ubahn_series,
     vehicle_numbers_text,
     vehicles_text,
@@ -165,3 +166,11 @@ def test_clock_before_anchor_is_not_next_day():
     from hvv_map.departures_tree import _clock
 
     assert _clock(datetime(2026, 10, 24), -10) == ("23:50", False)
+
+
+def test_train_number_comes_from_the_ubahn_vehicle_id():
+    vehicles = [{"id": "x", "number": "1"}, {"id": "FzgID_012326_4_382"}]
+
+    assert train_number(vehicles) == "012326"
+    assert train_number([{"id": "FzgID_1_4_382"}]) == ""
+    assert train_number(None) == ""
