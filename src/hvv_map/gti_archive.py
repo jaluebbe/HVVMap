@@ -288,6 +288,79 @@ WHERE excluded.last_seen_at >= departures.last_seen_at
 """
 
 
+# GTI reuses some plan IDs for a second trip on the same day (U1/U2, e.g.
+# 22141 at 04:50 and 15:09 on 05.11.). Later runs are stored as
+# -(run * RUN_BASE + id), as in ubahnkarte.
+RUN_BASE = PLAN_ID_MAX
+RUN_GAP = timedelta(hours=2)  # farther from every run: a new one
+MAX_RUNS = 10
+SAME_PLAN_ID = "service_id IN ({})".format(
+    ", ".join(["(:sid)"] + [f"(-{r} * :base - :sid)" for r in range(1, MAX_RUNS)])
+)
+
+
+def run_service_id(service_id: int, run: int) -> int:
+    return service_id if run == 0 else -(run * RUN_BASE + service_id)
+
+
+def split_run(service_id: int) -> tuple:
+    """(GTI service ID, run) of a stored service_id."""
+    if service_id >= 0:
+        return service_id, 0
+    return -service_id % RUN_BASE, -service_id // RUN_BASE
+
+
+def _runs(conn, day, line_key, sid):
+    """[(stored service_id, first, last departure)] of a plan ID's runs."""
+    return [
+        (r[0], datetime.fromisoformat(r[1]), datetime.fromisoformat(r[2]))
+        for r in conn.execute(
+            "SELECT service_id, min(dep_time), max(dep_time) FROM departures"
+            f" WHERE operating_day = :day AND line_key = :lk AND {SAME_PLAN_ID}"
+            " GROUP BY service_id",
+            {"day": day, "lk": line_key, "sid": sid, "base": RUN_BASE},
+        )
+    ]
+
+
+def _nearest_run(runs, at):
+    best = None
+    for sid, first, last in runs:
+        gap = max(first - at, at - last, timedelta(0))
+        if gap <= RUN_GAP and (best is None or gap < best[0]):
+            best = (gap, sid)
+    return best[1] if best else None
+
+
+def assign_run(conn, row: dict):
+    """Set a departure's service_id to the run of its plan ID it belongs to,
+    or to a new run when it is far from all of them."""
+    sid = row["service_id"]
+    if not 0 <= sid < PLAN_ID_MAX:
+        return
+    runs = _runs(conn, row["operating_day"], row["line_key"], sid)
+    if not runs:
+        return
+    found = _nearest_run(runs, datetime.fromisoformat(row["dep_time"]))
+    if found is None:
+        run = max(split_run(r[0])[1] for r in runs) + 1
+        if run >= MAX_RUNS:
+            return
+        found = run_service_id(sid, run)
+    row["service_id"] = found
+
+
+def assign_course_run(conn, row: dict):
+    """A course's run: the one its first departure falls into."""
+    sid = row["service_id"]
+    if not 0 <= sid < PLAN_ID_MAX:
+        return
+    runs = _runs(conn, row["operating_day"], row["line_key"], sid)
+    found = _nearest_run(runs, parse_gti_datetime(row["first_dep_time"]))
+    if found is not None:
+        row["service_id"] = found
+
+
 def continue_trip(conn, row: dict):
     """Assign a departure to the previous operating day if its trip runs
     there until shortly before (night trips crossing 03:00)."""
@@ -296,9 +369,14 @@ def continue_trip(conn, row: dict):
         return
     prev = (date.fromisoformat(row["operating_day"]) - timedelta(days=1)).isoformat()
     last = conn.execute(
-        "SELECT max(dep_time) FROM departures WHERE operating_day = ?"
-        " AND line_key = ? AND service_id = ?",
-        (prev, row["line_key"], row["service_id"]),
+        "SELECT max(dep_time) FROM departures WHERE operating_day = :day"
+        f" AND line_key = :lk AND {SAME_PLAN_ID}",
+        {
+            "day": prev,
+            "lk": row["line_key"],
+            "sid": row["service_id"],
+            "base": RUN_BASE,
+        },
     ).fetchone()[0]
     if last and dep_time - datetime.fromisoformat(last) <= CONTINUATION:
         row["operating_day"] = prev
@@ -451,6 +529,7 @@ def record_departures(response: dict, departures: list, seen_at: str):
                 continue
             row = departure_row(dep, response["time"], seen_at)
             continue_trip(conn, row)
+            assign_run(conn, row)
             conn.execute(UPSERT_DEPARTURE, row)
 
     if response.get("time"):
@@ -463,7 +542,12 @@ def record_course(
     """Upsert a course with elements; line is its departureList line."""
     row = course_row(request, response, line, fetched_at, trigger)
     if row:
-        _safely(lambda conn: conn.execute(UPSERT_COURSE, row))
+
+        def store(conn):
+            assign_course_run(conn, row)
+            conn.execute(UPSERT_COURSE, row)
+
+        _safely(store)
 
 
 def purge_if_due():
