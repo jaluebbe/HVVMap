@@ -28,6 +28,7 @@ from hvv_map.departures import (
     merge_departures,
     to_wall_offsets,
 )
+from hvv_map import gti_archive
 from hvv_map.gti_client import GtiClient
 from hvv_map.lines import WANTED_R_BAHN_LINES
 from hvv_map.redis_client import get_redis_client
@@ -75,21 +76,40 @@ def _chunk_size(service_types: list[str]) -> int:
     return U_CHUNK_STATIONS if service_types == U_SERVICE_TYPES else LIVE_CHUNK_STATIONS
 
 
-def _send(client: GtiClient, request: dict) -> tuple[dict | None, str]:
-    """(response, error): one retry after an HTTP error or a non-OK answer."""
-    error = ""
+def _send(
+    client: GtiClient, request: dict, group: str | None = None
+) -> tuple[dict | None, str, str]:
+    """(response, error, sent_at): one retry after an HTTP error or a non-OK
+    answer. Every attempt is archived (gti_archive)."""
+    error, sent_at = "", ""
     for attempt in range(2):
         if attempt:
             time.sleep(LIVE_RETRY_PAUSE)
+        sent_at, started = gti_archive.now_iso(), time.monotonic()
+        response, status = None, 200
         try:
             response = client.send("departureList", request)
         except requests.RequestException as exc:
             error = str(exc)
-            continue
-        if response.get("returnCode") == "OK":
-            return response, ""
-        error = str(response.get("returnCode"))
-    return None, error
+            response_obj = getattr(exc, "response", None)
+            status = getattr(response_obj, "status_code", None) or 0
+        else:
+            ok = response.get("returnCode") == "OK"
+            error = "" if ok else str(response.get("returnCode"))
+        gti_archive.record_query(
+            endpoint="departureList",
+            group_name=group,
+            sent_at=sent_at,
+            query_time=f"{request['time']['date']}T{request['time']['time']}",
+            status=status,
+            duration_s=round(time.monotonic() - started, 3),
+            n_departures=len((response or {}).get("departures") or []),
+            error=error or None,
+            window_min=request.get("maxTimeOffset"),
+        )
+        if response is not None and not error:
+            return response, "", sent_at
+    return None, error, sent_at
 
 
 def fetch_live_departures(
@@ -113,8 +133,9 @@ def fetch_live_departures(
             if not first:
                 time.sleep(1)  # 1 req/s rate limit across all GTI endpoints
             first = False
-            response, error = _send(
-                client, _live_request(chunk, service_types, start, minutes)
+            group = f"{'/'.join(service_types)} {number}/{len(chunks)}"
+            response, error, sent_at = _send(
+                client, _live_request(chunk, service_types, start, minutes), group
             )
             if response is None:
                 errors.append(
@@ -132,7 +153,11 @@ def fetch_live_departures(
                     for d in response.get("departures", [])
                     if d.get("line", {}).get("name") in WANTED_R_BAHN_LINES
                 ]
+            gti_archive.record_departures(
+                response, response.get("departures") or [], sent_at
+            )
             responses.append(response)
+    gti_archive.purge_if_due()
     return {
         "departures": to_wall_offsets(merge_departures(*responses), start),
         "anchor": {

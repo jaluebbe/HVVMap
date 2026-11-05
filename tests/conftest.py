@@ -11,3 +11,5 @@ data with test fixtures.
 import os
 
 os.environ.setdefault("REDIS_DB", "15")
+# No SQLite archive of GTI answers unless a test sets one up.
+os.environ.setdefault("GTI_ARCHIVE_DB_PATH", "")
