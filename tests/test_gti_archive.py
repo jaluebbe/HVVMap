@@ -151,3 +151,38 @@ def test_disabled_archive_does_nothing(monkeypatch):
     gti_archive.record_query(endpoint="departureList", sent_at="x", status=200)
 
     assert gti_archive._conn is None
+
+
+def test_a_plan_id_reused_later_in_the_day_gets_its_own_run(archive):
+    morning = {**_dep(offset=10), "serviceId": 22141}
+    afternoon = {**_dep(offset=10), "serviceId": 22141}
+    for hour in (8, 15):
+        response = {
+            "returnCode": "OK",
+            "time": {"date": "05.11.2026", "time": f"{hour:02d}:00"},
+            "departures": [morning if hour == 8 else afternoon],
+        }
+        gti_archive.record_departures(response, response["departures"], "x")
+        gti_archive.record_departures(response, response["departures"], "y")
+
+    rows = archive.execute(
+        "SELECT service_id, dep_time, seen_count FROM departures ORDER BY dep_time"
+    ).fetchall()
+    assert [(r[0], r[1][11:16], r[2]) for r in rows] == [
+        (22141, "08:10", 2),
+        (-122141, "15:10", 2),
+    ]
+    assert gti_archive.split_run(-122141) == (22141, 1)
+
+    element = {
+        "fromStation": {"id": "Master:10950"},
+        "toStation": {"id": "Master:10951"},
+        "depTime": "2026-11-05T15:10:00.000+0100",
+        "arrTime": "2026-11-05T15:12:00.000+0100",
+    }
+    gti_archive.record_course(
+        {"serviceId": 22141}, {"courseElements": [element]}, LINE, "z", "new"
+    )
+    assert archive.execute("SELECT service_id FROM courses").fetchall()[0][0] == (
+        -122141
+    )
