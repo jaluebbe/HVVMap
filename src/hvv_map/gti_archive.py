@@ -311,11 +311,18 @@ def split_run(service_id: int) -> tuple:
 
 
 def _runs(conn, day, line_key, sid):
-    """[(stored service_id, first, last departure)] of a plan ID's runs."""
+    """[(stored service_id, first, last departure, Zugnummer prefixes)] of a
+    plan ID's runs."""
     return [
-        (r[0], datetime.fromisoformat(r[1]), datetime.fromisoformat(r[2]))
+        (
+            r[0],
+            datetime.fromisoformat(r[1]),
+            datetime.fromisoformat(r[2]),
+            set((r[3] or "").split(",")) - {""},
+        )
         for r in conn.execute(
-            "SELECT service_id, min(dep_time), max(dep_time) FROM departures"
+            "SELECT service_id, min(dep_time), max(dep_time),"
+            " group_concat(DISTINCT vehicle_prefix) FROM departures"
             f" WHERE operating_day = :day AND line_key = :lk AND {SAME_PLAN_ID}"
             " GROUP BY service_id",
             {"day": day, "lk": line_key, "sid": sid, "base": RUN_BASE},
@@ -323,9 +330,13 @@ def _runs(conn, day, line_key, sid):
     ]
 
 
-def _nearest_run(runs, at):
+def _nearest_run(runs, at, prefix=None):
+    """Nearest run within RUN_GAP; a different Zugnummer is another run even
+    when close (21914 on 06.11.: 010821 until 09:10, 340925 from 09:25)."""
     best = None
-    for sid, first, last in runs:
+    for sid, first, last, prefixes in runs:
+        if prefix and prefixes and prefix not in prefixes:
+            continue
         gap = max(first - at, at - last, timedelta(0))
         if gap <= RUN_GAP and (best is None or gap < best[0]):
             best = (gap, sid)
@@ -341,7 +352,9 @@ def assign_run(conn, row: dict):
     runs = _runs(conn, row["operating_day"], row["line_key"], sid)
     if not runs:
         return
-    found = _nearest_run(runs, datetime.fromisoformat(row["dep_time"]))
+    found = _nearest_run(
+        runs, datetime.fromisoformat(row["dep_time"]), row.get("vehicle_prefix")
+    )
     if found is None:
         run = max(split_run(r[0])[1] for r in runs) + 1
         if run >= MAX_RUNS:
@@ -356,7 +369,9 @@ def assign_course_run(conn, row: dict):
     if not 0 <= sid < PLAN_ID_MAX:
         return
     runs = _runs(conn, row["operating_day"], row["line_key"], sid)
-    found = _nearest_run(runs, parse_gti_datetime(row["first_dep_time"]))
+    found = _nearest_run(
+        runs, parse_gti_datetime(row["first_dep_time"]), row.get("vehicle_prefix")
+    )
     if found is not None:
         row["service_id"] = found
 
