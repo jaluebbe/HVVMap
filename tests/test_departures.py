@@ -420,12 +420,12 @@ def test_fetch_u_departures_covers_every_station_in_chunks(monkeypatch):
 
     result = departures.fetch_u_departures(_Client(), datetime(2026, 10, 26), 10)
 
-    assert len(requests) == 3
+    assert len(requests) == 4
     assert all(r["serviceTypes"] == ["UBAHN"] for r in requests)
     assert all(len(r["stations"]) <= departures.U_CHUNK_STATIONS for r in requests)
     names = {s["name"] for r in requests for s in r["stations"]}
     assert names == UBAHN_STATIONS
-    assert len(result["departures"]) == 3
+    assert len(result["departures"]) == 4
 
 
 def test_fetch_u_departures_fails_on_a_rejected_chunk(monkeypatch):
