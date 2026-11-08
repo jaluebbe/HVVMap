@@ -61,7 +61,9 @@ UBAHN_STATIONS = {
 }  # fmt: skip
 U_SERVICE_TYPES = ["UBAHN"]
 SEV_CHUNK_STATIONS = 20  # a day of buses per station: big requests hit maxList
-U_CHUNK_STATIONS = 31  # all stations in 3 requests: 90 in one time out (504)
+# all stations in 4 requests: with 31 per request ~3 % hit the 5 s timeout
+# (504) at peak times, and the duration grows with the station count
+U_CHUNK_STATIONS = 24
 
 # Stations where S/AKN/ferry lines start or terminate - covers every
 # service without querying every single stop.
@@ -192,9 +194,14 @@ def _store(redis_client, key: str, data: dict) -> None:
 
 
 def chunked(stations: set[str], size: int) -> list[set[str]]:
-    """Stations in sorted groups of at most size."""
+    """Stations in as few sorted groups of at most size as possible, evenly
+    filled (no small remainder group next to full ones)."""
     names = sorted(stations)
-    return [set(names[i : i + size]) for i in range(0, len(names), size)]
+    count = -(-len(names) // size)
+    return [
+        set(names[i * len(names) // count : (i + 1) * len(names) // count])
+        for i in range(count)
+    ]
 
 
 def fetch_main_departures(

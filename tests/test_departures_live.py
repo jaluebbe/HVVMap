@@ -87,8 +87,15 @@ def test_failed_request_is_retried_once(monkeypatch):
     assert data["failed_requests"] == 0 and data["complete"]
 
 
-def test_all_ubahn_stations_take_three_requests():
-    assert len(live.chunked(live.UBAHN_STATIONS, live.U_CHUNK_STATIONS)) == 3
+def test_all_ubahn_stations_take_four_requests():
+    assert len(live.chunked(live.UBAHN_STATIONS, live.U_CHUNK_STATIONS)) == 4
+
+
+def test_chunks_are_filled_evenly():
+    chunks = live.chunked({f"s{i:02d}" for i in range(47)}, 20)
+    assert [len(c) for c in chunks] == [15, 16, 16]
+    assert sorted(set().union(*chunks)) == sorted(f"s{i:02d}" for i in range(47))
+    assert live.chunked(set(), 20) == []
 
 
 def test_failed_ubahn_request_makes_the_snapshot_incomplete(monkeypatch):
@@ -97,14 +104,14 @@ def test_failed_ubahn_request_makes_the_snapshot_incomplete(monkeypatch):
     data = fetch_live_departures(_FakeClient(fail_on={0, 1}), START)
 
     assert data["failed_requests"] == 1 and not data["complete"]
-    assert data["errors"][0].startswith("UBAHN 1/3")
+    assert data["errors"][0].startswith("UBAHN 1/4")
 
 
 def test_failed_main_request_makes_the_snapshot_incomplete(monkeypatch):
     monkeypatch.setattr(live.time, "sleep", lambda _: None)
 
-    # the U category takes the first three requests
-    data = fetch_live_departures(_FakeClient(fail_on={3, 4}), START)
+    # the U category takes the first four requests
+    data = fetch_live_departures(_FakeClient(fail_on={4, 5}), START)
 
     assert data["failed_requests"] == 1 and not data["complete"]
     assert data["errors"][0].startswith("SBAHN/AKN/FAEHRE 1/")
