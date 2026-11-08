@@ -186,3 +186,21 @@ def test_a_plan_id_reused_later_in_the_day_gets_its_own_run(archive):
     assert archive.execute("SELECT service_id FROM courses").fetchall()[0][0] == (
         -122141
     )
+
+
+def test_another_zugnummer_close_in_time_is_another_run(archive):
+    def dep(offset, number):
+        vehicle = {"id": f"FzgID_{number}_6_105", "number": "105"}
+        return {**_dep(offset=offset), "serviceId": 21914, "vehicles": [vehicle]}
+
+    response = {"time": {"date": "06.11.2026", "time": "09:00"}}
+    gti_archive.record_departures(response, [dep(10, "010821")], "x")
+    gti_archive.record_departures(response, [dep(25, "340925")], "x")
+
+    rows = archive.execute(
+        "SELECT service_id, vehicle_prefix FROM departures ORDER BY dep_time"
+    ).fetchall()
+    assert [tuple(r) for r in rows] == [
+        (21914, "010821_6"),
+        (-121914, "340925_6"),
+    ]
