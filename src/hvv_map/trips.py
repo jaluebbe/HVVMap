@@ -215,6 +215,16 @@ def _window_end(trip: dict, live_anchor: datetime) -> datetime:
     return live_anchor + timedelta(minutes=minutes)
 
 
+def _course_after(course: dict | None, live_anchor: datetime) -> bool:
+    """The course was fetched after this live snapshot, so it settles
+    cancellations the departures list at stops it serves (a U4 listed
+    cancelled on 09.11. that ran on)."""
+    if not course or not course.get("stops") or not course.get("fetched_at"):
+        return False
+    fetched = datetime.fromtimestamp(course["fetched_at"], ZoneInfo("Europe/Berlin"))
+    return fetched.replace(tzinfo=None) >= live_anchor
+
+
 def _route_rows(
     trip: dict, live_anchor: datetime, window_end: datetime, course: dict | None
 ) -> tuple[list[dict], list[str]]:
@@ -228,6 +238,7 @@ def _route_rows(
     anchors = trip["stops"]
     stations = _base_stations(trip, course)
     positions = _anchor_positions(anchors, stations)
+    settles = _course_after(course, live_anchor)
     if not positions and course and course.get("stops"):
         stations = _base_stations(trip, None)
         positions = _anchor_positions(anchors, stations)
@@ -235,6 +246,8 @@ def _route_rows(
     def anchor_row(stop: dict, station: dict | None = None) -> dict:
         planned = stop["planned"].strftime("%H:%M")
         match = stop["match"]
+        live_cancelled = bool((match or {}).get("cancelled"))
+        served = settles and bool(station) and not station["cancelled"]
         return {
             "station": stop["station"],
             "station_id": station["id"] if station else stop.get("station_id"),
@@ -251,8 +264,10 @@ def _route_rows(
             "interpolated": False,
             "anchor": True,
             "expected": live_anchor <= stop["planned"] <= window_end,
-            "cancelled": bool((match or {}).get("cancelled"))
+            "cancelled": (live_cancelled and not served)
             or bool(station and station["cancelled"]),
+            "course_served": served,
+            "cancel_disputed": live_cancelled and served,
             # whether a live departure or the course tells if it is served
             "known": bool(match) or bool(station and station["known"]),
             "match": _public(stop["match"]) if stop["match"] else None,
@@ -297,6 +312,8 @@ def _route_rows(
                 "anchor": False,
                 "expected": False,
                 "cancelled": station["cancelled"],
+                "course_served": settles and not station["cancelled"],
+                "cancel_disputed": False,
                 "known": station["known"],
                 "match": None,
             }
@@ -841,7 +858,10 @@ def _mark_confirmed(stops: list[dict], confirmed: dict | None) -> None:
             row["known"] = True
             row["earlier"] = state
         if row["cancelled_earlier"]:
-            row["cancelled"] = True
+            if row.get("course_served"):
+                row["cancel_disputed"] = True
+            else:
+                row["cancelled"] = True
 
 
 LIVE_IDS_PREFIX = "ids:"  # memory key prefix, see remember_live_ids
