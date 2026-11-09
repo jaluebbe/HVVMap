@@ -1,4 +1,5 @@
 from datetime import datetime
+from zoneinfo import ZoneInfo
 
 from hvv_map.trips import build_trip_table
 
@@ -351,6 +352,41 @@ def test_cancelled_course_stops_and_live_departures_mark_their_rows():
     row = build_trip_table(_routed_plan(), PLAN_ANCHOR, live, courses)["trips"][0]
 
     assert [s["cancelled"] for s in row["stops"]] == [False, True, False, False, True]
+
+
+def test_a_later_course_settles_cancellations_it_does_not_show():
+    from hvv_map.trips import alias_course_key
+
+    course = {
+        "stops": [
+            {
+                "id": sid,
+                "name": sid.lower(),
+                "dep": f"2026-10-17T09:{minute:02d}",
+                "arr": None,
+                "dep_delay": None,
+                "cancelled": False,
+            }
+            for sid, minute in (("Z", 0), ("A", 2), ("B", 5), ("C", 8), ("D", 10))
+        ],
+        "fetched_at": datetime(
+            2026, 10, 17, 9, 1, tzinfo=ZoneInfo("Europe/Berlin")
+        ).timestamp(),
+    }
+    live = {
+        "anchor": LIVE_ANCHOR,
+        "departures": [_live("U1", "A", 2, 6, cancelled=True)],
+    }
+    courses = {alias_course_key("900"): course}
+
+    row = build_trip_table(_routed_plan(), PLAN_ANCHOR, live, courses)["trips"][0]
+
+    assert not any(s["cancelled"] for s in row["stops"])
+    assert [s["cancel_disputed"] for s in row["stops"]] == [False, True] + [False] * 3
+
+    course["fetched_at"] -= 120  # before the live snapshot: no say
+    row = build_trip_table(_routed_plan(), PLAN_ANCHOR, live, courses)["trips"][0]
+    assert row["stops"][1]["cancelled"] and not row["stops"][1]["cancel_disputed"]
 
 
 def test_trip_row_reports_the_time_span_of_its_route():
