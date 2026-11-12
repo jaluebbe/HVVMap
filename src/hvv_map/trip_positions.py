@@ -21,7 +21,15 @@ from hvv_map.lines import replacement_bus_mode
 from hvv_map.redis_client import get_redis_client
 from hvv_map.stations import StationInfo, by_id, load_stations
 from hvv_map.trip_courses import REDIS_COURSES_KEY
-from hvv_map.trip_position import AT_STOP, BETWEEN, Position, locate, stops_from_row
+from hvv_map.trip_position import (
+    AT_STOP,
+    BETWEEN,
+    Position,
+    apply_delay,
+    locate,
+    stops_from_row,
+    timeline,
+)
 from hvv_map.trips import (
     COMBINED_DESTINATION,
     REDIS_VEHICLES_KEY,
@@ -386,6 +394,62 @@ def _one_per_train(features: list[dict], meta: dict[int, tuple]) -> list[dict]:
     return [f for f in features if id(f) not in dropped]
 
 
+# Single-track sections on the U1 to Großhansdorf: a train cannot enter one
+# while a train in the other direction is in it.
+SINGLE_TRACK = (
+    ("Buchenkamp", "Ahrensburg West"),
+    ("Ahrensburg West", "Ahrensburg Ost", "Schmalenbeck"),
+    ("Schmalenbeck", "Kiekut", "Großhansdorf"),
+)
+
+
+def _in_section(names: list[str], position: Position) -> tuple | None:
+    """(section, direction, entry stop index) the train occupies, else None.
+    A stop inside a section still occupies it."""
+    if position.state == BETWEEN:
+        i, j = position.index, position.end_index
+    elif position.state == AT_STOP and 0 < position.index < len(names) - 1:
+        i, j = position.index - 1, position.index + 1
+    else:
+        return None
+    for sec in SINGLE_TRACK:
+        if names[i] not in sec or names[j] not in sec:
+            continue
+        way = 1 if sec.index(names[j]) > sec.index(names[i]) else -1
+        entry = sec[0] if way > 0 else sec[-1]
+        # Entry: the last stop at or before i named like the section's start.
+        index = next((k for k in range(i, -1, -1) if names[k] == entry), None)
+        if index is not None and all(n in sec for n in names[index : j + 1]):
+            return sec, way, index
+    return None
+
+
+def _single_track(
+    features: list[dict], occupants: dict[int, tuple], stations: dict
+) -> None:
+    """Of two trains in opposite directions in one single-track section, the
+    later to enter waits at its entry station. Realtime per minute shows a
+    moved crossing only late. occupants: feature -> (section, direction,
+    entry departure, entry station id)."""
+    by_sec: dict[tuple, list] = defaultdict(list)
+    for f in features:
+        if id(f) in occupants:
+            sec, way, dep, sid = occupants[id(f)]
+            by_sec[sec].append((dep, way, sid, f))
+    for trains in by_sec.values():
+        if len({way for _, way, _, _ in trains}) < 2:
+            continue
+        trains.sort(key=lambda t: t[0])
+        first = trains[0][1]
+        for _, way, sid, f in trains:
+            station = stations.get(sid or "")
+            if way == first or not station:
+                continue
+            f["geometry"]["coordinates"] = [station.lon, station.lat]
+            f["properties"]["progress"] = 0
+            f["properties"]["straight"] = False
+
+
 def build_positions(
     table: dict,
     now: datetime,
@@ -401,6 +465,7 @@ def build_positions(
     rows = [r for r in map(_served_row, table["trips"]) if r]
     skip, hidden = _drawn_by_others(rows, now)
     meta: dict[int, tuple] = {}  # see _one_per_train
+    occupants: dict[int, tuple] = {}  # see _single_track
     for row in rows:
         # a cancelled trip still runs its served part (partial cancellation)
         if row["status"] == STATUS_MISSING or id(row) in skip:
@@ -425,6 +490,11 @@ def build_positions(
                     row.get("course_id") == row.get("service_id"),
                 )
                 features.append(feature)
+                names = [s["station"] for s in row["stops"]]
+                if found := _in_section(names, position):
+                    sec, way, entry = found
+                    times = timeline(apply_delay(stops), ferry)
+                    occupants[id(feature)] = (sec, way, times[entry][1], ids[entry])
         for alias in row["alias_courses"]:
             if alias["service_id"] in hidden:
                 continue
@@ -450,10 +520,9 @@ def build_positions(
                         straight,
                     )
                 )
-    return {
-        "type": "FeatureCollection",
-        "features": _one_feature_per_unit(_one_per_train(features, meta), rows),
-    }
+    features = _one_feature_per_unit(_one_per_train(features, meta), rows)
+    _single_track(features, occupants, stations)
+    return {"type": "FeatureCollection", "features": features}
 
 
 def _one_feature_per_unit(features: list[dict], rows: list[dict]) -> list[dict]:

@@ -537,3 +537,66 @@ def test_a_unit_on_two_trips_belongs_to_the_later_one():
     features = _positions_of([old, new])
 
     assert [f["properties"]["journeyID"] for f in features] == ["livetrip:1"]
+
+
+BRANCH = ["Ahrensburg West", "Ahrensburg Ost", "Schmalenbeck", "Kiekut"]
+BRANCH_STATIONS = {s: _station(s, i) for i, s in enumerate(BRANCH)}
+
+
+def _branch_row(row_id, stops):
+    return _row(id=row_id, course_key=f"{row_id}@x", stops=stops)
+
+
+def _branch_positions(rows, now):
+    return {
+        f["properties"]["journeyID"]: f["geometry"]["coordinates"][0]
+        for f in build_positions({"trips": rows}, now, BRANCH_STATIONS)["features"]
+    }
+
+
+def test_later_train_waits_at_the_entry_of_an_occupied_single_track_section():
+    east = _branch_row(
+        "east",
+        [
+            _stop("Ahrensburg West", None, "09:00"),
+            _stop("Ahrensburg Ost", "09:02", "09:03"),
+            _stop("Schmalenbeck", "09:05", None),
+        ],
+    )
+    west = _branch_row(
+        "west",
+        [
+            _stop("Schmalenbeck", None, "09:01"),
+            _stop("Ahrensburg Ost", "09:03", "09:04"),
+            _stop("Ahrensburg West", "09:06", None),
+        ],
+    )
+
+    positions = _branch_positions([east, west], datetime(2026, 10, 17, 9, 1, 30))
+
+    assert 0 < positions["east"] < 1  # entered first, runs on
+    assert positions["west"] == 2  # waits at Schmalenbeck
+
+
+def test_trains_in_one_direction_share_a_single_track_section():
+    first = _branch_row(
+        "first",
+        [
+            _stop("Ahrensburg West", None, "09:00"),
+            _stop("Ahrensburg Ost", "09:02", "09:03"),
+            _stop("Schmalenbeck", "09:05", None),
+        ],
+    )
+    second = _branch_row(
+        "second",
+        [
+            _stop("Ahrensburg West", None, "09:03"),
+            _stop("Ahrensburg Ost", "09:05", "09:06"),
+            _stop("Schmalenbeck", "09:08", None),
+        ],
+    )
+
+    positions = _branch_positions([first, second], datetime(2026, 10, 17, 9, 4, 0))
+
+    assert positions["first"] > 1
+    assert 0 < positions["second"] < 1
