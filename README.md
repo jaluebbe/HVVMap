@@ -82,6 +82,10 @@ The fetcher also archives every departureList and departureCourse answer in
 `GTI_ARCHIVE_KEEP_DAYS` operating days (default 4). `GTI_ARCHIVE_DB_PATH`
 sets another file; an empty value turns the archive off.
 
+`HVV_WING_LINES` (default `S1`) lists the lines with wing-train pairing
+(coupled parts drawn as one train); an empty value turns it off, so every
+part is drawn on its own and stacked with the others.
+
 Run the GTFS fetcher (needs a static GTFS feed - `agency.txt`, `routes.txt`,
 `trips.txt`, `stop_times.txt`, `stops.txt`, `calendar.txt`/
 `calendar_dates.txt`, `shapes.txt` - unzipped into one directory):

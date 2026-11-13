@@ -13,9 +13,15 @@ Departures are dicts with "at" (datetime), "platform", "direction" and
 "direction_id".
 """
 
+import os
 from datetime import timedelta
 
-WING_LINES = {"S1"}
+# Comma-separated; empty turns the wing-train handling off.
+WING_LINES = {
+    name.strip()
+    for name in os.environ.get("HVV_WING_LINES", "S1").split(",")
+    if name.strip()
+}
 NEAR = timedelta(minutes=1)
 QUALITY_EXACT = "exakt"
 QUALITY_NEAR = "±1 min"
