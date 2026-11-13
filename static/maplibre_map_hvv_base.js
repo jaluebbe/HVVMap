@@ -4,6 +4,7 @@ const HAMBURG_CENTER = [9.9937, 53.5511]; // MapLibre wants [lon, lat]
 const HAMBURG_DEFAULT_ZOOM = 12;
 
 // Optional page overrides (window.HVV_PAGE_CONFIG): center [lon, lat], zoom, minZoom, modes,
+// ais (AIS layer, default: on pages with ferries),
 // lineToggles {mode: [{key, color, icon}]} - per-line checkboxes replacing that mode's,
 // sourceKeys - restricts the data source choices.
 const PAGE_CONFIG = window.HVV_PAGE_CONFIG || {};
@@ -324,8 +325,9 @@ function buildIconNode(icon) {
 
 // One checkbox per mode + disruption category; collapsible on narrow/short screens.
 class ModeToggleControl {
-    constructor(onModeToggle, categories, onCategoryToggle, sourceConfig, onLineToggle, extraToggles) {
+    constructor(onModeToggle, categories, onCategoryToggle, sourceConfig, onLineToggle, extraToggles, aisToggle) {
         this._extraToggles = extraToggles || [];
+        this._aisToggle = aisToggle || null;
         this._onModeToggle = onModeToggle;
         this._onLineToggle = onLineToggle;
         this._categories = categories || [];
@@ -409,6 +411,16 @@ class ModeToggleControl {
             this._extraToggles.forEach((t) => this._appendItem(this._extrasSection, t.key, t.name, t.icon || '', t.checked, t.onToggle));
         }
         items.appendChild(this._extrasSection);
+
+        if (this._aisToggle) {
+            const t = this._aisToggle;
+            const aisSection = document.createElement('div');
+            const aisDivider = document.createElement('div');
+            aisDivider.className = 'hvv-mode-control-divider';
+            aisSection.appendChild(aisDivider);
+            this._appendItem(aisSection, t.key, t.name, t.icon, t.checked, t.onToggle);
+            items.appendChild(aisSection);
+        }
 
         if (this._sourceConfig && this._sourceConfig.sources.length > 1) {
             const sourceDivider = document.createElement('div');
@@ -735,6 +747,8 @@ function initHvvVehicleLayers(initialSourceKey) {
     // Markers by journeyID, kept across polls and moved in place.
     const positionEntries = new Map();
     let hoveredPositionKey = null;
+    // PAGE_CONFIG.ais overrides; by default on pages with ferries.
+    const aisEnabled = PAGE_CONFIG.ais ?? (!PAGE_CONFIG.modes || PAGE_CONFIG.modes.includes('FERRY'));
     let currentSource = SOURCES.find((s) => s.key === initialSourceKey) || SOURCES[0];
     let modeToggleControl = null;
     // Pages with PAGE_CONFIG.straightToggle false have no "Luftlinien" toggle
@@ -1008,6 +1022,8 @@ function initHvvVehicleLayers(initialSourceKey) {
 
         MODES.filter((m) => m.startsHidden).forEach((m) => applyModeVisibility(m.key));
 
+        // Optional AIS layer (maplibre_map_hvv_ais.js), off until switched on.
+        const aisLayer = aisEnabled && typeof createHvvAisLayer === 'function' ? createHvvAisLayer(map) : null;
         modeToggleControl = new ModeToggleControl(
             setModeVisibility,
             DISRUPTION_CATEGORIES,
@@ -1015,6 +1031,8 @@ function initHvvVehicleLayers(initialSourceKey) {
             { sources: SOURCES, initialKey: currentSource.key, onSourceChange: switchSource },
             setLineVisibility,
             [{ key: 'straight', name: 'Luftlinien', icon: '⋯', checked: false, onToggle: setStraightVisibility }],
+            aisLayer && { key: 'ais', name: 'AIS', icon: '/static/hvv/icons/ais.svg', checked: false,
+                onToggle: (key, checked) => aisLayer.setVisible(checked) },
         );
         map.addControl(modeToggleControl, 'top-right');
         modeToggleControl.setCategoriesVisible(!!currentSource.disruptionsEndpoint);

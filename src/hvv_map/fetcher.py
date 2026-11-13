@@ -4,6 +4,8 @@ Rate limit: max 1 request/second across ALL endpoints (see GTI docs, 1.10).
 Each loop cycle runs at most one job, and a job that makes several requests
 sleeps 1 s between them. Vehicle positions are not fetched: trip_positions.py
 computes them every second from the departure data stored here.
+HADAG ferry positions come from the AIS API (ais.py, own thread, only with
+AIS_TOKEN): hvv:ais:hadag.
 
 Jobs, each on its own interval:
 - getAnnouncements -> hvv:announcements, hvv:disruptions,
@@ -25,6 +27,7 @@ from hvv_map.disruptions import (
     build_disruptions_geojson,
     extract_announcement_station_names,
 )
+from hvv_map.ais import run_loop as run_ais_loop
 from hvv_map.departures import run_daily_snapshots, snapshots_stale
 from hvv_map.departures_live import run_live_snapshot
 from hvv_map.trip_courses import run_trip_courses
@@ -134,6 +137,7 @@ def fetch_once_announcements() -> None:
 def main() -> None:
     # own thread: GTI jobs below can block the loop for tens of seconds
     threading.Thread(target=run_trip_positions_loop, daemon=True).start()
+    threading.Thread(target=run_ais_loop, daemon=True).start()
     last_announcements_fetch = 0.0
     last_stations = 0.0
     last_sublines_cache_update = 0.0

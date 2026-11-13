@@ -14,7 +14,9 @@ one Redis instance:
   `hvv:disruptions`, `hvv:departures:*`, `hvv:trips:courses`,
   `hvv:courses:log`, `hvv:stations`, `hvv:sublines`. A second thread (`hvv_map.trip_positions`) computes the
   vehicle positions once per second from that data and writes
-  `hvv:positions_gtilive`. Needs GTI credentials, no web-facing port.
+  `hvv:positions_gtilive`. A third thread (`hvv_map.ais`) polls the HADAG
+  ferries' AIS positions (Open Waters API, by MMSI) into `hvv:ais:hadag`; it
+  does nothing without `AIS_TOKEN`. Needs GTI credentials, no web-facing port.
 - **gtfs-fetcher** (`hvv_map.gtfs_fetcher`) - background loop building the
   same kind of layers purely from a static GTFS feed on disk - no GTI
   credentials, no live API, no disruptions (a static feed has none). Writes
@@ -40,6 +42,7 @@ Supporting modules (all under `src/hvv_map/`):
 | `geometry.py` | distance helpers for walking along a polyline |
 | `announcement_categories.py` | our own SPERRUNG/BARRIEREFREIHEIT/SONSTIGE classification per announcement - dependency-free (stdlib only), importable by both the fetcher and the API server |
 | `disruptions.py` | builds `hvv:disruptions` from a `getAnnouncements` response, using `announcement_categories.py` for classification |
+| `ais.py` | HADAG ferry positions from the Open Waters AIS API (`hvv:ais:hadag`), independent of the GTI data |
 | `gtfs_schedule.py` | parses a static GTFS feed into an in-memory schedule, locates a trip's position at a given time |
 | `gtfs_geojson.py` | builds the three `hvv:gtfs:*` layers from a loaded `Schedule` |
 
@@ -125,6 +128,8 @@ they're built directly from the static feed on first run.
   filters by name); not read by the running system, purely diagnostic
 - `hvvmap-fetch-announcements` - one-shot fetch for manual inspection via
   `redis-cli`
+- `hvvmap-ais` - one AIS request for the HADAG fleet (needs `AIS_TOKEN`),
+  prints the number of vessels found
 - `hvvmap-gtfs-fetch-once` - one-shot GTFS layer build, same idea for the
   `hvv:gtfs:*` keys
 
@@ -135,7 +140,12 @@ they're built directly from the static feed on first run.
 
 - `maplibre_map_hvv_live.html` - all modes; the data source (`gtilive`,
   `gtfs`) is switched at runtime via a dropdown, no page reload needed; see
-  `maplibre_map_hvv_base.js`'s `SOURCES`. Defaults to `gtilive`.
+  `maplibre_map_hvv_base.js`'s `SOURCES`. Defaults to `gtilive`. The
+  checkbox "AIS" (off by default) adds the HADAG ferries' AIS positions
+  (`maplibre_map_hvv_ais.js`, `/api/hvv/ais/hadag.geojson`): a hull icon per
+  vessel, green while under way and grey while moored; the page option
+  `ais` overrides, by default it is on for pages with ferries. It is
+  independent of the GTI ferries.
 - `maplibre_map_hvv_ubahn.html` - the same page restricted to the U-Bahn and
   the `gtilive` source, centered on Betriebshof Barmbek, with U1-U4
   toggleable individually and a `#` toggle for the unit numbers below the
@@ -209,7 +219,9 @@ is there: rail hops GTI delivers no track for are then cut from the GTFS
 shapes (`gtfs_tracks.py`). Without a feed this step is skipped.
 
 All images read `REDIS_HOST`/`REDIS_DB` (default `127.0.0.1`/`0`); only the
-GTI fetcher needs `GTI_USER`/`GTI_HMAC_SECRET`.
+GTI fetcher needs `GTI_USER`/`GTI_HMAC_SECRET`, and `AIS_TOKEN` (personal token
+from openwaters.io/ais/token, e.g. from the `.env` next to the compose file)
+enables the AIS layer.
 
 ## History
 
