@@ -207,6 +207,48 @@ def _served(stops: list[dict]) -> list[dict]:
     return stops[kept[0] : kept[-1] + 1] if kept else []
 
 
+# A train in another's path departs where it takes over at most this long
+# after the other one's planned time there.
+SWAP_S = 300
+
+
+def _stop_time(stop: dict) -> datetime | None:
+    return datetime.fromisoformat(stop["at"]) if stop.get("at") else None
+
+
+def _swapped_rows(rows: list[dict]) -> list[dict]:
+    """Rows ending where a train in their path (Zugnummer +7000) starts, if
+    cancelled after that stop: GTI lists a train swapped in Farmsen one stop
+    further (341625 to Trabrennbahn, 348625 from Farmsen Gleis 4)."""
+    by_number = {r["train_number"]: r for r in rows if r.get("train_number")}
+    out = []
+    for row in rows:
+        number = row.get("train_number") or ""
+        other = None
+        if (
+            number.isdigit()
+            and len(number) == 6
+            and int(number) % 10000 < IN_PATH_OFFSET
+        ):
+            other = by_number.get(f"{int(number) + IN_PATH_OFFSET:06d}")
+        if other and other["stops"]:
+            origin = other["stops"][0]
+            start = _stop_time(origin)
+            for i, stop in enumerate(row["stops"][1:-1], 1):
+                at = _stop_time(stop)
+                if (
+                    stop["station_id"] == origin["station_id"]
+                    and start
+                    and at
+                    and 0 <= (start - at).total_seconds() <= SWAP_S
+                    and any(s.get("cancelled") for s in row["stops"][i + 1 :])
+                ):
+                    row = {**row, "stops": row["stops"][: i + 1], "alias_courses": []}
+                    break
+        out.append(row)
+    return out
+
+
 def _served_row(row: dict) -> dict | None:
     """The row and its wing courses cut to their served stops, ending at the
     last served stop instead of the announced destination; None if no stop
@@ -462,7 +504,7 @@ def build_positions(
     `cache` keeps segment tracks between calls on the same data."""
     cache = {} if cache is None else cache
     features = []
-    rows = [r for r in map(_served_row, table["trips"]) if r]
+    rows = [r for r in map(_served_row, _swapped_rows(table["trips"])) if r]
     skip, hidden = _drawn_by_others(rows, now)
     meta: dict[int, tuple] = {}  # see _one_per_train
     occupants: dict[int, tuple] = {}  # see _single_track
