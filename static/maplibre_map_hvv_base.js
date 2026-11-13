@@ -507,6 +507,8 @@ function buildLineIconFallback(name, height) {
 function buildMarkerElement(properties) {
     const wrapper = document.createElement('div');
     wrapper.className = 'hvv-marker-wrapper';
+    wrapper.hvvLine = properties.line;  // read by stackOffsets
+    wrapper.hvvLabelText = properties.label;
 
     if (properties.icon) {
         const height = properties.iconHeight || 20;
@@ -613,7 +615,34 @@ const SOURCES = (PAGE_CONFIG.sourceKeys
 // placed label are hidden (only the icon and a delay badge stay); zooming in
 // spreads the vehicles apart and brings them back. Delayed vehicles and
 // labels shown last time are placed first, so labels do not flicker.
+// Vehicles on the same spot (meeting at a station) are stacked vertically,
+// as zooming in cannot separate them.
 const LABEL_PADDING_PX = 2;
+const SAME_SPOT_PX = 1;
+const LABEL_HEIGHT_PX = 14;  // label boxes are point.y ± 7
+
+function stackOffsets(items) {
+    const groups = [];
+    items.forEach((item) => {
+        const group = groups.find((g) => Math.abs(g[0].point.x - item.point.x) <= SAME_SPOT_PX
+            && Math.abs(g[0].point.y - item.point.y) <= SAME_SPOT_PX);
+        if (group) {
+            group.push(item);
+        } else {
+            groups.push([item]);
+        }
+    });
+    groups.forEach((group) => {
+        group.sort((a, b) => (a.element.hvvLine || '').localeCompare(b.element.hvvLine || '')
+            || (a.element.hvvLabelText || '').localeCompare(b.element.hvvLabelText || ''));
+        // Rows far enough apart for each label to clear its neighbours.
+        const row = Math.max(LABEL_HEIGHT_PX, ...group.map((item) => item.layout.height));
+        const step = row + LABEL_PADDING_PX + 1;
+        group.forEach((item, index) => {
+            item.dy = Math.round((index - (group.length - 1) / 2) * step);
+        });
+    });
+}
 
 function placeVehicleLabels(mapInstance, markers) {
     const container = mapInstance.getContainer();
@@ -650,6 +679,16 @@ function placeVehicleLabels(mapInstance, markers) {
                 layout.unitsMeasured = true;
             }
         }
+        items.push({ element, layout, marker, point });
+    });
+    stackOffsets(items);
+    items.forEach((item) => {
+        const { element, layout, marker } = item;
+        if ((element.hvvStackDy || 0) !== item.dy) {
+            element.hvvStackDy = item.dy;
+            marker.setOffset([0, item.dy]);
+        }
+        const point = { x: item.point.x, y: item.point.y + item.dy };
         const half = layout.height / 2;
         const label = labelsOn && layout.labelWidth ? [
             point.x + layout.labelOffset, point.y - 7,
@@ -659,9 +698,7 @@ function placeVehicleLabels(mapInstance, markers) {
             point.x - layout.unitsWidth / 2, point.y + half,
             point.x + layout.unitsWidth / 2, point.y + half + 12,
         ] : null;
-        items.push({
-            element,
-            layout,
+        Object.assign(item, {
             icon: [point.x - layout.height, point.y - half, point.x + layout.labelOffset, point.y + half],
             // A missing destination label counts as collided, as before.
             boxes: labelsOn && !label ? null : [label, units].filter(Boolean),
@@ -1095,7 +1132,7 @@ function initHvvVehicleLayers(initialSourceKey) {
                             // Extra gap above the icon so the popup doesn't sit flush against it.
                             const halfIconHeight = (properties.iconHeight || 20) / 2;
                             hoverPopup
-                                .setOffset(halfIconHeight)
+                                .setOffset([0, (element.hvvStackDy || 0) - halfIconHeight])
                                 .setLngLat(entry.marker.getLngLat())
                                 .setHTML(properties.text)
                                 .addTo(map);
