@@ -50,15 +50,9 @@ def test_missing_angles_fall_back_and_unavailable_values_are_ignored():
     assert second["rotation"] == 90
 
 
-def test_other_vessels_are_dropped_and_destination_is_cleaned():
-    data = ais.build_geojson(
-        [
-            _feature(123456789, sog=3),
-            _feature(211437240, sog=3, destination="@@@@@BG"),
-        ]
-    )
+def test_other_vessels_are_dropped():
+    data = ais.build_geojson([_feature(123456789, sog=3), _feature(211437240, sog=3)])
     assert [f["properties"]["mmsi"] for f in data["features"]] == [211437240]
-    assert data["features"][0]["properties"]["destination"] == "BG"
 
 
 def test_the_fleet_fits_into_one_request():

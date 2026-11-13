@@ -40,7 +40,6 @@ function aisPopupHtml(p) {
     const lines = [
         `<b>${p.name}</b>`,
         [p.state === 'underway' ? 'in Fahrt' : 'festgemacht', knots].filter(Boolean).join(', '),
-        p.destination ? `Ziel: ${p.destination}` : '',
         age === null ? '' : `Position vor ${age} min`,
     ];
     return lines.filter(Boolean).join('<br>');

@@ -112,7 +112,6 @@ def build_geojson(features: list[dict], fleet: dict[int, str] = HADAG) -> dict:
         heading = _angle(props.get("heading"))
         course = _angle(props.get("cog"))
         state = _state(props)
-        destination = (props.get("destination") or "").replace("@", "").strip()
         result.append(
             {
                 "type": "Feature",
@@ -126,7 +125,6 @@ def build_geojson(features: list[dict], fleet: dict[int, str] = HADAG) -> dict:
                     "cog": course,
                     "heading": heading,
                     "nav_status": NAV_STATUS.get(props.get("nav_status"), ""),
-                    "destination": destination,
                     "length": props.get("length"),
                     "seen": props.get("seen"),
                 },
