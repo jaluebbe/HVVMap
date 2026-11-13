@@ -241,6 +241,7 @@ REDIS_ANCHOR_KEY = "hvv:departures:anchor_start"
 REDIS_LIVE_KEY = "hvv:departures:live"
 REDIS_TRIP_COURSES_KEY = "hvv:trips:courses"  # written by trip_courses.py
 REDIS_POSITIONS_KEY = "hvv:positions_gtilive"  # written by trip_positions.py
+REDIS_AIS_KEY = "hvv:ais:hadag"  # written by ais.py
 
 
 def _read_cached_payload(key: str) -> dict:
@@ -447,6 +448,12 @@ def get_known_courses(service_ids: str):
 def get_gtilive_positions():
     """Vehicle positions computed from the trip table (trip_positions.py)."""
     return _read_cached_json(REDIS_POSITIONS_KEY)
+
+
+@app.get("/api/hvv/ais/hadag.geojson", tags=["hvv_ais"])
+def get_ais_hadag():
+    """HADAG ferries from AIS (ais.py), independent of the GTI data."""
+    return _read_cached_json(REDIS_AIS_KEY)
 
 
 @app.get("/api/hvv/gtilive/stops.geojson", tags=["hvv_gtilive"])
