@@ -600,3 +600,36 @@ def test_trains_in_one_direction_share_a_single_track_section():
 
     assert positions["first"] > 1
     assert 0 < positions["second"] < 1
+
+
+def test_train_swapped_in_farmsen_ends_where_the_train_in_its_path_starts():
+    stops = ["Berne", "Farmsen", "Trabrennbahn", "Wandsbek-Gartenstadt"]
+    stations = {s: _station(s, i) for i, s in enumerate(stops)}
+    old = _row(
+        id="old",
+        course_key="old@x",
+        train_number="341625",
+        stops=[
+            _stop("Berne", None, "16:37"),
+            _stop("Farmsen", "16:39", "16:39"),
+            _stop("Trabrennbahn", "16:41", "16:42"),
+            {**_stop("Wandsbek-Gartenstadt", "16:44", None), "cancelled": True},
+        ],
+    )
+    new = _row(
+        id="new",
+        course_key="new@x",
+        train_number="348625",
+        stops=[
+            _stop("Farmsen", None, "16:40"),
+            _stop("Trabrennbahn", "16:42", "16:43"),
+            _stop("Wandsbek-Gartenstadt", "16:45", None),
+        ],
+    )
+
+    features = build_positions(
+        {"trips": [old, new]}, datetime(2026, 10, 17, 16, 41, 30), stations
+    )["features"]
+
+    ids = {f["properties"]["journeyID"] for f in features}
+    assert ids == {"new"}  # the old train stays in Farmsen, gone at 16:41
