@@ -23,8 +23,7 @@
       ],
       "layout": {
         "line-cap": "round",
-        "line-join": "round",
-        "visibility": "none"
+        "line-join": "round"
       },
       "paint": {
         "line-color": "#ffffff",
@@ -63,12 +62,10 @@
       ],
       "layout": {
         "line-cap": "round",
-        "line-join": "round",
-        "visibility": "none"
+        "line-join": "round"
       },
       "paint": {
-        "line-color": "#f29400",
-        "line-opacity": [
+        "line-color": [
           "case",
           [
             "==",
@@ -78,8 +75,8 @@
             ],
             "tunnel"
           ],
-          0.55,
-          1
+          "#f6c77f",
+          "#f29400"
         ],
         "line-width": [
           "interpolate",
@@ -127,8 +124,7 @@
       ],
       "layout": {
         "line-cap": "round",
-        "line-join": "round",
-        "visibility": "none"
+        "line-join": "round"
       },
       "paint": {
         "line-color": "#ffffff",
@@ -178,12 +174,10 @@
       ],
       "layout": {
         "line-cap": "round",
-        "line-join": "round",
-        "visibility": "none"
+        "line-join": "round"
       },
       "paint": {
-        "line-color": "#00963f",
-        "line-opacity": [
+        "line-color": [
           "case",
           [
             "==",
@@ -193,8 +187,8 @@
             ],
             "tunnel"
           ],
-          0.55,
-          1
+          "#7cc79b",
+          "#00963f"
         ],
         "line-width": [
           "interpolate",
@@ -242,8 +236,7 @@
       ],
       "layout": {
         "line-cap": "round",
-        "line-join": "round",
-        "visibility": "none"
+        "line-join": "round"
       },
       "paint": {
         "line-color": "#ffffff",
@@ -293,12 +286,10 @@
       ],
       "layout": {
         "line-cap": "round",
-        "line-join": "round",
-        "visibility": "none"
+        "line-join": "round"
       },
       "paint": {
-        "line-color": "#0f5ea8",
-        "line-opacity": [
+        "line-color": [
           "case",
           [
             "==",
@@ -308,8 +299,8 @@
             ],
             "tunnel"
           ],
-          0.55,
-          1
+          "#7aa6d6",
+          "#0f5ea8"
         ],
         "line-width": [
           "interpolate",
@@ -371,9 +362,6 @@
           20,
           3
         ]
-      },
-      "layout": {
-        "visibility": "none"
       }
     },
     {
@@ -407,9 +395,6 @@
           20,
           6
         ]
-      },
-      "layout": {
-        "visibility": "none"
       }
     }
   ]

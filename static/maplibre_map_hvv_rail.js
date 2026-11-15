@@ -1,15 +1,21 @@
 // Optional rail network overlay from /api/vector/overlay/style.json.
-// Off by default; only offered if an overlay .mbtiles file is mounted.
+// Visible by default; only offered if an overlay .mbtiles file is mounted.
 // Used by maplibre_map_hvv_base.js.
 
 const RAIL_STYLE_ENDPOINT = '/api/vector/overlay/style.json';
 
-// Basemap labels stay above the lines; falls back to below the live layers.
+// Above the basemap's roads and rails, below its labels and the live layers.
 function railInsertBeforeId(map) {
     const layers = map.getStyle().layers;
-    const basemapLabels = layers.find((l) => l.type === 'symbol' && !l.id.startsWith('hvv-'));
+    let lastTransport = -1;
+    layers.forEach((l, i) => {
+        if (l['source-layer'] === 'transportation' && l.type !== 'symbol') {
+            lastTransport = i;
+        }
+    });
+    const next = layers.find((l, i) => i > lastTransport && l.type === 'symbol' && !l.id.startsWith('hvv-'));
     const live = layers.find((l) => l.id.startsWith('hvv-'));
-    return (basemapLabels || live || {}).id;
+    return (next || live || {}).id;
 }
 
 // Resolves to null while no overlay is available.

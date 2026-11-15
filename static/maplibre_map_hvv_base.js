@@ -1047,7 +1047,7 @@ function initHvvVehicleLayers(initialSourceKey) {
         if (railEnabled && typeof createHvvRailLayer === 'function') {
             createHvvRailLayer(map).then((railLayer) => {
                 if (railLayer && modeToggleControl) {
-                    modeToggleControl.addLayerToggle({ key: 'rail', name: 'Streckennetz', icon: '≡', checked: false,
+                    modeToggleControl.addLayerToggle({ key: 'rail', name: 'Streckennetz', icon: '≡', checked: true,
                         onToggle: (key, checked) => railLayer.setVisible(checked) });
                 }
             });

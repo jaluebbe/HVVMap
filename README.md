@@ -151,11 +151,11 @@ they're built directly from the static feed on first run.
   `ais` overrides, by default it is on for pages with ferries. It is
   independent of the GTI ferries. While the layer is visible, "AIS: Open
   Waters" is added to the map attribution.
-  The checkbox "Streckennetz" (off by default, `maplibre_map_hvv_rail.js`)
-  draws the rail overlay from `/api/vector/overlay/*` between the basemap
-  roads and labels and the live layers: U-Bahn, S-Bahn and AKN lines with
-  tunnel sections dimmed. It only appears if an overlay file is mounted; the
-  page option `rail` overrides, by default it is on.
+  The checkbox "Streckennetz" (on by default, `maplibre_map_hvv_rail.js`)
+  draws the rail overlay from `/api/vector/overlay/*` above the basemap
+  roads, below its labels and the live layers: U-Bahn, S-Bahn and AKN lines
+  with tunnel sections in a lighter tint. It only appears if an overlay file is
+  mounted; the page option `rail` overrides, by default it is on.
 - `maplibre_map_hvv_ubahn.html` - the same page restricted to the U-Bahn and
   the `gtilive` source, centered on Betriebshof Barmbek, with U1-U4
   toggleable individually and a `#` toggle for the unit numbers below the
