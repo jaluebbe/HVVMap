@@ -35,28 +35,28 @@ map.addControl(
 );
 map.addControl(new maplibregl.ScaleControl({ unit: 'metric' }), 'bottom-left');
 
-const attributionControl = new maplibregl.AttributionControl({
-    compact: true,
-    customAttribution: [
-        '<a href="https://github.com/jaluebbe/HVVMap" target="_blank">Source on GitHub</a>',
-        '<a href="https://www.hvv.de/" target="_blank">Fahrplandaten: Hamburger Verkehrsverbund GmbH</a>',
-    ],
-});
-map.addControl(attributionControl, 'bottom-right');
+const ATTRIBUTION_LINKS = [
+    '<a href="https://github.com/jaluebbe/HVVMap" target="_blank">Source on GitHub</a>',
+    '<a href="https://www.hvv.de/" target="_blank">Fahrplandaten: Hamburger Verkehrsverbund GmbH</a>',
+];
+const PRIVACY_LINK = '<a href="/static/datenschutz.html" target="_blank">Impressum &amp; Datenschutzerkl&auml;rung</a>';
+let attributionControl = null;
 
+function setAttributionControl(links) {
+    if (attributionControl) {
+        map.removeControl(attributionControl);
+    }
+    attributionControl = new maplibregl.AttributionControl({ compact: true, customAttribution: links });
+    map.addControl(attributionControl, 'bottom-right');
+}
+setAttributionControl(ATTRIBUTION_LINKS);
+
+// Added as a custom attribution, so it survives attribution updates (e.g. AIS layer toggled).
 function addPrivacyStatement() {
     fetch('/static/datenschutz.html', { method: 'HEAD' }).then(function(response) {
-        if (!response.ok) {
-            return;
+        if (response.ok) {
+            setAttributionControl([...ATTRIBUTION_LINKS, PRIVACY_LINK]);
         }
-        const container = map.getContainer().querySelector('.maplibregl-ctrl-attrib-inner');
-        if (!container) {
-            return;
-        }
-        container.insertAdjacentHTML(
-            'beforeend',
-            ' · <a href="/static/datenschutz.html" target="_blank">Impressum &amp; Datenschutzerkl&auml;rung</a>',
-        );
     }).catch(function() {});
 }
 map.on('load', addPrivacyStatement);
