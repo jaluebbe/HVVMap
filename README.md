@@ -223,7 +223,10 @@ and, mounted as a volume at runtime:
   API picks up whatever's there
 - optionally a single `*.mbtiles` file under `/overlays/` with the HVV rail
   network (OpenMapTiles schema, `transportation` layer, see
-  `hvv_rail_style.json`). Without it the frontend simply offers no rail
+  `hvv_rail_style.json`). OpenMapTiles shows subway/light_rail only from z14,
+  so the tracks are retagged when building the tiles and styled by
+  `class=rail` with subclass `narrow_gauge` (U-Bahn), `preserved` (S-Bahn)
+  and `rail` (AKN). Without it the frontend simply offers no rail
   toggle.
 
 The **gtfs-fetcher** image needs a static GTFS feed mounted at `GTFS_DIR`

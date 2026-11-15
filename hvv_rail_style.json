@@ -14,12 +14,23 @@
       "source": "hvv_rail",
       "source-layer": "transportation",
       "filter": [
-        "==",
+        "all",
         [
-          "get",
-          "class"
+          "==",
+          [
+            "get",
+            "class"
+          ],
+          "rail"
         ],
-        "rail"
+        [
+          "==",
+          [
+            "get",
+            "subclass"
+          ],
+          "rail"
+        ]
       ],
       "layout": {
         "line-cap": "round",
@@ -53,12 +64,23 @@
       "source": "hvv_rail",
       "source-layer": "transportation",
       "filter": [
-        "==",
+        "all",
         [
-          "get",
-          "class"
+          "==",
+          [
+            "get",
+            "class"
+          ],
+          "rail"
         ],
-        "rail"
+        [
+          "==",
+          [
+            "get",
+            "subclass"
+          ],
+          "rail"
+        ]
       ],
       "layout": {
         "line-cap": "round",
@@ -111,7 +133,7 @@
             "get",
             "class"
           ],
-          "transit"
+          "rail"
         ],
         [
           "==",
@@ -119,7 +141,7 @@
             "get",
             "subclass"
           ],
-          "light_rail"
+          "preserved"
         ]
       ],
       "layout": {
@@ -161,7 +183,7 @@
             "get",
             "class"
           ],
-          "transit"
+          "rail"
         ],
         [
           "==",
@@ -169,7 +191,7 @@
             "get",
             "subclass"
           ],
-          "light_rail"
+          "preserved"
         ]
       ],
       "layout": {
@@ -223,7 +245,7 @@
             "get",
             "class"
           ],
-          "transit"
+          "rail"
         ],
         [
           "==",
@@ -231,7 +253,7 @@
             "get",
             "subclass"
           ],
-          "subway"
+          "narrow_gauge"
         ]
       ],
       "layout": {
@@ -273,7 +295,7 @@
             "get",
             "class"
           ],
-          "transit"
+          "rail"
         ],
         [
           "==",
@@ -281,7 +303,7 @@
             "get",
             "subclass"
           ],
-          "subway"
+          "narrow_gauge"
         ]
       ],
       "layout": {
