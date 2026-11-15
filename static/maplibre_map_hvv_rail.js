@@ -3,6 +3,8 @@
 // Used by maplibre_map_hvv_base.js.
 
 const RAIL_STYLE_ENDPOINT = '/api/vector/overlay/style.json';
+// Basemap U-/S-Bahn lines the overlay replaces; hidden while it is shown.
+const RAIL_BASEMAP_LAYERS = ['railway_transit', 'railway_transit_dashline'];
 
 // Above the basemap's roads and rails, below its labels and the live layers.
 function railInsertBeforeId(map) {
@@ -36,9 +38,13 @@ async function createHvvRailLayer(map) {
         map.addLayer(layer, beforeId);
         return layer.id;
     });
-    return {
-        setVisible(show) {
-            layerIds.forEach((id) => map.setLayoutProperty(id, 'visibility', show ? 'visible' : 'none'));
-        },
-    };
+    function setVisible(show) {
+        const visibility = show ? 'visible' : 'none';
+        layerIds.forEach((id) => map.setLayoutProperty(id, 'visibility', visibility));
+        RAIL_BASEMAP_LAYERS.filter((id) => map.getLayer(id)).forEach((id) => {
+            map.setLayoutProperty(id, 'visibility', show ? 'none' : 'visible');
+        });
+    }
+    setVisible(true);
+    return { setVisible };
 }
