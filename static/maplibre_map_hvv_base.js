@@ -295,6 +295,8 @@ const ALL_MODES = [
 const MODES = PAGE_CONFIG.modes ? ALL_MODES.filter((m) => PAGE_CONFIG.modes.includes(m.key)) : ALL_MODES;
 // Map layers bottom to top: rapid transit above regional trains and ferries.
 const LAYER_ORDER = ['R', 'FERRY', 'AKN', 'S', 'U'];
+// Modes whose lines the OpenRailwayMap overlay draws instead (ferries keep theirs).
+const RAIL_MODE_KEYS = new Set(['U', 'S', 'AKN', 'R']);
 const LAYER_MODES = [...MODES].sort((a, b) => LAYER_ORDER.indexOf(a.key) - LAYER_ORDER.indexOf(b.key));
 
 // "U1-ERSATZ" -> "U1"
@@ -759,6 +761,7 @@ function initHvvVehicleLayers(initialSourceKey) {
     const railEnabled = PAGE_CONFIG.rail ?? true;
     let currentSource = SOURCES.find((s) => s.key === initialSourceKey) || SOURCES[0];
     let modeToggleControl = null;
+    let railOverlayOn = false;
     // Pages with PAGE_CONFIG.straightToggle false have no "Luftlinien" toggle
     // and show every segment.
     const straightToggle = PAGE_CONFIG.straightToggle !== false;
@@ -825,14 +828,20 @@ function initHvvVehicleLayers(initialSourceKey) {
 
     function applyModeVisibility(modeKey) {
         const visibility = activeModes.has(modeKey) ? 'visible' : 'none';
-        map.setLayoutProperty(`hvv-lines-layer-${modeKey}`, 'visibility', visibility);
-        map.setLayoutProperty(`hvv-lines-layer-${modeKey}-replacement`, 'visibility', visibility);
-        map.setLayoutProperty(`hvv-lines-layer-${modeKey}-straight`, 'visibility', visibility);
+        const lineVisibility = railOverlayOn && RAIL_MODE_KEYS.has(modeKey) ? 'none' : visibility;
+        map.setLayoutProperty(`hvv-lines-layer-${modeKey}`, 'visibility', lineVisibility);
+        map.setLayoutProperty(`hvv-lines-layer-${modeKey}-replacement`, 'visibility', lineVisibility);
+        map.setLayoutProperty(`hvv-lines-layer-${modeKey}-straight`, 'visibility', lineVisibility);
         map.setLayoutProperty(`hvv-stops-layer-${modeKey}`, 'visibility', visibility);
         map.setLayoutProperty(`hvv-stops-labels-${modeKey}`, 'visibility', visibility);
         positionMarkersByMode[modeKey].forEach((marker) => {
             marker.getElement().style.display = markerVisible(modeKey, marker) ? '' : 'none';
         });
+    }
+
+    function setRailOverlay(on) {
+        railOverlayOn = on;
+        MODES.forEach((m) => applyModeVisibility(m.key));
     }
 
     function setLineVisibility(lineKey, visible) {
@@ -1048,7 +1057,10 @@ function initHvvVehicleLayers(initialSourceKey) {
             createHvvRailLayer(map).then((railLayer) => {
                 if (railLayer && modeToggleControl) {
                     modeToggleControl.addLayerToggle({ key: 'rail', name: 'OpenRailwayMap', icon: '≡', checked: false,
-                        onToggle: (key, checked) => railLayer.setVisible(checked) });
+                        onToggle: (key, checked) => {
+                            railLayer.setVisible(checked);
+                            setRailOverlay(checked);
+                        } });
                 }
             });
         }

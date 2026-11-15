@@ -154,7 +154,9 @@ they're built directly from the static feed on first run.
   The checkbox "OpenRailwayMap" (off by default, `maplibre_map_hvv_rail.js`)
   draws the OpenRailwayMap standard style from `/api/vector/overlay/*` above
   the basemap roads, below its labels and the live layers, and hides the
-  basemap's own railway lines meanwhile. The data is OpenRailwayMap's, not the
+  basemap's own railway lines meanwhile. The U-Bahn, S-Bahn, AKN and Regio
+  modes then draw no lines of their own, only their moving vehicles and
+  stops; ferry lines stay as they are. The data is OpenRailwayMap's, not the
   HVV's. It only appears if an overlay file is mounted; the page option `rail`
   overrides, by default the checkbox is offered. While visible, "OpenRailwayMap" is added to
   the map attribution.
@@ -224,7 +226,10 @@ and, mounted as a volume at runtime:
 - any single `*.mbtiles` file under `/osm/` - filename doesn't matter, the
   API picks up whatever's there
 - optionally a single `*.mbtiles` file under `/overlays/`, built with
-  OpenRailwayMap-vector from the sources `openrailwaymap_style.json` uses.
+  OpenRailwayMap-vector from the sources `openrailwaymap_style.json` uses
+  (`high`, `openrailwaymap_low`, `openrailwaymap_standard`,
+  `standard_railway_line_low`, `standard_railway_text_stations_low`,
+  `standard_railway_text_stations_med`).
   Without it the frontend simply offers no OpenRailwayMap toggle.
 
 The **gtfs-fetcher** image needs a static GTFS feed mounted at `GTFS_DIR`
