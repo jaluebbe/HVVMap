@@ -151,12 +151,12 @@ they're built directly from the static feed on first run.
   `ais` overrides, by default it is on for pages with ferries. It is
   independent of the GTI ferries. While the layer is visible, "AIS: Open
   Waters" is added to the map attribution.
-  The checkbox "OpenRailwayMap" (on by default, `maplibre_map_hvv_rail.js`)
+  The checkbox "OpenRailwayMap" (off by default, `maplibre_map_hvv_rail.js`)
   draws the OpenRailwayMap standard style from `/api/vector/overlay/*` above
   the basemap roads, below its labels and the live layers, and hides the
   basemap's own railway lines meanwhile. The data is OpenRailwayMap's, not the
   HVV's. It only appears if an overlay file is mounted; the page option `rail`
-  overrides, by default it is on. While visible, "OpenRailwayMap" is added to
+  overrides, by default the checkbox is offered. While visible, "OpenRailwayMap" is added to
   the map attribution.
 - `maplibre_map_hvv_ubahn.html` - the same page restricted to the U-Bahn and
   the `gtilive` source, centered on Betriebshof Barmbek, with U1-U4

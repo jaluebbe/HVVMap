@@ -1,5 +1,5 @@
 // Optional OpenRailwayMap overlay from /api/vector/overlay/style.json.
-// Visible by default; only offered if an overlay .mbtiles file is mounted.
+// Off by default; only offered if an overlay .mbtiles file is mounted.
 // Used by maplibre_map_hvv_base.js.
 
 const RAIL_STYLE_ENDPOINT = '/api/vector/overlay/style.json';
@@ -48,6 +48,6 @@ async function createHvvRailLayer(map) {
             map.setLayoutProperty(id, 'visibility', show ? 'none' : 'visible');
         });
     }
-    setVisible(true);
+    setVisible(false);
     return { setVisible };
 }
