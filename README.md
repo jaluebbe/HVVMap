@@ -145,7 +145,8 @@ they're built directly from the static feed on first run.
   (`maplibre_map_hvv_ais.js`, `/api/hvv/ais/hadag.geojson`): a hull icon per
   vessel, green while under way and grey while moored; the page option
   `ais` overrides, by default it is on for pages with ferries. It is
-  independent of the GTI ferries.
+  independent of the GTI ferries. While the layer is visible, "AIS: Open
+  Waters" is added to the map attribution.
 - `maplibre_map_hvv_ubahn.html` - the same page restricted to the U-Bahn and
   the `gtilive` source, centered on Betriebshof Barmbek, with U1-U4
   toggleable individually and a `#` toggle for the unit numbers below the

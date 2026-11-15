@@ -5,6 +5,7 @@ const AIS_ENDPOINT = '/api/hvv/ais/hadag.geojson';
 const AIS_POLL_INTERVAL_MS = 30000;
 const AIS_SOURCE = 'hvv-ais';
 const AIS_LAYER = 'hvv-ais-vessels';
+const AIS_ATTRIBUTION = '<a href="https://openwaters.io/ais" target="_blank">AIS: Open Waters</a>';
 const AIS_COLORS = { underway: '#00897b', moored: '#9aa5b1' };
 
 // Top view of a hull, bow up (rotation 0 = north); drawn at 2x.
@@ -53,7 +54,12 @@ function createHvvAisLayer(map) {
     Object.entries(AIS_COLORS).forEach(([state, color]) => {
         map.addImage(`hvv-ais-${state}`, buildAisIcon(color), { pixelRatio: 2 });
     });
-    map.addSource(AIS_SOURCE, { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
+    // The source attribution shows up in the attribution control while the layer is visible.
+    map.addSource(AIS_SOURCE, {
+        type: 'geojson',
+        data: { type: 'FeatureCollection', features: [] },
+        attribution: AIS_ATTRIBUTION,
+    });
     map.addLayer({
         id: AIS_LAYER,
         type: 'symbol',
