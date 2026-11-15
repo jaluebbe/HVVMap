@@ -156,7 +156,7 @@ they're built directly from the static feed on first run.
   the basemap roads, below its labels and the live layers, and hides the
   basemap's own railway lines meanwhile. The U-Bahn, S-Bahn, AKN and Regio
   modes then draw no lines of their own, only their moving vehicles and
-  stops; ferry lines stay as they are. The data is OpenRailwayMap's, not the
+  stops; ferry and replacement bus lines stay as they are. The data is OpenRailwayMap's, not the
   HVV's. It only appears if an overlay file is mounted; the page option `rail`
   overrides, by default the checkbox is offered. While visible, "OpenRailwayMap" is added to
   the map attribution.

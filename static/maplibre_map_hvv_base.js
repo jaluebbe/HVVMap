@@ -295,7 +295,8 @@ const ALL_MODES = [
 const MODES = PAGE_CONFIG.modes ? ALL_MODES.filter((m) => PAGE_CONFIG.modes.includes(m.key)) : ALL_MODES;
 // Map layers bottom to top: rapid transit above regional trains and ferries.
 const LAYER_ORDER = ['R', 'FERRY', 'AKN', 'S', 'U'];
-// Modes whose lines the OpenRailwayMap overlay draws instead (ferries keep theirs).
+// Modes whose rail lines the OpenRailwayMap overlay draws instead (ferry and
+// replacement bus lines keep theirs).
 const RAIL_MODE_KEYS = new Set(['U', 'S', 'AKN', 'R']);
 const LAYER_MODES = [...MODES].sort((a, b) => LAYER_ORDER.indexOf(a.key) - LAYER_ORDER.indexOf(b.key));
 
@@ -830,7 +831,7 @@ function initHvvVehicleLayers(initialSourceKey) {
         const visibility = activeModes.has(modeKey) ? 'visible' : 'none';
         const lineVisibility = railOverlayOn && RAIL_MODE_KEYS.has(modeKey) ? 'none' : visibility;
         map.setLayoutProperty(`hvv-lines-layer-${modeKey}`, 'visibility', lineVisibility);
-        map.setLayoutProperty(`hvv-lines-layer-${modeKey}-replacement`, 'visibility', lineVisibility);
+        map.setLayoutProperty(`hvv-lines-layer-${modeKey}-replacement`, 'visibility', visibility);
         map.setLayoutProperty(`hvv-lines-layer-${modeKey}-straight`, 'visibility', lineVisibility);
         map.setLayoutProperty(`hvv-stops-layer-${modeKey}`, 'visibility', visibility);
         map.setLayoutProperty(`hvv-stops-labels-${modeKey}`, 'visibility', visibility);
