@@ -2,7 +2,8 @@
 
 Serves two independent things, read-only:
 - a background vector basemap from a single .mbtiles file mounted under
-  OSM_DIR (any filename - no region switching, HVVMap only ever needs one)
+  OSM_DIR (any filename - no region switching, HVVMap only ever needs one),
+  plus an optional overlay from a .mbtiles file under OVERLAY_DIR
 - the live HVV GeoJSON layers, built and cached in Redis by the separate
   hvvmap-fetcher process - pure passthrough, no computation here
 
@@ -119,19 +120,37 @@ async def robots():
 # --- Background vector basemap ---------------------------------------------
 
 OSM_DIR = Path("/osm")
+# Optional overlay tiles (e.g. the HVV rail network); same schema as the basemap.
+OVERLAY_DIR = Path("/overlays")
+OVERLAY_STYLE_NAME = "hvv_rail"
 
-# Persistent read-only connection, opened once and reused across requests.
-# check_same_thread=False lets FastAPI's thread pool call it, but that alone
+# Persistent read-only connections, opened once and reused across requests.
+# check_same_thread=False lets FastAPI's thread pool call them, but that alone
 # doesn't make one connection safe under concurrent queries from different
 # threads - the lock around each query prevents interleaved reads from
 # returning spurious empty results under rapid tile requests.
 _db_connection: sqlite3.Connection | None = None
+_overlay_connection: sqlite3.Connection | None = None
 _db_lock = threading.Lock()
 
 
-def _basemap_path() -> Path | None:
-    candidates = sorted(OSM_DIR.glob("*.mbtiles"))
+def _first_mbtiles(directory: Path) -> Path | None:
+    candidates = sorted(directory.glob("*.mbtiles"))
     return candidates[0] if candidates else None
+
+
+def _basemap_path() -> Path | None:
+    return _first_mbtiles(OSM_DIR)
+
+
+def _open_readonly(path: Path) -> sqlite3.Connection:
+    connection = sqlite3.connect(
+        f"file:{path}?mode=ro", uri=True, check_same_thread=False
+    )
+    connection.execute("PRAGMA cache_size = -8192")
+    connection.execute("PRAGMA mmap_size = 0")
+    connection.execute("PRAGMA temp_store = MEMORY")
+    return connection
 
 
 def _get_db_connection() -> sqlite3.Connection:
@@ -142,13 +161,20 @@ def _get_db_connection() -> sqlite3.Connection:
             raise HTTPException(
                 status_code=503, detail="No basemap .mbtiles file mounted under /osm"
             )
-        _db_connection = sqlite3.connect(
-            f"file:{path}?mode=ro", uri=True, check_same_thread=False
-        )
-        _db_connection.execute("PRAGMA cache_size = -8192")
-        _db_connection.execute("PRAGMA mmap_size = 0")
-        _db_connection.execute("PRAGMA temp_store = MEMORY")
+        _db_connection = _open_readonly(path)
     return _db_connection
+
+
+def _get_overlay_connection() -> sqlite3.Connection:
+    global _overlay_connection
+    if _overlay_connection is None:
+        path = _first_mbtiles(OVERLAY_DIR)
+        if path is None:
+            raise HTTPException(
+                status_code=404, detail="No overlay .mbtiles file mounted"
+            )
+        _overlay_connection = _open_readonly(path)
+    return _overlay_connection
 
 
 def _base_url(request: Request) -> str:
@@ -157,17 +183,10 @@ def _base_url(request: Request) -> str:
     return f"{scheme}://{request.url.hostname}{port_suffix}"
 
 
-@app.get("/api/vector/metadata.json", tags=["basemap"])
-def get_vector_metadata(request: Request):
-    conn = _get_db_connection()
+def _tilejson(conn: sqlite3.Connection, tiles_url: str) -> dict:
     with _db_lock:
         rows = conn.execute("SELECT * FROM metadata").fetchall()
-    base = _base_url(request)
-    metadata = {
-        "tilejson": "2.0.0",
-        "scheme": "xyz",
-        "tiles": [f"{base}/api/vector/tiles/{{z}}/{{x}}/{{y}}.pbf"],
-    }
+    metadata = {"tilejson": "2.0.0", "scheme": "xyz", "tiles": [tiles_url]}
     for key, value in rows:
         if key == "json":
             metadata.update(json.loads(value))
@@ -180,16 +199,13 @@ def get_vector_metadata(request: Request):
     return metadata
 
 
-@app.get("/api/vector/tiles/{zoom_level}/{x}/{y}.pbf", tags=["basemap"])
-def get_vector_tiles(zoom_level: int, x: int, y: int):
-    conn = _get_db_connection()
-    tile_column = x
+def _tile_response(conn: sqlite3.Connection, zoom_level: int, x: int, y: int):
     tile_row = 2**zoom_level - 1 - y
     with _db_lock:
         result = conn.execute(
             "SELECT tile_data FROM tiles"
             " WHERE zoom_level = ? AND tile_column = ? AND tile_row = ?",
-            (zoom_level, tile_column, tile_row),
+            (zoom_level, x, tile_row),
         ).fetchone()
     if result is None:
         raise HTTPException(status_code=404, detail="Tile not found.")
@@ -198,6 +214,18 @@ def get_vector_tiles(zoom_level: int, x: int, y: int):
         media_type="application/octet-stream",
         headers={"Content-Encoding": "gzip"},
     )
+
+
+@app.get("/api/vector/metadata.json", tags=["basemap"])
+def get_vector_metadata(request: Request):
+    conn = _get_db_connection()
+    base = _base_url(request)
+    return _tilejson(conn, f"{base}/api/vector/tiles/{{z}}/{{x}}/{{y}}.pbf")
+
+
+@app.get("/api/vector/tiles/{zoom_level}/{x}/{y}.pbf", tags=["basemap"])
+def get_vector_tiles(zoom_level: int, x: int, y: int):
+    return _tile_response(_get_db_connection(), zoom_level, x, y)
 
 
 @app.get("/api/vector/style/{style_name}.json", tags=["basemap"])
@@ -225,6 +253,33 @@ def get_vector_style(style_name: str, request: Request):
     style["glyphs"] = f"{base}/fonts/{{fontstack}}/{{range}}.pbf"
     if style.get("sprite") is not None:
         style["sprite"] = f"{base}/static/sprites/{style_name}"
+    return style
+
+
+@app.get("/api/vector/overlay/metadata.json", tags=["basemap"])
+def get_overlay_metadata(request: Request):
+    conn = _get_overlay_connection()
+    base = _base_url(request)
+    return _tilejson(conn, f"{base}/api/vector/overlay/tiles/{{z}}/{{x}}/{{y}}.pbf")
+
+
+@app.get("/api/vector/overlay/tiles/{zoom_level}/{x}/{y}.pbf", tags=["basemap"])
+def get_overlay_tiles(zoom_level: int, x: int, y: int):
+    return _tile_response(_get_overlay_connection(), zoom_level, x, y)
+
+
+@app.get("/api/vector/overlay/style.json", tags=["basemap"])
+def get_overlay_style(request: Request):
+    """Style of the optional overlay; 404 while no overlay file is mounted."""
+    _get_overlay_connection()
+    style_file_name = f"{OVERLAY_STYLE_NAME}_style.json"
+    if not Path(style_file_name).is_file():
+        raise HTTPException(status_code=404, detail="Overlay style not found.")
+    with open(style_file_name) as f:
+        style = json.load(f)
+    base = _base_url(request)
+    for source in style["sources"].values():
+        source["url"] = f"{base}/api/vector/overlay/metadata.json"
     return style
 
 

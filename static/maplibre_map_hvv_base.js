@@ -5,6 +5,7 @@ const HAMBURG_DEFAULT_ZOOM = 12;
 
 // Optional page overrides (window.HVV_PAGE_CONFIG): center [lon, lat], zoom, minZoom, modes,
 // ais (AIS layer, default: on pages with ferries),
+// rail (rail network overlay, default: on),
 // lineToggles {mode: [{key, color, icon}]} - per-line checkboxes replacing that mode's,
 // sourceKeys - restricts the data source choices.
 const PAGE_CONFIG = window.HVV_PAGE_CONFIG || {};
@@ -325,9 +326,9 @@ function buildIconNode(icon) {
 
 // One checkbox per mode + disruption category; collapsible on narrow/short screens.
 class ModeToggleControl {
-    constructor(onModeToggle, categories, onCategoryToggle, sourceConfig, onLineToggle, extraToggles, aisToggle) {
+    constructor(onModeToggle, categories, onCategoryToggle, sourceConfig, onLineToggle, extraToggles, layerToggles) {
         this._extraToggles = extraToggles || [];
-        this._aisToggle = aisToggle || null;
+        this._layerToggles = (layerToggles || []).filter(Boolean);
         this._onModeToggle = onModeToggle;
         this._onLineToggle = onLineToggle;
         this._categories = categories || [];
@@ -412,15 +413,14 @@ class ModeToggleControl {
         }
         items.appendChild(this._extrasSection);
 
-        if (this._aisToggle) {
-            const t = this._aisToggle;
-            const aisSection = document.createElement('div');
-            const aisDivider = document.createElement('div');
-            aisDivider.className = 'hvv-mode-control-divider';
-            aisSection.appendChild(aisDivider);
-            this._appendItem(aisSection, t.key, t.name, t.icon, t.checked, t.onToggle);
-            items.appendChild(aisSection);
-        }
+        // Optional map layers (AIS, rail overlay); hidden while there are none.
+        this._layersSection = document.createElement('div');
+        const layersDivider = document.createElement('div');
+        layersDivider.className = 'hvv-mode-control-divider';
+        this._layersSection.appendChild(layersDivider);
+        this._layersSection.style.display = 'none';
+        items.appendChild(this._layersSection);
+        this._layerToggles.forEach((t) => this.addLayerToggle(t));
 
         if (this._sourceConfig && this._sourceConfig.sources.length > 1) {
             const sourceDivider = document.createElement('div');
@@ -444,6 +444,12 @@ class ModeToggleControl {
 
         this._container = container;
         return container;
+    }
+
+    // Adds a checkbox for an optional map layer, also after the control is on the map.
+    addLayerToggle(t) {
+        this._appendItem(this._layersSection, t.key, t.name, t.icon, t.checked, t.onToggle);
+        this._layersSection.style.display = '';
     }
 
     // Hides the disruption checkboxes for sources without disruption data (e.g. GTFS).
@@ -749,6 +755,8 @@ function initHvvVehicleLayers(initialSourceKey) {
     let hoveredPositionKey = null;
     // PAGE_CONFIG.ais overrides; by default on pages with ferries.
     const aisEnabled = PAGE_CONFIG.ais ?? (!PAGE_CONFIG.modes || PAGE_CONFIG.modes.includes('FERRY'));
+    // PAGE_CONFIG.rail overrides; on by default.
+    const railEnabled = PAGE_CONFIG.rail ?? true;
     let currentSource = SOURCES.find((s) => s.key === initialSourceKey) || SOURCES[0];
     let modeToggleControl = null;
     // Pages with PAGE_CONFIG.straightToggle false have no "Luftlinien" toggle
@@ -1031,10 +1039,19 @@ function initHvvVehicleLayers(initialSourceKey) {
             { sources: SOURCES, initialKey: currentSource.key, onSourceChange: switchSource },
             setLineVisibility,
             [{ key: 'straight', name: 'Luftlinien', icon: '⋯', checked: false, onToggle: setStraightVisibility }],
-            aisLayer && { key: 'ais', name: 'AIS', icon: '/static/hvv/icons/ais.svg', checked: false,
-                onToggle: (key, checked) => aisLayer.setVisible(checked) },
+            [aisLayer && { key: 'ais', name: 'AIS', icon: '/static/hvv/icons/ais.svg', checked: false,
+                onToggle: (key, checked) => aisLayer.setVisible(checked) }],
         );
         map.addControl(modeToggleControl, 'top-right');
+        // Optional rail network overlay (maplibre_map_hvv_rail.js), only if tiles are mounted.
+        if (railEnabled && typeof createHvvRailLayer === 'function') {
+            createHvvRailLayer(map).then((railLayer) => {
+                if (railLayer && modeToggleControl) {
+                    modeToggleControl.addLayerToggle({ key: 'rail', name: 'Streckennetz', icon: '≡', checked: false,
+                        onToggle: (key, checked) => railLayer.setVisible(checked) });
+                }
+            });
+        }
         modeToggleControl.setCategoriesVisible(!!currentSource.disruptionsEndpoint);
         modeToggleControl.setExtrasVisible(straightToggle && !!currentSource.straightToggle);
         map.addControl(new LabelToggleControl(), 'top-right');

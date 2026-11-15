@@ -524,3 +524,68 @@ def test_course_cache_counts_live_ids_by_course_state(client, monkeypatch):
         1,
     )
     assert data["total"]["stale"] == 0 and 55 <= data["total"]["age"]["median"] <= 65
+
+
+@pytest.fixture
+def overlay_client(client, tmp_path, monkeypatch):
+    overlay_dir = tmp_path / "overlays"
+    overlay_dir.mkdir()
+    conn = sqlite3.connect(overlay_dir / "rail.mbtiles")
+    conn.execute("CREATE TABLE metadata (name TEXT, value TEXT)")
+    conn.execute(
+        "CREATE TABLE tiles (zoom_level INTEGER, tile_column INTEGER, "
+        "tile_row INTEGER, tile_data BLOB)"
+    )
+    conn.execute("INSERT INTO metadata VALUES ('maxzoom', '14')")
+    conn.execute(
+        "INSERT INTO tiles VALUES (5, 10, 20, ?)", (gzip.compress(b"rail-pbf"),)
+    )
+    conn.commit()
+    conn.close()
+    (tmp_path / "hvv_rail_style.json").write_text(
+        json.dumps(
+            {
+                "version": 8,
+                "sources": {"hvv_rail": {"type": "vector", "url": "x"}},
+                "layers": [],
+            }
+        )
+    )
+    monkeypatch.setattr(api_module, "OVERLAY_DIR", overlay_dir)
+    monkeypatch.setattr(api_module, "_overlay_connection", None)
+    return client
+
+
+def test_overlay_style_points_at_overlay_metadata(overlay_client):
+    response = overlay_client.get("/api/vector/overlay/style.json")
+    assert response.status_code == 200
+    source = response.json()["sources"]["hvv_rail"]
+    assert source["url"] == "http://testserver/api/vector/overlay/metadata.json"
+
+
+def test_overlay_metadata_includes_overlay_tiles_url(overlay_client):
+    data = overlay_client.get("/api/vector/overlay/metadata.json").json()
+    assert data["maxzoom"] == 14
+    assert data["tiles"] == [
+        "http://testserver/api/vector/overlay/tiles/{z}/{x}/{y}.pbf"
+    ]
+
+
+def test_overlay_tile_comes_from_overlay_not_basemap(overlay_client):
+    response = overlay_client.get("/api/vector/overlay/tiles/5/10/11.pbf")
+    assert response.status_code == 200
+    assert response.content == b"rail-pbf"
+    assert response.headers["content-encoding"] == "gzip"
+
+
+def test_overlay_endpoints_404_without_mounted_overlay(client, tmp_path, monkeypatch):
+    empty_dir = tmp_path / "no_overlays"
+    empty_dir.mkdir()
+    monkeypatch.setattr(api_module, "OVERLAY_DIR", empty_dir)
+    monkeypatch.setattr(api_module, "_overlay_connection", None)
+    for path in (
+        "/api/vector/overlay/style.json",
+        "/api/vector/overlay/metadata.json",
+        "/api/vector/overlay/tiles/5/10/11.pbf",
+    ):
+        assert client.get(path).status_code == 404

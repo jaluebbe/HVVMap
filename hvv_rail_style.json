@@ -1,0 +1,416 @@
+{
+  "version": 8,
+  "name": "HVV rail network",
+  "sources": {
+    "hvv_rail": {
+      "type": "vector",
+      "url": "__METADATA_URL__"
+    }
+  },
+  "layers": [
+    {
+      "id": "rail-overlay-akn-casing",
+      "type": "line",
+      "source": "hvv_rail",
+      "source-layer": "transportation",
+      "filter": [
+        "==",
+        [
+          "get",
+          "class"
+        ],
+        "rail"
+      ],
+      "layout": {
+        "line-cap": "round",
+        "line-join": "round",
+        "visibility": "none"
+      },
+      "paint": {
+        "line-color": "#ffffff",
+        "line-width": [
+          "interpolate",
+          [
+            "exponential",
+            1.5
+          ],
+          [
+            "zoom"
+          ],
+          8,
+          1.2,
+          12,
+          3,
+          16,
+          8,
+          20,
+          30
+        ]
+      }
+    },
+    {
+      "id": "rail-overlay-akn",
+      "type": "line",
+      "source": "hvv_rail",
+      "source-layer": "transportation",
+      "filter": [
+        "==",
+        [
+          "get",
+          "class"
+        ],
+        "rail"
+      ],
+      "layout": {
+        "line-cap": "round",
+        "line-join": "round",
+        "visibility": "none"
+      },
+      "paint": {
+        "line-color": "#f29400",
+        "line-opacity": [
+          "case",
+          [
+            "==",
+            [
+              "get",
+              "brunnel"
+            ],
+            "tunnel"
+          ],
+          0.55,
+          1
+        ],
+        "line-width": [
+          "interpolate",
+          [
+            "exponential",
+            1.5
+          ],
+          [
+            "zoom"
+          ],
+          8,
+          0.6,
+          12,
+          1.6,
+          16,
+          5,
+          20,
+          20
+        ]
+      }
+    },
+    {
+      "id": "rail-overlay-sbahn-casing",
+      "type": "line",
+      "source": "hvv_rail",
+      "source-layer": "transportation",
+      "filter": [
+        "all",
+        [
+          "==",
+          [
+            "get",
+            "class"
+          ],
+          "transit"
+        ],
+        [
+          "==",
+          [
+            "get",
+            "subclass"
+          ],
+          "light_rail"
+        ]
+      ],
+      "layout": {
+        "line-cap": "round",
+        "line-join": "round",
+        "visibility": "none"
+      },
+      "paint": {
+        "line-color": "#ffffff",
+        "line-width": [
+          "interpolate",
+          [
+            "exponential",
+            1.5
+          ],
+          [
+            "zoom"
+          ],
+          8,
+          1.2,
+          12,
+          3,
+          16,
+          8,
+          20,
+          30
+        ]
+      }
+    },
+    {
+      "id": "rail-overlay-sbahn",
+      "type": "line",
+      "source": "hvv_rail",
+      "source-layer": "transportation",
+      "filter": [
+        "all",
+        [
+          "==",
+          [
+            "get",
+            "class"
+          ],
+          "transit"
+        ],
+        [
+          "==",
+          [
+            "get",
+            "subclass"
+          ],
+          "light_rail"
+        ]
+      ],
+      "layout": {
+        "line-cap": "round",
+        "line-join": "round",
+        "visibility": "none"
+      },
+      "paint": {
+        "line-color": "#00963f",
+        "line-opacity": [
+          "case",
+          [
+            "==",
+            [
+              "get",
+              "brunnel"
+            ],
+            "tunnel"
+          ],
+          0.55,
+          1
+        ],
+        "line-width": [
+          "interpolate",
+          [
+            "exponential",
+            1.5
+          ],
+          [
+            "zoom"
+          ],
+          8,
+          0.6,
+          12,
+          1.6,
+          16,
+          5,
+          20,
+          20
+        ]
+      }
+    },
+    {
+      "id": "rail-overlay-ubahn-casing",
+      "type": "line",
+      "source": "hvv_rail",
+      "source-layer": "transportation",
+      "filter": [
+        "all",
+        [
+          "==",
+          [
+            "get",
+            "class"
+          ],
+          "transit"
+        ],
+        [
+          "==",
+          [
+            "get",
+            "subclass"
+          ],
+          "subway"
+        ]
+      ],
+      "layout": {
+        "line-cap": "round",
+        "line-join": "round",
+        "visibility": "none"
+      },
+      "paint": {
+        "line-color": "#ffffff",
+        "line-width": [
+          "interpolate",
+          [
+            "exponential",
+            1.5
+          ],
+          [
+            "zoom"
+          ],
+          8,
+          1.2,
+          12,
+          3,
+          16,
+          8,
+          20,
+          30
+        ]
+      }
+    },
+    {
+      "id": "rail-overlay-ubahn",
+      "type": "line",
+      "source": "hvv_rail",
+      "source-layer": "transportation",
+      "filter": [
+        "all",
+        [
+          "==",
+          [
+            "get",
+            "class"
+          ],
+          "transit"
+        ],
+        [
+          "==",
+          [
+            "get",
+            "subclass"
+          ],
+          "subway"
+        ]
+      ],
+      "layout": {
+        "line-cap": "round",
+        "line-join": "round",
+        "visibility": "none"
+      },
+      "paint": {
+        "line-color": "#0f5ea8",
+        "line-opacity": [
+          "case",
+          [
+            "==",
+            [
+              "get",
+              "brunnel"
+            ],
+            "tunnel"
+          ],
+          0.55,
+          1
+        ],
+        "line-width": [
+          "interpolate",
+          [
+            "exponential",
+            1.5
+          ],
+          [
+            "zoom"
+          ],
+          8,
+          0.6,
+          12,
+          1.6,
+          16,
+          5,
+          20,
+          20
+        ]
+      }
+    },
+    {
+      "id": "rail-overlay-platforms",
+      "type": "line",
+      "source": "hvv_rail",
+      "source-layer": "transportation",
+      "minzoom": 16,
+      "filter": [
+        "all",
+        [
+          "==",
+          [
+            "get",
+            "class"
+          ],
+          "path"
+        ],
+        [
+          "==",
+          [
+            "get",
+            "subclass"
+          ],
+          "platform"
+        ]
+      ],
+      "paint": {
+        "line-color": "#9a9a9a",
+        "line-width": [
+          "interpolate",
+          [
+            "linear"
+          ],
+          [
+            "zoom"
+          ],
+          16,
+          0.5,
+          20,
+          3
+        ]
+      },
+      "layout": {
+        "visibility": "none"
+      }
+    },
+    {
+      "id": "rail-overlay-subway-entrance",
+      "type": "circle",
+      "source": "hvv_rail",
+      "source-layer": "poi",
+      "minzoom": 16,
+      "filter": [
+        "==",
+        [
+          "get",
+          "subclass"
+        ],
+        "subway_entrance"
+      ],
+      "paint": {
+        "circle-color": "#0f5ea8",
+        "circle-stroke-color": "#ffffff",
+        "circle-stroke-width": 1,
+        "circle-radius": [
+          "interpolate",
+          [
+            "linear"
+          ],
+          [
+            "zoom"
+          ],
+          16,
+          2,
+          20,
+          6
+        ]
+      },
+      "layout": {
+        "visibility": "none"
+      }
+    }
+  ]
+}
