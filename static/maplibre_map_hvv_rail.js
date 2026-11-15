@@ -1,10 +1,13 @@
-// Optional rail network overlay from /api/vector/overlay/style.json.
+// Optional OpenRailwayMap overlay from /api/vector/overlay/style.json.
 // Visible by default; only offered if an overlay .mbtiles file is mounted.
 // Used by maplibre_map_hvv_base.js.
 
 const RAIL_STYLE_ENDPOINT = '/api/vector/overlay/style.json';
-// Basemap U-/S-Bahn lines the overlay replaces; hidden while it is shown.
-const RAIL_BASEMAP_LAYERS = ['railway_transit', 'railway_transit_dashline'];
+// Basemap railway lines the overlay replaces; hidden while it is shown.
+const RAIL_BASEMAP_LAYERS = [
+    'railway_transit', 'railway_transit_dashline', 'railway_service',
+    'railway_service_dashline', 'railway', 'railway_dashline',
+];
 
 // Above the basemap's roads and rails, below its labels and the live layers.
 function railInsertBeforeId(map) {

@@ -5,7 +5,7 @@ const HAMBURG_DEFAULT_ZOOM = 12;
 
 // Optional page overrides (window.HVV_PAGE_CONFIG): center [lon, lat], zoom, minZoom, modes,
 // ais (AIS layer, default: on pages with ferries),
-// rail (rail network overlay, default: on),
+// rail (OpenRailwayMap overlay, default: on),
 // lineToggles {mode: [{key, color, icon}]} - per-line checkboxes replacing that mode's,
 // sourceKeys - restricts the data source choices.
 const PAGE_CONFIG = window.HVV_PAGE_CONFIG || {};
@@ -1043,11 +1043,11 @@ function initHvvVehicleLayers(initialSourceKey) {
                 onToggle: (key, checked) => aisLayer.setVisible(checked) }],
         );
         map.addControl(modeToggleControl, 'top-right');
-        // Optional rail network overlay (maplibre_map_hvv_rail.js), only if tiles are mounted.
+        // Optional OpenRailwayMap overlay (maplibre_map_hvv_rail.js), only if tiles are mounted.
         if (railEnabled && typeof createHvvRailLayer === 'function') {
             createHvvRailLayer(map).then((railLayer) => {
                 if (railLayer && modeToggleControl) {
-                    modeToggleControl.addLayerToggle({ key: 'rail', name: 'Streckennetz', icon: '≡', checked: true,
+                    modeToggleControl.addLayerToggle({ key: 'rail', name: 'OpenRailwayMap', icon: '≡', checked: true,
                         onToggle: (key, checked) => railLayer.setVisible(checked) });
                 }
             });

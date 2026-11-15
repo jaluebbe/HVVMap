@@ -151,11 +151,13 @@ they're built directly from the static feed on first run.
   `ais` overrides, by default it is on for pages with ferries. It is
   independent of the GTI ferries. While the layer is visible, "AIS: Open
   Waters" is added to the map attribution.
-  The checkbox "Streckennetz" (on by default, `maplibre_map_hvv_rail.js`)
-  draws the rail overlay from `/api/vector/overlay/*` above the basemap
-  roads, below its labels and the live layers: U-Bahn, S-Bahn and AKN lines
-  with tunnel sections in a lighter tint. It only appears if an overlay file is
-  mounted; the page option `rail` overrides, by default it is on.
+  The checkbox "OpenRailwayMap" (on by default, `maplibre_map_hvv_rail.js`)
+  draws the OpenRailwayMap standard style from `/api/vector/overlay/*` above
+  the basemap roads, below its labels and the live layers, and hides the
+  basemap's own railway lines meanwhile. The data is OpenRailwayMap's, not the
+  HVV's. It only appears if an overlay file is mounted; the page option `rail`
+  overrides, by default it is on. While visible, "OpenRailwayMap" is added to
+  the map attribution.
 - `maplibre_map_hvv_ubahn.html` - the same page restricted to the U-Bahn and
   the `gtilive` source, centered on Betriebshof Barmbek, with U1-U4
   toggleable individually and a `#` toggle for the unit numbers below the
@@ -216,18 +218,14 @@ The **api** image expects, copied in at build time:
   uses, see the style's `text-font` entries)
 - `positron_style.json` - the MapLibre style (`{name}_style.json` naming;
   referenced as `/api/vector/style/{name}.json`)
-- `hvv_rail_style.json` - style of the optional rail network overlay
+- `openrailwaymap_style.json` - style of the optional OpenRailwayMap overlay
 
 and, mounted as a volume at runtime:
 - any single `*.mbtiles` file under `/osm/` - filename doesn't matter, the
   API picks up whatever's there
-- optionally a single `*.mbtiles` file under `/overlays/` with the HVV rail
-  network (OpenMapTiles schema, `transportation` layer, see
-  `hvv_rail_style.json`). OpenMapTiles shows subway/light_rail only from z14,
-  so the tracks are retagged when building the tiles and styled by
-  `class=rail` with subclass `narrow_gauge` (U-Bahn), `preserved` (S-Bahn)
-  and `rail` (AKN). Without it the frontend simply offers no rail
-  toggle.
+- optionally a single `*.mbtiles` file under `/overlays/`, built with
+  OpenRailwayMap-vector from the sources `openrailwaymap_style.json` uses.
+  Without it the frontend simply offers no OpenRailwayMap toggle.
 
 The **gtfs-fetcher** image needs a static GTFS feed mounted at `GTFS_DIR`
 (default `data/gtfs`) - unzipped, not the raw `.zip`.

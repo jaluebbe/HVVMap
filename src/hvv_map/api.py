@@ -120,9 +120,9 @@ async def robots():
 # --- Background vector basemap ---------------------------------------------
 
 OSM_DIR = Path("/osm")
-# Optional overlay tiles (e.g. the HVV rail network); same schema as the basemap.
+# Optional OpenRailwayMap overlay tiles (OpenRailwayMap-vector, see README).
 OVERLAY_DIR = Path("/overlays")
-OVERLAY_STYLE_NAME = "hvv_rail"
+OVERLAY_STYLE_NAME = "openrailwaymap"
 
 # Persistent read-only connections, opened once and reused across requests.
 # check_same_thread=False lets FastAPI's thread pool call them, but that alone

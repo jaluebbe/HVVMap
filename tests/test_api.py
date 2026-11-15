@@ -530,7 +530,7 @@ def test_course_cache_counts_live_ids_by_course_state(client, monkeypatch):
 def overlay_client(client, tmp_path, monkeypatch):
     overlay_dir = tmp_path / "overlays"
     overlay_dir.mkdir()
-    conn = sqlite3.connect(overlay_dir / "rail.mbtiles")
+    conn = sqlite3.connect(overlay_dir / "orm.mbtiles")
     conn.execute("CREATE TABLE metadata (name TEXT, value TEXT)")
     conn.execute(
         "CREATE TABLE tiles (zoom_level INTEGER, tile_column INTEGER, "
@@ -542,11 +542,11 @@ def overlay_client(client, tmp_path, monkeypatch):
     )
     conn.commit()
     conn.close()
-    (tmp_path / "hvv_rail_style.json").write_text(
+    (tmp_path / "openrailwaymap_style.json").write_text(
         json.dumps(
             {
                 "version": 8,
-                "sources": {"hvv_rail": {"type": "vector", "url": "x"}},
+                "sources": {"orm_high": {"type": "vector", "url": "x"}},
                 "layers": [],
             }
         )
@@ -559,7 +559,7 @@ def overlay_client(client, tmp_path, monkeypatch):
 def test_overlay_style_points_at_overlay_metadata(overlay_client):
     response = overlay_client.get("/api/vector/overlay/style.json")
     assert response.status_code == 200
-    source = response.json()["sources"]["hvv_rail"]
+    source = response.json()["sources"]["orm_high"]
     assert source["url"] == "http://testserver/api/vector/overlay/metadata.json"
 
 
