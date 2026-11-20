@@ -26,6 +26,8 @@ WRITE_INTERVAL = 15.0  # seconds between Redis writes
 MAX_AGE_S = 30 * 60  # positions older than this are dropped
 AISSTREAM_TTL = 600
 RECONNECT_MAX_S = 300.0
+# The handshake often takes longer than websockets' default of 10 s.
+OPEN_TIMEOUT_S = 60
 
 
 def subscription(key: str, fleet=HADAG) -> dict:
@@ -100,7 +102,7 @@ def _write(redis_client, latest: dict[int, dict]) -> None:
 
 def _stream(key: str, redis_client, latest: dict[int, dict]) -> None:
     """One connection: subscribe, then read until it fails."""
-    with connect(AISSTREAM_URL, open_timeout=10) as ws:
+    with connect(AISSTREAM_URL, open_timeout=OPEN_TIMEOUT_S) as ws:
         ws.send(json.dumps(subscription(key)))
         last_write = 0.0
         while True:
@@ -151,7 +153,7 @@ def main() -> None:
     key = os.environ.get("AISSTREAM_KEY", "").strip()
     if not key:
         raise SystemExit("AISSTREAM_KEY is not set")
-    with connect(AISSTREAM_URL, open_timeout=10) as ws:
+    with connect(AISSTREAM_URL, open_timeout=OPEN_TIMEOUT_S) as ws:
         ws.send(json.dumps(subscription(key)))
         end = time.time() + 60
         while time.time() < end:
