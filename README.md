@@ -150,7 +150,10 @@ they're built directly from the static feed on first run.
   vessel, green while under way and grey while moored; the page option
   `ais` overrides, by default it is on for pages with ferries. It is
   independent of the GTI ferries. While the layer is visible, "AIS: Open
-  Waters" is added to the map attribution.
+  Waters" is added to the map attribution. For moving vessels whose last
+  message is 20 s to 10 min old, a thin dashed line with a hollow end point
+  shows the dead-reckoned position now (course and speed over ground); it
+  fades with the age of the message.
 - `maplibre_map_hvv_ubahn.html` - the same page restricted to the U-Bahn and
   the `gtilive` source, centered on Betriebshof Barmbek, with U1-U4
   toggleable individually and a `#` toggle for the unit numbers below the
