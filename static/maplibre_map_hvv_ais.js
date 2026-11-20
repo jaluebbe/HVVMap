@@ -1,12 +1,23 @@
-// Optional AIS layer: HADAG ferries from /api/hvv/ais/hadag.geojson (see ais.py).
-// Off by default; polls only while visible. Used by maplibre_map_hvv_base.js.
+// Optional AIS layers: HADAG ferries from /api/hvv/ais/*.geojson (ais.py,
+// aisstream.py). Off by default; poll only while visible. Used by
+// maplibre_map_hvv_base.js.
 
-const AIS_ENDPOINT = '/api/hvv/ais/hadag.geojson';
-const AIS_POLL_INTERVAL_MS = 30000;
-const AIS_SOURCE = 'hvv-ais';
-const AIS_LAYER = 'hvv-ais-vessels';
-const AIS_ATTRIBUTION = '<a href="https://openwaters.io/ais" target="_blank">AIS: Open Waters</a>';
-const AIS_COLORS = { underway: '#00897b', moored: '#9aa5b1' };
+const AIS_SOURCES = {
+    ais: {
+        endpoint: '/api/hvv/ais/hadag.geojson',
+        pollMs: 30000,
+        label: 'Open Waters',
+        attribution: '<a href="https://openwaters.io/ais" target="_blank">AIS: Open Waters</a>',
+        colors: { underway: '#00897b', moored: '#9aa5b1' },
+    },
+    aisstream: {
+        endpoint: '/api/hvv/ais/aisstream.geojson',
+        pollMs: 15000,
+        label: 'aisstream.io',
+        attribution: '<a href="https://aisstream.io" target="_blank">AIS: aisstream.io</a>',
+        colors: { underway: '#6a1b9a', moored: '#b39ddb' },
+    },
+};
 
 // Top view of a hull, bow up (rotation 0 = north); drawn at 2x.
 function buildAisIcon(color) {
@@ -35,38 +46,42 @@ function buildAisIcon(color) {
     return ctx.getImageData(0, 0, canvas.width, canvas.height);
 }
 
-function aisPopupHtml(p) {
+function aisPopupHtml(p, label) {
     const knots = p.sog === null || p.sog === undefined ? '' : `${Number(p.sog).toFixed(1)} kn`;
     const age = p.seen ? Math.max(0, Math.round((Date.now() - Date.parse(p.seen)) / 60000)) : null;
     const lines = [
         `<b>${p.name}</b>`,
         [p.state === 'underway' ? 'in Fahrt' : 'festgemacht', knots].filter(Boolean).join(', '),
         age === null ? '' : `Position vor ${age} min`,
+        `<span style="color:#78909c">${label}</span>`,
     ];
     return lines.filter(Boolean).join('<br>');
 }
 
-function createHvvAisLayer(map) {
+function createHvvAisLayer(map, key = 'ais') {
+    const config = AIS_SOURCES[key];
+    const source = `hvv-${key}`;
+    const layer = `hvv-${key}-vessels`;
     const popup = new maplibregl.Popup({ closeButton: false, closeOnClick: false, anchor: 'bottom', offset: 14 });
     let timer = null;
     let visible = false;
 
-    Object.entries(AIS_COLORS).forEach(([state, color]) => {
-        map.addImage(`hvv-ais-${state}`, buildAisIcon(color), { pixelRatio: 2 });
+    Object.entries(config.colors).forEach(([state, color]) => {
+        map.addImage(`${source}-${state}`, buildAisIcon(color), { pixelRatio: 2 });
     });
     // The source attribution shows up in the attribution control while the layer is visible.
-    map.addSource(AIS_SOURCE, {
+    map.addSource(source, {
         type: 'geojson',
         data: { type: 'FeatureCollection', features: [] },
-        attribution: AIS_ATTRIBUTION,
+        attribution: config.attribution,
     });
     map.addLayer({
-        id: AIS_LAYER,
+        id: layer,
         type: 'symbol',
-        source: AIS_SOURCE,
+        source,
         layout: {
             visibility: 'none',
-            'icon-image': ['concat', 'hvv-ais-', ['get', 'state']],
+            'icon-image': ['concat', `${source}-`, ['get', 'state']],
             'icon-rotate': ['get', 'rotation'],
             'icon-rotation-alignment': 'map',
             'icon-allow-overlap': true,
@@ -92,20 +107,20 @@ function createHvvAisLayer(map) {
     function show(event) {
         map.getCanvas().style.cursor = 'pointer';
         const feature = event.features[0];
-        popup.setLngLat(feature.geometry.coordinates).setHTML(aisPopupHtml(feature.properties)).addTo(map);
+        popup.setLngLat(feature.geometry.coordinates).setHTML(aisPopupHtml(feature.properties, config.label)).addTo(map);
     }
-    map.on('mouseenter', AIS_LAYER, show);
-    map.on('click', AIS_LAYER, show);
-    map.on('mouseleave', AIS_LAYER, () => {
+    map.on('mouseenter', layer, show);
+    map.on('click', layer, show);
+    map.on('mouseleave', layer, () => {
         map.getCanvas().style.cursor = '';
         popup.remove();
     });
 
     async function refresh() {
         try {
-            const response = await fetch(AIS_ENDPOINT);
+            const response = await fetch(config.endpoint);
             if (response.ok) {
-                map.getSource(AIS_SOURCE).setData(await response.json());
+                map.getSource(source).setData(await response.json());
             }
         } catch (error) {
             // keep the vessels of the last successful poll
@@ -115,12 +130,12 @@ function createHvvAisLayer(map) {
     return {
         setVisible(show) {
             visible = show;
-            map.setLayoutProperty(AIS_LAYER, 'visibility', show ? 'visible' : 'none');
+            map.setLayoutProperty(layer, 'visibility', show ? 'visible' : 'none');
             clearInterval(timer);
             timer = null;
             if (show) {
                 refresh();
-                timer = setInterval(refresh, AIS_POLL_INTERVAL_MS);
+                timer = setInterval(refresh, config.pollMs);
             } else {
                 popup.remove();
             }

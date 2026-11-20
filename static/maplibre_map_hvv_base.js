@@ -325,9 +325,9 @@ function buildIconNode(icon) {
 
 // One checkbox per mode + disruption category; collapsible on narrow/short screens.
 class ModeToggleControl {
-    constructor(onModeToggle, categories, onCategoryToggle, sourceConfig, onLineToggle, extraToggles, aisToggle) {
+    constructor(onModeToggle, categories, onCategoryToggle, sourceConfig, onLineToggle, extraToggles, aisToggles) {
         this._extraToggles = extraToggles || [];
-        this._aisToggle = aisToggle || null;
+        this._aisToggles = aisToggles || [];
         this._onModeToggle = onModeToggle;
         this._onLineToggle = onLineToggle;
         this._categories = categories || [];
@@ -412,13 +412,12 @@ class ModeToggleControl {
         }
         items.appendChild(this._extrasSection);
 
-        if (this._aisToggle) {
-            const t = this._aisToggle;
+        if (this._aisToggles.length > 0) {
             const aisSection = document.createElement('div');
             const aisDivider = document.createElement('div');
             aisDivider.className = 'hvv-mode-control-divider';
             aisSection.appendChild(aisDivider);
-            this._appendItem(aisSection, t.key, t.name, t.icon, t.checked, t.onToggle);
+            this._aisToggles.forEach((t) => this._appendItem(aisSection, t.key, t.name, t.icon, t.checked, t.onToggle));
             items.appendChild(aisSection);
         }
 
@@ -1022,8 +1021,14 @@ function initHvvVehicleLayers(initialSourceKey) {
 
         MODES.filter((m) => m.startsHidden).forEach((m) => applyModeVisibility(m.key));
 
-        // Optional AIS layer (maplibre_map_hvv_ais.js), off until switched on.
-        const aisLayer = aisEnabled && typeof createHvvAisLayer === 'function' ? createHvvAisLayer(map) : null;
+        // Optional AIS layers (maplibre_map_hvv_ais.js), off until switched on.
+        const aisToggles = aisEnabled && typeof createHvvAisLayer === 'function'
+            ? [['ais', 'AIS'], ['aisstream', 'AIS (aisstream)']].map(([key, name]) => {
+                const layer = createHvvAisLayer(map, key);
+                return { key, name, icon: '/static/hvv/icons/ais.svg', checked: false,
+                    onToggle: (k, checked) => layer.setVisible(checked) };
+            })
+            : [];
         modeToggleControl = new ModeToggleControl(
             setModeVisibility,
             DISRUPTION_CATEGORIES,
@@ -1031,8 +1036,7 @@ function initHvvVehicleLayers(initialSourceKey) {
             { sources: SOURCES, initialKey: currentSource.key, onSourceChange: switchSource },
             setLineVisibility,
             [{ key: 'straight', name: 'Luftlinien', icon: '⋯', checked: false, onToggle: setStraightVisibility }],
-            aisLayer && { key: 'ais', name: 'AIS', icon: '/static/hvv/icons/ais.svg', checked: false,
-                onToggle: (key, checked) => aisLayer.setVisible(checked) },
+            aisToggles,
         );
         map.addControl(modeToggleControl, 'top-right');
         modeToggleControl.setCategoriesVisible(!!currentSource.disruptionsEndpoint);

@@ -14,7 +14,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-fetcher = ["requests"]
+fetcher = ["requests", "websockets>=13"]
 gtfs-fetcher = ["redis"]
 api = ["fastapi", "uvicorn"]
 dev = ["pytest", "ruff", "httpx2"]
@@ -30,6 +30,7 @@ hvvmap-gtfs-fetch-once = "hvv_map.gtfs_fetcher:fetch_once"
 hvvmap-departures = "hvv_map.departures:main"
 hvvmap-departures-live = "hvv_map.departures_live:main"
 hvvmap-ais = "hvv_map.ais:main"
+hvvmap-aisstream = "hvv_map.aisstream:main"
 hvvmap-trip-courses = "hvv_map.trip_courses:main"
 hvvmap-course = "hvv_map.course_debug:main"
 hvvmap-vehicle = "hvv_map.vehicle_history:main"
