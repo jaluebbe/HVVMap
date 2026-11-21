@@ -90,16 +90,14 @@ def _seen_epoch(properties: dict) -> float | None:
 
 
 def _state(properties: dict, last_moving: dict | None = None) -> str:
-    """"underway", "halted" (stopped moments after moving) or "moored".
-    The crew's nav status wins, else the speed. last_moving maps a MMSI to
-    the time of its last moving message and is updated here."""
+    """"underway", "halted" or "moored". A vessel that stopped or was made
+    fast within HALTED_SECONDS of its last moving message is "halted"; the
+    crew's nav status otherwise wins over the speed. last_moving maps a MMSI
+    to the time of its last moving message and is updated here."""
     mmsi = properties.get("mmsi")
     seen = _seen_epoch(properties)
-    if properties.get("nav_status") in MOORED_STATUSES:
-        if last_moving is not None:
-            last_moving.pop(mmsi, None)
-        return "moored"
-    if (properties.get("sog") or 0) >= MOVING_KNOTS:
+    fast = properties.get("nav_status") in MOORED_STATUSES
+    if not fast and (properties.get("sog") or 0) >= MOVING_KNOTS:
         if last_moving is not None and seen is not None:
             last_moving[mmsi] = seen
         return "underway"
