@@ -9,6 +9,7 @@ import json
 import os
 import time
 import traceback
+from datetime import datetime
 
 import requests
 
@@ -66,6 +67,7 @@ NAV_STATUS = {
 }
 MOORED_STATUSES = {1, 5}
 MOVING_KNOTS = 0.5  # below this a vessel counts as lying still
+HALTED_SECONDS = 300  # after its last moving message a stopped vessel stays "halted"
 
 
 def fetch_vessels(token: str, mmsis, max_age: str = AIS_MAX_AGE) -> list[dict]:
@@ -80,13 +82,31 @@ def fetch_vessels(token: str, mmsis, max_age: str = AIS_MAX_AGE) -> list[dict]:
     return response.json()["features"]
 
 
-def _state(properties: dict) -> str:
-    """"moored" or "underway": the crew's nav status, else the speed."""
+def _seen_epoch(properties: dict) -> float | None:
+    try:
+        return datetime.fromisoformat(properties["seen"].replace("Z", "+00:00")).timestamp()
+    except (KeyError, AttributeError, ValueError):
+        return None
+
+
+def _state(properties: dict, last_moving: dict | None = None) -> str:
+    """"underway", "halted" (stopped moments after moving) or "moored".
+    The crew's nav status wins, else the speed. last_moving maps a MMSI to
+    the time of its last moving message and is updated here."""
+    mmsi = properties.get("mmsi")
+    seen = _seen_epoch(properties)
     if properties.get("nav_status") in MOORED_STATUSES:
+        if last_moving is not None:
+            last_moving.pop(mmsi, None)
         return "moored"
-    if (properties.get("sog") or 0) < MOVING_KNOTS:
-        return "moored"
-    return "underway"
+    if (properties.get("sog") or 0) >= MOVING_KNOTS:
+        if last_moving is not None and seen is not None:
+            last_moving[mmsi] = seen
+        return "underway"
+    moved = (last_moving or {}).get(mmsi)
+    if moved is not None and seen is not None and 0 <= seen - moved <= HALTED_SECONDS:
+        return "halted"
+    return "moored"
 
 
 def _angle(value) -> float | None:
@@ -101,7 +121,11 @@ def _rotation(state: str, heading: float | None, course: float | None) -> float:
     return next((angle for angle in order if angle is not None), 0)
 
 
-def build_geojson(features: list[dict], fleet: dict[int, str] = HADAG) -> dict:
+def build_geojson(
+    features: list[dict],
+    fleet: dict[int, str] = HADAG,
+    last_moving: dict | None = None,
+) -> dict:
     """Display features of the fleet's vessels; others are dropped."""
     result = []
     for feature in features:
@@ -111,7 +135,7 @@ def build_geojson(features: list[dict], fleet: dict[int, str] = HADAG) -> dict:
             continue
         heading = _angle(props.get("heading"))
         course = _angle(props.get("cog"))
-        state = _state(props)
+        state = _state(props, last_moving)
         result.append(
             {
                 "type": "Feature",
@@ -133,9 +157,9 @@ def build_geojson(features: list[dict], fleet: dict[int, str] = HADAG) -> dict:
     return {"type": "FeatureCollection", "features": result}
 
 
-def run_once(redis_client, token: str) -> int:
+def run_once(redis_client, token: str, last_moving: dict | None = None) -> int:
     """One request for the whole fleet; stored for AIS_TTL. Returns the count."""
-    data = build_geojson(fetch_vessels(token, HADAG))
+    data = build_geojson(fetch_vessels(token, HADAG), last_moving=last_moving)
     redis_client.set(
         REDIS_AIS_KEY,
         json.dumps({"fetched_at": int(time.time()), "data": data}),
@@ -152,10 +176,11 @@ def run_loop(interval: float = AIS_INTERVAL) -> None:
         return
     redis_client = get_redis_client()
     last_error = ("", 0.0)
+    last_moving: dict = {}
     while True:
         started = time.time()
         try:
-            run_once(redis_client, token)
+            run_once(redis_client, token, last_moving)
         except Exception:  # keep the loop alive across network or data errors
             message = traceback.format_exc()
             if (
