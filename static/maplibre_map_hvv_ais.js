@@ -5,8 +5,18 @@ const AIS_ENDPOINT = '/api/hvv/ais/hadag.geojson';
 const AIS_POLL_INTERVAL_MS = 30000;
 const AIS_SOURCE = 'hvv-ais';
 const AIS_LAYER = 'hvv-ais-vessels';
+const AIS_PROJECTION_SOURCE = 'hvv-ais-projection';
+const AIS_PROJECTION_LINE = 'hvv-ais-projection-line';
+const AIS_PROJECTION_END = 'hvv-ais-projection-end';
+const AIS_PROJECTION_UPDATE_MS = 5000;
+// A projection is only drawn for moving vessels with a message this old.
+const AIS_PROJECTION_MIN_AGE_S = 20;
+const AIS_PROJECTION_MAX_AGE_S = 600;
+const AIS_MOVING_KNOTS = 0.5;
+const EARTH_RADIUS_M = 6371000;
+const AIS_STATE_LABELS = { underway: 'in Fahrt', halted: 'gerade angehalten', moored: 'festgemacht' };
 const AIS_ATTRIBUTION = '<a href="https://openwaters.io/ais" target="_blank">AIS: Open Waters</a>';
-const AIS_COLORS = { underway: '#00897b', moored: '#9aa5b1' };
+const AIS_COLORS = { underway: '#00897b', halted: '#8fcfb5', moored: '#9aa5b1' };
 
 // Top view of a hull, bow up (rotation 0 = north); drawn at 2x.
 function buildAisIcon(color) {
@@ -35,12 +45,53 @@ function buildAisIcon(color) {
     return ctx.getImageData(0, 0, canvas.width, canvas.height);
 }
 
+// Point reached from [lon, lat] after `meters` along the bearing `course` (great circle).
+function destinationPoint([lon, lat], course, meters) {
+    const rad = Math.PI / 180;
+    const delta = meters / EARTH_RADIUS_M;
+    const theta = course * rad;
+    const phi1 = lat * rad;
+    const phi2 = Math.asin(Math.sin(phi1) * Math.cos(delta) + Math.cos(phi1) * Math.sin(delta) * Math.cos(theta));
+    const lambda2 =
+        lon * rad +
+        Math.atan2(Math.sin(theta) * Math.sin(delta) * Math.cos(phi1), Math.cos(delta) - Math.sin(phi1) * Math.sin(phi2));
+    return [((lambda2 / rad + 540) % 360) - 180, phi2 / rad];
+}
+
+// Dead reckoning: a dashed line from the last reported position along the course
+// to where the vessel would be now at the reported speed.
+function buildProjections(collection, nowMs) {
+    const features = [];
+    (collection.features || []).forEach((feature) => {
+        const p = feature.properties;
+        if (p.state !== 'underway' || p.cog === null || p.cog === undefined || !p.seen) {
+            return;
+        }
+        if (!(p.sog >= AIS_MOVING_KNOTS)) {
+            return;
+        }
+        const ageS = (nowMs - Date.parse(p.seen)) / 1000;
+        if (!(ageS >= AIS_PROJECTION_MIN_AGE_S && ageS <= AIS_PROJECTION_MAX_AGE_S)) {
+            return;
+        }
+        const start = feature.geometry.coordinates;
+        const end = destinationPoint(start, p.cog, p.sog * 0.514444 * ageS);
+        // older messages are less certain, so the indicator fades out
+        const opacity = 0.7 - 0.45 * (ageS / AIS_PROJECTION_MAX_AGE_S);
+        features.push(
+            { type: 'Feature', properties: { opacity }, geometry: { type: 'LineString', coordinates: [start, end] } },
+            { type: 'Feature', properties: { opacity }, geometry: { type: 'Point', coordinates: end } },
+        );
+    });
+    return { type: 'FeatureCollection', features };
+}
+
 function aisPopupHtml(p) {
     const knots = p.sog === null || p.sog === undefined ? '' : `${Number(p.sog).toFixed(1)} kn`;
     const age = p.seen ? Math.max(0, Math.round((Date.now() - Date.parse(p.seen)) / 60000)) : null;
     const lines = [
         `<b>${p.name}</b>`,
-        [p.state === 'underway' ? 'in Fahrt' : 'festgemacht', knots].filter(Boolean).join(', '),
+        [AIS_STATE_LABELS[p.state] || p.state, knots].filter(Boolean).join(', '),
         age === null ? '' : `Position vor ${age} min`,
     ];
     return lines.filter(Boolean).join('<br>');
@@ -49,7 +100,9 @@ function aisPopupHtml(p) {
 function createHvvAisLayer(map) {
     const popup = new maplibregl.Popup({ closeButton: false, closeOnClick: false, anchor: 'bottom', offset: 14 });
     let timer = null;
+    let projectionTimer = null;
     let visible = false;
+    let lastData = { type: 'FeatureCollection', features: [] };
 
     Object.entries(AIS_COLORS).forEach(([state, color]) => {
         map.addImage(`hvv-ais-${state}`, buildAisIcon(color), { pixelRatio: 2 });
@@ -59,6 +112,36 @@ function createHvvAisLayer(map) {
         type: 'geojson',
         data: { type: 'FeatureCollection', features: [] },
         attribution: AIS_ATTRIBUTION,
+    });
+    map.addSource(AIS_PROJECTION_SOURCE, { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
+    // drawn below the vessel icons
+    map.addLayer({
+        id: AIS_PROJECTION_LINE,
+        type: 'line',
+        source: AIS_PROJECTION_SOURCE,
+        filter: ['==', ['geometry-type'], 'LineString'],
+        layout: { visibility: 'none', 'line-cap': 'round' },
+        paint: {
+            'line-color': AIS_COLORS.underway,
+            'line-width': 1.2,
+            'line-dasharray': [2, 3],
+            'line-opacity': ['get', 'opacity'],
+        },
+    });
+    map.addLayer({
+        id: AIS_PROJECTION_END,
+        type: 'circle',
+        source: AIS_PROJECTION_SOURCE,
+        filter: ['==', ['geometry-type'], 'Point'],
+        layout: { visibility: 'none' },
+        paint: {
+            'circle-radius': 3,
+            'circle-color': '#ffffff',
+            'circle-opacity': ['get', 'opacity'],
+            'circle-stroke-color': AIS_COLORS.underway,
+            'circle-stroke-width': 1.2,
+            'circle-stroke-opacity': ['get', 'opacity'],
+        },
     });
     map.addLayer({
         id: AIS_LAYER,
@@ -101,11 +184,17 @@ function createHvvAisLayer(map) {
         popup.remove();
     });
 
+    function updateProjections() {
+        map.getSource(AIS_PROJECTION_SOURCE).setData(buildProjections(lastData, Date.now()));
+    }
+
     async function refresh() {
         try {
             const response = await fetch(AIS_ENDPOINT);
             if (response.ok) {
-                map.getSource(AIS_SOURCE).setData(await response.json());
+                lastData = await response.json();
+                map.getSource(AIS_SOURCE).setData(lastData);
+                updateProjections();
             }
         } catch (error) {
             // keep the vessels of the last successful poll
@@ -115,12 +204,16 @@ function createHvvAisLayer(map) {
     return {
         setVisible(show) {
             visible = show;
-            map.setLayoutProperty(AIS_LAYER, 'visibility', show ? 'visible' : 'none');
+            [AIS_LAYER, AIS_PROJECTION_LINE, AIS_PROJECTION_END].forEach((id) => {
+                map.setLayoutProperty(id, 'visibility', show ? 'visible' : 'none');
+            });
             clearInterval(timer);
-            timer = null;
+            clearInterval(projectionTimer);
+            timer = projectionTimer = null;
             if (show) {
                 refresh();
                 timer = setInterval(refresh, AIS_POLL_INTERVAL_MS);
+                projectionTimer = setInterval(updateProjections, AIS_PROJECTION_UPDATE_MS);
             } else {
                 popup.remove();
             }

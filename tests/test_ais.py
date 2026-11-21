@@ -85,3 +85,46 @@ def test_loop_without_token_returns_at_once(monkeypatch, capsys):
     monkeypatch.delenv("AIS_TOKEN", raising=False)
     ais.run_loop()
     assert "AIS_TOKEN is not set" in capsys.readouterr().out
+
+
+def _at(mmsi, seen, **props):
+    feature = _feature(mmsi, **props)
+    feature["properties"]["seen"] = seen
+    return feature
+
+
+def _state(feature, last_moving):
+    data = ais.build_geojson([feature], last_moving=last_moving)
+    return data["features"][0]["properties"]["state"]
+
+
+def test_vessel_stopping_after_moving_is_halted_then_moored():
+    last_moving = {}
+    moving = _at(211437340, "2026-11-13T17:10:00Z", sog=6.0, cog=90, nav_status=0)
+    assert _state(moving, last_moving) == "underway"
+    stopped = _at(211437340, "2026-11-13T17:11:00Z", sog=0.0, heading=10, nav_status=0)
+    assert _state(stopped, last_moving) == "halted"
+    later = _at(211437340, "2026-11-13T17:16:01Z", sog=0.0, heading=10, nav_status=0)
+    assert _state(later, last_moving) == "moored"
+
+
+def test_vessel_made_fast_shortly_after_moving_is_halted():
+    last_moving = {}
+    moving = _at(211437340, "2026-11-13T17:10:00Z", sog=4.0, cog=90, nav_status=0)
+    assert _state(moving, last_moving) == "underway"
+    fast = _at(211437340, "2026-11-13T17:11:00Z", sog=0.0, nav_status=5)
+    assert _state(fast, last_moving) == "halted"
+    later = _at(211437340, "2026-11-13T17:16:01Z", sog=0.0, nav_status=5)
+    assert _state(later, last_moving) == "moored"
+
+
+def test_moored_nav_status_overrides_a_residual_speed():
+    last_moving = {}
+    fast = _at(211437340, "2026-11-13T17:10:07Z", sog=0.8, nav_status=5)
+    assert _state(fast, last_moving) == "moored"
+    assert last_moving == {}
+
+
+def test_stationary_vessel_without_history_is_moored():
+    stopped = _at(211437340, "2026-11-13T17:11:00Z", sog=0.0, nav_status=0)
+    assert _state(stopped, {}) == "moored"

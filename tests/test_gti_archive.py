@@ -204,3 +204,65 @@ def test_another_zugnummer_close_in_time_is_another_run(archive):
         (21914, "010821_6"),
         (-121914, "340925_6"),
     ]
+
+
+def test_departures_of_another_trip_under_the_id_are_another_run(archive):
+    own = {**_dep(offset=10), "serviceId": 24149}
+    foreign = {
+        **_dep(offset=12),
+        "serviceId": 24149,
+        "line": {**LINE, "origin": "Farmsen", "direction": "Ohlsdorf"},
+        "vehicles": [],
+    }
+    response = {"time": {"date": "19.11.2026", "time": "12:00"}}
+    gti_archive.record_departures(response, [own], "x")
+    gti_archive.record_departures(response, [foreign], "x")
+    gti_archive.record_departures(response, [own], "y")
+
+    rows = archive.execute(
+        "SELECT service_id, origin, seen_count FROM departures ORDER BY service_id DESC"
+    ).fetchall()
+    assert [tuple(r) for r in rows] == [
+        (24149, "Norderstedt Mitte", 2),
+        (-124149, "Farmsen", 1),
+    ]
+
+
+def test_origin_does_not_split_runs_of_other_modes(archive):
+    line = {**LINE, "id": "VHH-X:S1_VHH-X", "type": {"shortInfo": "S"}}
+
+    def dep(offset, origin):
+        return {
+            **_dep(offset=offset),
+            "serviceId": 3000,
+            "vehicles": [],
+            "line": {**line, "origin": origin},
+        }
+
+    response = {"time": {"date": "05.11.2026", "time": "08:00"}}
+    gti_archive.record_departures(response, [dep(10, "A")], "x")
+    gti_archive.record_departures(response, [dep(12, "B")], "x")
+    assert archive.execute("SELECT DISTINCT service_id FROM departures").fetchall()[0][0] == 3000
+
+
+def test_course_run_follows_the_courses_own_first_stop(archive):
+    own = {**_dep(offset=10), "serviceId": 24149}
+    foreign = {
+        **_dep(offset=12),
+        "serviceId": 24149,
+        "line": {**LINE, "origin": "Farmsen", "direction": "Ohlsdorf"},
+        "vehicles": [],
+    }
+    response = {"time": {"date": "19.11.2026", "time": "12:00"}}
+    gti_archive.record_departures(response, [own], "x")
+    gti_archive.record_departures(response, [foreign], "x")
+    element = {
+        "fromStation": {"id": "Master:1", "name": "Farmsen"},
+        "toStation": {"id": "Master:2"},
+        "depTime": "2026-11-19T12:12:00.000+0100",
+        "arrTime": "2026-11-19T12:14:00.000+0100",
+    }
+    gti_archive.record_course(
+        {"serviceId": 24149}, {"courseElements": [element]}, LINE, "z", "new"
+    )
+    assert archive.execute("SELECT service_id FROM courses").fetchall()[0][0] == -124149
