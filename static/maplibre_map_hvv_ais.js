@@ -14,8 +14,9 @@ const AIS_PROJECTION_MIN_AGE_S = 20;
 const AIS_PROJECTION_MAX_AGE_S = 600;
 const AIS_MOVING_KNOTS = 0.5;
 const EARTH_RADIUS_M = 6371000;
+const AIS_STATE_LABELS = { underway: 'in Fahrt', halted: 'gerade angehalten', moored: 'festgemacht' };
 const AIS_ATTRIBUTION = '<a href="https://openwaters.io/ais" target="_blank">AIS: Open Waters</a>';
-const AIS_COLORS = { underway: '#00897b', moored: '#9aa5b1' };
+const AIS_COLORS = { underway: '#00897b', halted: '#8fcfb5', moored: '#9aa5b1' };
 
 // Top view of a hull, bow up (rotation 0 = north); drawn at 2x.
 function buildAisIcon(color) {
@@ -90,7 +91,7 @@ function aisPopupHtml(p) {
     const age = p.seen ? Math.max(0, Math.round((Date.now() - Date.parse(p.seen)) / 60000)) : null;
     const lines = [
         `<b>${p.name}</b>`,
-        [p.state === 'underway' ? 'in Fahrt' : 'festgemacht', knots].filter(Boolean).join(', '),
+        [AIS_STATE_LABELS[p.state] || p.state, knots].filter(Boolean).join(', '),
         age === null ? '' : `Position vor ${age} min`,
     ];
     return lines.filter(Boolean).join('<br>');
