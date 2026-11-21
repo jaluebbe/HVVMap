@@ -147,8 +147,8 @@ they're built directly from the static feed on first run.
   `maplibre_map_hvv_base.js`'s `SOURCES`. Defaults to `gtilive`. The
   checkbox "AIS" (off by default) adds the HADAG ferries' AIS positions
   (`maplibre_map_hvv_ais.js`, `/api/hvv/ais/hadag.geojson`): a hull icon per
-  vessel, green while under way, pale green for up to 5 min after it came to a
-  stop (`HALTED_SECONDS` in `ais.py`) and grey while moored; the page option
+  vessel, green while under way, pale green for up to 5 min after it stopped or
+  was made fast (`HALTED_SECONDS` in `ais.py`) and grey while moored; the page option
   `ais` overrides, by default it is on for pages with ferries. It is
   independent of the GTI ferries. While the layer is visible, "AIS: Open
   Waters" is added to the map attribution. For moving vessels whose last
