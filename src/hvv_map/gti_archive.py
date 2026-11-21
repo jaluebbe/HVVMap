@@ -294,6 +294,9 @@ WHERE excluded.last_seen_at >= departures.last_seen_at
 RUN_BASE = PLAN_ID_MAX
 RUN_GAP = timedelta(hours=2)  # farther from every run: a new one
 MAX_RUNS = 10
+# Line keys whose Zugnummer never changes its start station (U-Bahn, checked
+# in ubahnkarte 03.-18.11.); not verified for other modes.
+ORIGIN_RUN_LINES = ("HHA-U:",)
 SAME_PLAN_ID = "service_id IN ({})".format(
     ", ".join(["(:sid)"] + [f"(-{r} * :base - :sid)" for r in range(1, MAX_RUNS)])
 )
@@ -311,18 +314,20 @@ def split_run(service_id: int) -> tuple:
 
 
 def _runs(conn, day, line_key, sid):
-    """[(stored service_id, first, last departure, Zugnummer prefixes)] of a
-    plan ID's runs."""
+    """[(stored service_id, first, last departure, Zugnummer prefixes,
+    start stations)] of a plan ID's runs."""
     return [
         (
             r[0],
             datetime.fromisoformat(r[1]),
             datetime.fromisoformat(r[2]),
             set((r[3] or "").split(",")) - {""},
+            set(json.loads(r[4])) - {None},
         )
         for r in conn.execute(
             "SELECT service_id, min(dep_time), max(dep_time),"
-            " group_concat(DISTINCT vehicle_prefix) FROM departures"
+            " group_concat(DISTINCT vehicle_prefix),"
+            " json_group_array(DISTINCT origin) FROM departures"
             f" WHERE operating_day = :day AND line_key = :lk AND {SAME_PLAN_ID}"
             " GROUP BY service_id",
             {"day": day, "lk": line_key, "sid": sid, "base": RUN_BASE},
@@ -330,17 +335,30 @@ def _runs(conn, day, line_key, sid):
     ]
 
 
-def _nearest_run(runs, at, prefix=None):
+def _nearest_run(runs, at, prefix=None, origin=None):
     """Nearest run within RUN_GAP; a different Zugnummer is another run even
-    when close (21914 on 06.11.: 010821 until 09:10, 340925 from 09:25)."""
+    when close (21914 on 06.11.: 010821 until 09:10, 340925 from 09:25).
+    So is a different start station: GTI lists departures of another trip
+    under a trip's ID (24149 on 19.11.), which would overwrite its own at
+    shared stops. The direction ID does not tell (it changes within trips
+    from Farmsen)."""
     best = None
-    for sid, first, last, prefixes in runs:
+    for sid, first, last, prefixes, origins in runs:
         if prefix and prefixes and prefix not in prefixes:
+            continue
+        if origin and origins and origin not in origins:
             continue
         gap = max(first - at, at - last, timedelta(0))
         if gap <= RUN_GAP and (best is None or gap < best[0]):
             best = (gap, sid)
     return best[1] if best else None
+
+
+def _run_origin(row: dict) -> str | None:
+    """The start station that tells runs apart, only for lines where it holds."""
+    if row["line_key"].startswith(ORIGIN_RUN_LINES):
+        return row.get("origin")
+    return None
 
 
 def assign_run(conn, row: dict):
@@ -353,7 +371,10 @@ def assign_run(conn, row: dict):
     if not runs:
         return
     found = _nearest_run(
-        runs, datetime.fromisoformat(row["dep_time"]), row.get("vehicle_prefix")
+        runs,
+        datetime.fromisoformat(row["dep_time"]),
+        row.get("vehicle_prefix"),
+        _run_origin(row),
     )
     if found is None:
         run = max(split_run(r[0])[1] for r in runs) + 1
@@ -363,14 +384,19 @@ def assign_run(conn, row: dict):
     row["service_id"] = found
 
 
-def assign_course_run(conn, row: dict):
-    """A course's run: the one its first departure falls into."""
+def assign_course_run(conn, row: dict, origin: str | None = None):
+    """A course's run: the one its first departure falls into. origin is the
+    name of the course's own first stop: the request may name another trip's
+    start (24149 on 19.11.), the answer is the trip's."""
     sid = row["service_id"]
     if not 0 <= sid < PLAN_ID_MAX:
         return
     runs = _runs(conn, row["operating_day"], row["line_key"], sid)
     found = _nearest_run(
-        runs, parse_gti_datetime(row["first_dep_time"]), row.get("vehicle_prefix")
+        runs,
+        parse_gti_datetime(row["first_dep_time"]),
+        row.get("vehicle_prefix"),
+        origin if row["line_key"].startswith(ORIGIN_RUN_LINES) else None,
     )
     if found is not None:
         row["service_id"] = found
@@ -558,8 +584,10 @@ def record_course(
     row = course_row(request, response, line, fetched_at, trigger)
     if row:
 
+        first = (response["courseElements"][0].get("fromStation") or {}).get("name")
+
         def store(conn):
-            assign_course_run(conn, row)
+            assign_course_run(conn, row, first)
             conn.execute(UPSERT_COURSE, row)
 
         _safely(store)
