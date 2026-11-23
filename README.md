@@ -146,7 +146,8 @@ they're built directly from the static feed on first run.
   fades with the age of the message.
   The checkbox "OpenRailwayMap" (off by default, `maplibre_map_hvv_rail.js`)
   draws the OpenRailwayMap standard style from `/api/vector/overlay/*` above
-  the basemap roads, below its labels and the live layers, and hides the
+  the basemap roads and street names, below its place names and the live
+  layers, and hides the
   basemap's own railway lines meanwhile. The U-Bahn, S-Bahn, AKN and Regio
   modes then draw no lines of their own, only their moving vehicles and
   stops; ferry and replacement bus lines stay as they are. The data is OpenRailwayMap's, not the
