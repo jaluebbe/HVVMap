@@ -248,6 +248,12 @@ GTI fetcher needs `GTI_USER`/`GTI_HMAC_SECRET`, and `AIS_TOKEN` (personal token
 from openwaters.io/ais/token, e.g. from the `.env` next to the compose file)
 enables the AIS layer.
 
+`TRAIN_NUMBERS_DIR` (fetcher and api) points to the daily
+`train_numbers_YYYYMMDD.json` of
+[transitfeeds-de](https://github.com/jaluebbe/transitfeeds-de)
+(`scripts/daily.sh`); S-Bahn, AKN and regional trains then show their train number
+in the tooltip. Without it they show none.
+
 ## History
 
 The `getVehicleMap` implementation (fetcher job, `segment_cache`,

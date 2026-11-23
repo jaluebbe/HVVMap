@@ -39,6 +39,7 @@ map.addControl(new maplibregl.ScaleControl({ unit: 'metric' }), 'bottom-left');
 const ATTRIBUTION_LINKS = [
     '<a href="https://github.com/jaluebbe/HVVMap" target="_blank">Source on GitHub</a>',
     '<a href="https://www.hvv.de/" target="_blank">Fahrplandaten: Hamburger Verkehrsverbund GmbH</a>',
+    '<a href="https://www.delfi.de/" target="_blank">Zugnummern: DELFI e.V.</a>',
 ];
 const PRIVACY_LINK = '<a href="/static/datenschutz.html" target="_blank">Impressum &amp; Datenschutzerkl&auml;rung</a>';
 let attributionControl = null;
@@ -748,7 +749,9 @@ function placeVehicleLabels(mapInstance, markers) {
 // initialSourceKey defaults to the first source when omitted or unknown.
 function initHvvVehicleLayers(initialSourceKey) {
     // Single shared popup (vehicles/stops/disruptions); anchor:'bottom' points its tip straight down.
-    const hoverPopup = new maplibregl.Popup({ closeButton: false, closeOnClick: false, anchor: 'bottom' });
+    const hoverPopup = new maplibregl.Popup({
+        closeButton: false, closeOnClick: false, anchor: 'bottom', maxWidth: 'none', className: 'hvv-hover-popup',
+    });
     const activeModes = new Set(MODES.filter((m) => !m.startsHidden).map((m) => m.key));
     const activeCategories = new Set(DISRUPTION_CATEGORIES.filter((c) => c.visible).map((c) => c.key));
     const positionMarkersByMode = {};

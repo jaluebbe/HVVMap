@@ -633,3 +633,58 @@ def test_train_swapped_in_farmsen_ends_where_the_train_in_its_path_starts():
 
     ids = {f["properties"]["journeyID"] for f in features}
     assert ids == {"new"}  # the old train stays in Farmsen, gone at 16:41
+
+
+def test_train_number_of_an_s_bahn_without_the_in_path_note():
+    [feature] = _positions(_row(line="S1", mode="S", train_number="47028"))
+
+    assert "Zugnr. 47028" in feature["properties"]["text"]
+    assert "Lage" not in feature["properties"]["text"]
+
+
+def _coupled_part(id, number, destination, late, confirmed=True):
+    row = _row(
+        id=id, line="S1", mode="S", train_number=number,
+        primary_ids=[id] if confirmed else [], direction_id=1, destination=destination,
+    )  # fmt: skip
+    row["stops"] = [
+        _stop("A", None, "09:00", delay=late),
+        _stop("B", "09:04", "09:05", delay=late),
+        _stop("C", "09:09", None),
+    ]
+    return row
+
+
+def test_coupled_parts_with_different_delays_are_drawn_once():
+    airport = _coupled_part("1", "41233", "Hamburg Airport", 0)
+    poppenbuettel = _coupled_part("2", "48233", "Poppenbüttel", 120)
+
+    [feature] = _positions_of([airport, poppenbuettel])
+
+    assert feature["properties"]["delay"] == 2
+    assert feature["properties"]["label"] == "Hamburg Airport / Poppenbüttel"
+    assert "Zugnr. 41233/48233" in feature["properties"]["text"]
+
+
+def test_coupled_part_without_live_departure_still_named():
+    airport = _coupled_part("1", "41233", "Hamburg Airport", 0, confirmed=False)
+    poppenbuettel = _coupled_part("2", "48233", "Poppenbüttel", 120)
+
+    [feature] = _positions_of([airport, poppenbuettel])
+
+    assert feature["properties"]["journeyID"] == "2"
+    assert feature["properties"]["label"] == "Poppenbüttel / Hamburg Airport"
+    assert "Zugnr. 41233/48233" in feature["properties"]["text"]
+    assert "+2 Minuten" in feature["properties"]["text"]
+
+
+def test_trains_of_one_line_at_different_planned_times_are_not_aligned():
+    first = _coupled_part("1", "41233", "Poppenbüttel", 0)
+    second = _coupled_part("2", "41235", "Poppenbüttel", 120)
+    second["stops"] = [
+        _stop("A", None, "08:58", delay=240),
+        _stop("B", "09:02", "09:03", delay=240),
+        _stop("C", "09:07", None),
+    ]
+    features = _positions_of([first, second])
+    assert sorted(f["properties"]["delay"] for f in features) == [0, 4]
