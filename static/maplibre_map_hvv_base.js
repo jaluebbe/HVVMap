@@ -740,7 +740,9 @@ function placeVehicleLabels(mapInstance, markers) {
 // initialSourceKey defaults to the first source when omitted or unknown.
 function initHvvVehicleLayers(initialSourceKey) {
     // Single shared popup (vehicles/stops/disruptions); anchor:'bottom' points its tip straight down.
-    const hoverPopup = new maplibregl.Popup({ closeButton: false, closeOnClick: false, anchor: 'bottom' });
+    const hoverPopup = new maplibregl.Popup({
+        closeButton: false, closeOnClick: false, anchor: 'bottom', maxWidth: 'none', className: 'hvv-hover-popup',
+    });
     const activeModes = new Set(MODES.filter((m) => !m.startsHidden).map((m) => m.key));
     const activeCategories = new Set(DISRUPTION_CATEGORIES.filter((c) => c.visible).map((c) => c.key));
     const positionMarkersByMode = {};

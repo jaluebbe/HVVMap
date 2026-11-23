@@ -404,6 +404,38 @@ def _spot(feature: dict) -> tuple:
     return feature["properties"]["line"], round(lon, 4), round(lat, 4)
 
 
+def _numbered_parts(parts: list[dict], meta: dict[int, tuple]) -> bool:
+    numbers = [meta[id(f)][4] for f in parts]
+    return all(numbers) and len(set(numbers)) == len(parts)
+
+
+def _set_delay(feature: dict, minutes: int) -> None:
+    props = feature["properties"]
+    lines = [t for t in props["text"].split("<br>") if not t.endswith(" Minuten")]
+    if minutes > 0:
+        lines.append(f"+{minutes} Minuten")
+    props["text"], props["delay"] = "<br>".join(lines), minutes
+
+
+def _align_coupled(features: list[dict], meta: dict[int, tuple]) -> None:
+    """Coupled parts with their own train numbers (S1 41233 and 48233) run
+    as one: same spot and delay, that of a confirmed part (the larger), so
+    _one_per_train draws them once."""
+    groups: dict[tuple, list[dict]] = defaultdict(list)
+    for f in features:
+        if id(f) in meta and meta[id(f)][4]:
+            groups[meta[id(f)][5]].append(f)
+    for parts in groups.values():
+        if len(parts) < 2 or not _numbered_parts(parts, meta):
+            continue
+        confirmed = [f for f in parts if meta[id(f)][2]] or parts
+        lead = max(confirmed, key=lambda f: f["properties"]["delay"])
+        for f in parts:
+            f["geometry"]["coordinates"] = list(lead["geometry"]["coordinates"])
+            f["properties"]["progress"] = lead["properties"]["progress"]
+            _set_delay(f, lead["properties"]["delay"])
+
+
 def _one_per_train(features: list[dict], meta: dict[int, tuple]) -> list[dict]:
     """Main features of one line and direction at the same spot are one
     train. Confirmed trips win over trips without a current live departure
@@ -411,8 +443,11 @@ def _one_per_train(features: list[dict], meta: dict[int, tuple]) -> list[dict]:
     confirmed trips are a coupled train (e.g. RE7 to Kiel and Flensburg) and
     get one feature with all destinations; of unconfirmed ones only the trip
     on its own course stays. A trip at its terminus is another train than
-    one starting there (e.g. U3 at Barmbek). meta: feature -> (direction id,
-    destination, confirmed, on own course)."""
+    one starting there (e.g. U3 at Barmbek). A coupled part with its own
+    train number counts for destinations and numbers even without a live
+    departure (S1 to the airport, see _align_coupled). meta: feature ->
+    (direction id, destination, confirmed, on own course, train number,
+    coupling key)."""
     groups: dict[tuple, list[dict]] = defaultdict(list)
     for f in features:
         if id(f) in meta:
@@ -428,15 +463,26 @@ def _one_per_train(features: list[dict], meta: dict[int, tuple]) -> list[dict]:
             dropped.update(id(f) for f in parts if f is not keep)
             continue
         dropped.update(id(f) for f in parts if not meta[id(f)][2])
+        keys = {meta[id(f)][5] for f in confirmed}
+        partners = [
+            f
+            for f in parts
+            if not meta[id(f)][2] and meta[id(f)][4] and meta[id(f)][5] in keys
+        ]
+        members = confirmed + partners
         first = confirmed[0]
-        destinations = list(dict.fromkeys(meta[id(f)][1] for f in confirmed))
+        props = first["properties"]
+        destinations = list(dict.fromkeys(meta[id(f)][1] for f in members))
         if len(destinations) > 1:
-            props = first["properties"]
             combined = COMBINED_DESTINATION.join(destinations)
             props["text"] = props["text"].replace(meta[id(first)][1], combined, 1)
             props["label"] = COMBINED_DESTINATION.join(
                 d.split("(")[0].strip() for d in destinations
             )
+        if _numbered_parts(members, meta) and len(members) > 1:
+            numbers = sorted((meta[id(f)][4] for f in members), key=int)
+            own = f"Zugnr. {meta[id(first)][4]}"
+            props["text"] = props["text"].replace(own, f"Zugnr. {'/'.join(numbers)}", 1)
         dropped.update(id(f) for f in confirmed[1:])
     return [f for f in features if id(f) not in dropped]
 
@@ -530,11 +576,21 @@ def build_positions(
                 feature = _feature(row, destination, position, point, delay, straight)
                 if position.state == AT_STOP and position.index == len(stops) - 1:
                     feature["properties"]["terminus"] = True
+                here = row["stops"][position.index]
+                after = row["stops"][position.index + 1 : position.index + 2]
                 meta[id(feature)] = (
                     row.get("direction_id"),
                     destination,
                     bool(row.get("primary_ids")),
                     row.get("course_id") == row.get("service_id"),
+                    row.get("train_number") or "",
+                    # coupled parts: same line, stop, planned time and next stop
+                    (
+                        row["line"],
+                        here["station"],
+                        here.get("dep") or here.get("arr"),
+                        after[0]["station"] if after else None,
+                    ),
                 )
                 features.append(feature)
                 names = [s["station"] for s in row["stops"]]
@@ -567,6 +623,7 @@ def build_positions(
                         straight,
                     )
                 )
+    _align_coupled(features, meta)
     features = _one_feature_per_unit(_one_per_train(features, meta), rows)
     _single_track(features, occupants, stations)
     return {"type": "FeatureCollection", "features": features}
