@@ -640,3 +640,30 @@ def test_train_number_of_an_s_bahn_without_the_in_path_note():
 
     assert "Zugnr. 47028" in feature["properties"]["text"]
     assert "Lage" not in feature["properties"]["text"]
+
+
+def test_coupled_parts_with_own_numbers_are_stacked_with_one_delay():
+    def part(id, number, destination, late):
+        row = _row(
+            id=id, line="S1", mode="S", train_number=number, primary_ids=[id],
+            direction_id=1, destination=destination,
+        )  # fmt: skip
+        row["stops"] = [
+            _stop("A", None, "09:00", delay=late),
+            _stop("B", "09:04", "09:05", delay=late),
+            _stop("C", "09:09", None),
+        ]
+        return row
+
+    # GTI lists the airport part only before the split: no live departure now
+    airport = part("1", "41233", "Hamburg Airport", 0)
+    airport["primary_ids"] = []
+    poppenbuettel = part("2", "48233", "Poppenbüttel", 120)
+
+    features = _positions_of([airport, poppenbuettel])
+
+    assert sorted(f["properties"]["journeyID"] for f in features) == ["1", "2"]
+    a, b = features
+    assert a["geometry"]["coordinates"] == b["geometry"]["coordinates"]
+    assert a["properties"]["delay"] == b["properties"]["delay"] == 2
+    assert all("+2 Minuten" in f["properties"]["text"] for f in features)
