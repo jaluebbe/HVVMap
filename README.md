@@ -155,6 +155,15 @@ they're built directly from the static feed on first run.
   message is 20 s to 10 min old, a thin dashed line with a hollow end point
   shows the dead-reckoned position now (course and speed over ground); it
   fades with the age of the message.
+  The checkbox "OpenRailwayMap" (off by default, `maplibre_map_hvv_rail.js`)
+  draws the OpenRailwayMap standard style from `/api/vector/overlay/*` above
+  the basemap roads, below its labels and the live layers, and hides the
+  basemap's own railway lines meanwhile. The U-Bahn, S-Bahn, AKN and Regio
+  modes then draw no lines of their own, only their moving vehicles and
+  stops; ferry and replacement bus lines stay as they are. The data is OpenRailwayMap's, not the
+  HVV's. It only appears if an overlay file is mounted; the page option `rail`
+  overrides, by default the checkbox is offered. While visible, "OpenRailwayMap" is added to
+  the map attribution.
 - `maplibre_map_hvv_ubahn.html` - the same page restricted to the U-Bahn and
   the `gtilive` source, centered on Betriebshof Barmbek, with U1-U4
   toggleable individually and a `#` toggle for the unit numbers below the
@@ -215,10 +224,17 @@ The **api** image expects, copied in at build time:
   uses, see the style's `text-font` entries)
 - `positron_style.json` - the MapLibre style (`{name}_style.json` naming;
   referenced as `/api/vector/style/{name}.json`)
+- `openrailwaymap_style.json` - style of the optional OpenRailwayMap overlay
 
 and, mounted as a volume at runtime:
 - any single `*.mbtiles` file under `/osm/` - filename doesn't matter, the
   API picks up whatever's there
+- optionally a single `*.mbtiles` file under `/overlays/`, built with
+  OpenRailwayMap-vector from the sources `openrailwaymap_style.json` uses
+  (`high`, `openrailwaymap_low`, `openrailwaymap_standard`,
+  `standard_railway_line_low`, `standard_railway_text_stations_low`,
+  `standard_railway_text_stations_med`).
+  Without it the frontend simply offers no OpenRailwayMap toggle.
 
 The **gtfs-fetcher** image needs a static GTFS feed mounted at `GTFS_DIR`
 (default `data/gtfs`) - unzipped, not the raw `.zip`.
