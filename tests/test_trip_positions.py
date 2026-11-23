@@ -688,3 +688,99 @@ def test_trains_of_one_line_at_different_planned_times_are_not_aligned():
     ]
     features = _positions_of([first, second])
     assert sorted(f["properties"]["delay"] for f in features) == [0, 4]
+
+
+def _sbahn(line, times, delay=0, platforms=("Gleis 1",) * 3):
+    (a_dep, b_arr, b_dep, c_arr) = times
+    stops = [
+        _stop("A", None, a_dep, delay),
+        _stop("B", b_arr, b_dep, delay),
+        _stop("C", c_arr, None, delay),
+    ]
+    for stop, platform in zip(stops, platforms):
+        stop["platform"] = platform
+    return _row(
+        id=line,
+        line=line,
+        line_id=f"SBH:{line}",
+        mode="S",
+        primary_ids=[line],
+        stops=stops,
+    )
+
+
+def _coordinates_by_line(rows, now):
+    features = build_positions({"trips": rows}, now, STATIONS)["features"]
+    return {f["properties"]["line"]: f["geometry"]["coordinates"] for f in features}
+
+
+def test_delayed_train_ahead_keeps_the_platform_the_next_one_waits_before():
+    s5 = _sbahn("S5", ("08:58", "09:00", "09:01", "09:04"), delay=120)
+    s3 = _sbahn("S3", ("09:00", "09:02", "09:03", "09:06"))
+
+    placed = _coordinates_by_line([s3, s5], datetime(2026, 10, 17, 9, 2, 30))
+
+    assert placed["S5"] == [1, 53.5]  # at B
+    assert placed["S3"] == [0, 53.5]  # waits at A
+
+
+def test_trains_at_different_platforms_of_a_station_stand_side_by_side():
+    s5 = _sbahn("S5", ("08:58", "09:00", "09:01", "09:04"), delay=120)
+    s3 = _sbahn(
+        "S3",
+        ("09:00", "09:02", "09:03", "09:06"),
+        platforms=("Gleis 1", "Gleis 2", "Gleis 1"),
+    )
+
+    placed = _coordinates_by_line([s3, s5], datetime(2026, 10, 17, 9, 2, 30))
+
+    assert placed["S5"] == placed["S3"] == [1, 53.5]
+
+
+def test_without_platforms_trains_are_not_held():
+    s5 = _sbahn(
+        "S5", ("08:58", "09:00", "09:01", "09:04"), delay=120, platforms=("",) * 3
+    )
+    s3 = _sbahn("S3", ("09:00", "09:02", "09:03", "09:06"), platforms=("",) * 3)
+
+    placed = _coordinates_by_line([s3, s5], datetime(2026, 10, 17, 9, 2, 30))
+
+    assert placed["S5"] == placed["S3"] == [1, 53.5]
+
+
+def test_train_behind_on_the_same_section_runs_on():
+    ahead = _sbahn("S5", ("09:00", "09:04", "09:05", "09:08"))
+    behind = _sbahn("S3", ("09:01", "09:05", "09:06", "09:09"))
+
+    placed = _coordinates_by_line([ahead, behind], datetime(2026, 10, 17, 9, 2))
+
+    assert placed["S5"][0] == 0.5
+    assert placed["S3"][0] == 0.25
+
+
+def test_train_level_with_the_one_ahead_on_the_section_waits_at_its_start():
+    ahead = _sbahn("S5", ("08:59", "09:03", "09:04", "09:07"), delay=60)
+    behind = _sbahn("S3", ("09:00", "09:04", "09:05", "09:08"))
+
+    placed = _coordinates_by_line([ahead, behind], datetime(2026, 10, 17, 9, 2))
+
+    assert placed["S5"][0] == 0.5
+    assert placed["S3"] == [0, 53.5]
+
+
+def test_trains_at_their_first_or_last_stop_are_not_held():
+    ending = _sbahn("S5", ("08:56", "08:58", "08:59", "09:02"))
+    starting = _row(
+        id="S3",
+        line="S3",
+        line_id="SBH:S3",
+        mode="S",
+        primary_ids=["S3"],
+        stops=[_stop("C", None, "09:03"), _stop("D", "09:06", None)],
+    )
+    for stop in starting["stops"]:
+        stop["platform"] = "Gleis 1"
+
+    placed = _coordinates_by_line([ending, starting], datetime(2026, 10, 17, 9, 2, 30))
+
+    assert placed["S5"] == placed["S3"] == [2, 53.5]

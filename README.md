@@ -257,6 +257,11 @@ the last state with it is commit `85caf4e`
   while a running trip has no live match.
 - The GTI-Live positions are minute-accurate at best (planned and live times
   have no seconds), so vehicles departing in the same minute move in sync.
+- A knock-on delay shows up only once the following train actually waits, so
+  a delayed train can land on the next one of another line. Of two S-Bahn,
+  U-Bahn or AKN trains at the same platform (or on the same section between
+  the same platforms, the later one not behind), the one that came later
+  is shown waiting at its previous stop; without platform data both stay.
 - Straight links (shapes with sparse points, e.g. replacement buses) are
   flagged `straight` and only drawn with the "Luftlinien" checkbox.
 - GTFS mode assignment (U/S/AKN/ferry) is mostly a direct `route_type`
