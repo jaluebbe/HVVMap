@@ -21,6 +21,11 @@ body {
     line-height: 1.3;
 }
 
+/* Vehicle tooltips: one line per entry, as wide as the longest. */
+.hvv-hover-popup .maplibregl-popup-content {
+    white-space: nowrap;
+}
+
 /* Checkbox layout for ModeToggleControl - maplibregl-ctrl-group only styles buttons. */
 .hvv-mode-control {
     font-size: 12px;
