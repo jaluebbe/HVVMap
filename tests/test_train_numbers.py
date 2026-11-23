@@ -109,3 +109,23 @@ def test_course_stops_tell_apart_trains_leaving_an_anchor_together(tables):
     courses = {alias_course_key("900"): course}
     table = build_trip_table(plan, datetime(2026, 10, 17, 4, 0), live, courses)
     assert table["trips"][0]["train_number"] == "269912"
+
+
+def test_new_service_day_does_not_hide_the_night_train(tables):
+    tables("20261123", {
+        "S1|de:02000:90950|2026-11-24T00:21": [["41253", "x"], ["41260", "y"]],
+        "S1|de:02000:71950|2026-11-24T00:26": [["41253", "z"]],
+    })  # fmt: skip
+    tables("20261124", {"S1|de:02000:90950|2026-11-24T00:21": [["48260", "y"]]})
+    stops = [("de:02000:90950", at("00:21", 24)), ("de:02000:71950", at("00:26", 24))]
+    assert train_numbers.lookup("S1", stops) == "41253"
+
+
+def test_one_stop_listing_another_train_does_not_hide_the_number(tables):
+    tables("20261123", {
+        "S1|de:02000:1|2026-11-23T23:00": [["41253", "a"]],
+        "S1|de:02000:2|2026-11-23T23:02": [["41253", "b"]],
+        "S1|de:02000:3|2026-11-23T23:04": [["48260", "c"]],
+    })  # fmt: skip
+    stops = [(f"de:02000:{i}", at(t)) for i, t in ((1, "23:00"), (2, "23:02"), (3, "23:04"))]
+    assert train_numbers.lookup("S1", stops) == "41253"
