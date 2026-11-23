@@ -443,8 +443,11 @@ def _one_per_train(features: list[dict], meta: dict[int, tuple]) -> list[dict]:
     confirmed trips are a coupled train (e.g. RE7 to Kiel and Flensburg) and
     get one feature with all destinations; of unconfirmed ones only the trip
     on its own course stays. A trip at its terminus is another train than
-    one starting there (e.g. U3 at Barmbek). meta: feature -> (direction id,
-    destination, confirmed, on own course)."""
+    one starting there (e.g. U3 at Barmbek). A coupled part with its own
+    train number counts for destinations and numbers even without a live
+    departure (S1 to the airport, see _align_coupled). meta: feature ->
+    (direction id, destination, confirmed, on own course, train number,
+    coupling key)."""
     groups: dict[tuple, list[dict]] = defaultdict(list)
     for f in features:
         if id(f) in meta:
@@ -460,15 +463,26 @@ def _one_per_train(features: list[dict], meta: dict[int, tuple]) -> list[dict]:
             dropped.update(id(f) for f in parts if f is not keep)
             continue
         dropped.update(id(f) for f in parts if not meta[id(f)][2])
+        keys = {meta[id(f)][5] for f in confirmed}
+        partners = [
+            f
+            for f in parts
+            if not meta[id(f)][2] and meta[id(f)][4] and meta[id(f)][5] in keys
+        ]
+        members = confirmed + partners
         first = confirmed[0]
-        destinations = list(dict.fromkeys(meta[id(f)][1] for f in confirmed))
+        props = first["properties"]
+        destinations = list(dict.fromkeys(meta[id(f)][1] for f in members))
         if len(destinations) > 1:
-            props = first["properties"]
             combined = COMBINED_DESTINATION.join(destinations)
             props["text"] = props["text"].replace(meta[id(first)][1], combined, 1)
             props["label"] = COMBINED_DESTINATION.join(
                 d.split("(")[0].strip() for d in destinations
             )
+        if _numbered_parts(members, meta) and len(members) > 1:
+            numbers = sorted((meta[id(f)][4] for f in members), key=int)
+            own = f"Zugnr. {meta[id(first)][4]}"
+            props["text"] = props["text"].replace(own, f"Zugnr. {'/'.join(numbers)}", 1)
         dropped.update(id(f) for f in confirmed[1:])
     return [f for f in features if id(f) not in dropped]
 

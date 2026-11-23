@@ -663,6 +663,19 @@ def test_coupled_parts_with_different_delays_are_drawn_once():
 
     assert feature["properties"]["delay"] == 2
     assert feature["properties"]["label"] == "Hamburg Airport / Poppenbüttel"
+    assert "Zugnr. 41233/48233" in feature["properties"]["text"]
+
+
+def test_coupled_part_without_live_departure_still_named():
+    airport = _coupled_part("1", "41233", "Hamburg Airport", 0, confirmed=False)
+    poppenbuettel = _coupled_part("2", "48233", "Poppenbüttel", 120)
+
+    [feature] = _positions_of([airport, poppenbuettel])
+
+    assert feature["properties"]["journeyID"] == "2"
+    assert feature["properties"]["label"] == "Poppenbüttel / Hamburg Airport"
+    assert "Zugnr. 41233/48233" in feature["properties"]["text"]
+    assert "+2 Minuten" in feature["properties"]["text"]
 
 
 def test_trains_of_one_line_at_different_planned_times_are_not_aligned():
