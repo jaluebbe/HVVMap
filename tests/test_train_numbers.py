@@ -39,7 +39,12 @@ def test_coupled_trains_and_a_single_ambiguous_stop(tables):
     })  # fmt: skip
     both = [("de:02000:10950", at("10:21")), ("de:02000:10951", at("10:25"))]
     assert train_numbers.lookup("RE7", both) == "11163/11263"
-    assert train_numbers.lookup("RE7", both[:1]) == ""
+    assert train_numbers.lookup("RE7", both[:1]) == "11163/11263"  # same next station
+
+
+def test_single_stop_with_trains_to_different_next_stations(tables):
+    tables("20261123", {"S7|de:02000:10952|2026-11-23T05:17": [["47027", "a"], ["47028", "b"]]})
+    assert train_numbers.lookup("S7", [("de:02000:10952", at("05:17"))]) == ""
 
 
 def test_after_midnight_from_the_previous_service_day(tables):

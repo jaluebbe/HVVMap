@@ -235,7 +235,7 @@ enables the AIS layer.
 `TRAIN_NUMBERS_DIR` (fetcher and api) points to the daily
 `train_numbers_YYYYMMDD.json` of
 [transitfeeds-de](https://github.com/jaluebbe/transitfeeds-de)
-(`scripts/daily.sh`); S-Bahn and regional trains then show their train number
+(`scripts/daily.sh`); S-Bahn, AKN and regional trains then show their train number
 in the tooltip. Without it they show none.
 
 ## History

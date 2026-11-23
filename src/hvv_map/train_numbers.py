@@ -1,4 +1,4 @@
-"""Train numbers of S-Bahn and regional trains from the daily tables of
+"""Train numbers of S-Bahn, AKN and regional trains from the daily tables of
 transitfeeds-de (numbers/train_numbers.py): train_numbers_YYYYMMDD.json in
 TRAIN_NUMBERS_DIR, keyed by line, station DHID and planned departure."""
 
@@ -8,7 +8,7 @@ from datetime import date, datetime, timedelta
 from pathlib import Path
 
 NUMBERS_DIR = os.environ.get("TRAIN_NUMBERS_DIR", "")
-MODES = {"S", "R"}
+MODES = {"S", "AKN", "R"}
 
 _cache: dict[Path, tuple[float, dict]] = {}
 
@@ -39,9 +39,9 @@ def _station(global_id: str) -> str:
 
 def lookup(line: str, stops: list[tuple[str | None, datetime]]) -> str:
     """Train number of a trip from its (station globalId, planned departure)
-    stops: the numbers listed at every stop found ("41021/71013" for coupled
+    stops: the numbers listed at every stop found ("11163/11263" for coupled
     trains), "" if none or ambiguous."""
-    numbers, found_at = None, 0
+    numbers, nexts, found_at = None, set(), 0
     for global_id, planned in stops:
         if not global_id:
             continue
@@ -52,10 +52,11 @@ def lookup(line: str, stops: list[tuple[str | None, datetime]]) -> str:
             if entry:
                 found = {number for number, _ in entry}
                 numbers = found if numbers is None else numbers & found
+                nexts = {following for _, following in entry}
                 found_at += 1
                 break
     if not numbers:
         return ""
-    if len(numbers) > 1 and found_at < 2:
-        return ""  # one stop cannot tell apart trains leaving at the same minute
+    if len(numbers) > 1 and found_at < 2 and len(nexts) > 1:
+        return ""  # one stop: same-minute trains to different next stations
     return "/".join(sorted(numbers, key=int))
