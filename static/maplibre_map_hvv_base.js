@@ -38,6 +38,7 @@ map.addControl(new maplibregl.ScaleControl({ unit: 'metric' }), 'bottom-left');
 const ATTRIBUTION_LINKS = [
     '<a href="https://github.com/jaluebbe/HVVMap" target="_blank">Source on GitHub</a>',
     '<a href="https://www.hvv.de/" target="_blank">Fahrplandaten: Hamburger Verkehrsverbund GmbH</a>',
+    '<a href="https://www.delfi.de/" target="_blank">Zugnummern: DELFI e.V.</a>',
 ];
 const PRIVACY_LINK = '<a href="/static/datenschutz.html" target="_blank">Impressum &amp; Datenschutzerkl&auml;rung</a>';
 let attributionControl = null;

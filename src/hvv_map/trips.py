@@ -9,6 +9,7 @@ from collections import defaultdict
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
+from hvv_map import train_numbers
 from hvv_map.departure_pairing import pair
 from hvv_map.gtilive_geojson import mode_for_line
 from hvv_map.departures_tree import (
@@ -101,6 +102,7 @@ def _plan_trips(by_service: dict, plan_anchor: datetime) -> list[dict]:
                     "stops": [
                         {
                             "station_id": (s.get("station") or {}).get("id"),
+                            "global_id": (s.get("station") or {}).get("globalId"),
                             "station": _station_name(s.get("station") or {}),
                             "direction": s.get("direction"),
                             "platform": s.get("realtimePlatform") or s.get("platform"),
@@ -1145,6 +1147,10 @@ def build_trip_table(
         unify_shared_delays(
             rows[-1]["stops"], rows[-1]["course_fetched_at"], rows[-1]["alias_courses"]
         )
+        if rows[-1]["mode"] in train_numbers.MODES and not rows[-1]["train_number"]:
+            rows[-1]["train_number"] = train_numbers.lookup(
+                trip["line"], [(s.get("global_id"), s["planned"]) for s in trip["stops"]]
+            )
         per_line[trip["line"]]["trips"] += 1
         per_line[trip["line"]][_COUNTER_KEY[status]] += 1
 
