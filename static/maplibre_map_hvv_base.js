@@ -603,7 +603,7 @@ function buildMarkerElement(properties) {
 }
 
 
-// Built-in data sources - GTFS has no disruptions endpoint (null skips that layer).
+// Built-in data sources.
 const ALL_SOURCES = [
     {
         // departureList/sublines based, vehicles computed from the trip table.
@@ -615,16 +615,6 @@ const ALL_SOURCES = [
         linesEndpoint: '/api/hvv/gtilive/lines.geojson',
         stopsEndpoint: '/api/hvv/gtilive/stops.geojson',
         disruptionsEndpoint: '/api/hvv/live/disruptions.geojson',
-    },
-    {
-        key: 'gtfs',
-        name: 'GTFS',
-        positionsEndpoint: '/api/hvv/gtfs/positions.geojson',
-        linesEndpoint: '/api/hvv/gtfs/lines.geojson',
-        stopsEndpoint: '/api/hvv/gtfs/stops.geojson',
-        disruptionsEndpoint: null,
-        // Shapes and segments without a track (properties.straight) get a "Luftlinien" toggle.
-        straightToggle: true,
     },
 ];
 // PAGE_CONFIG.disruptions false: no disruption layer and no category toggles.

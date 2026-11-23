@@ -552,12 +552,6 @@ def _build_gtilive_lines() -> dict:
 
 _gtilive_stops_cache = CachedJsonResponse(_build_gtilive_stops)
 _gtilive_lines_cache = CachedJsonResponse(_build_gtilive_lines)
-_gtfs_lines_cache = CachedJsonResponse(
-    lambda: _read_cached_json("hvv:gtfs:reference_lines")
-)
-_gtfs_stops_cache = CachedJsonResponse(
-    lambda: _read_cached_json("hvv:gtfs:reference_stops")
-)
 
 
 @app.get("/api/hvv/gtilive/lines.geojson", tags=["hvv_gtilive"])
@@ -579,22 +573,6 @@ def get_gtilive_courses(limit: int = 500):
     """departureCourse call log from hvvmap-gti-shapes-update, for
     static/dev_courses.html."""
     return read_course_log(_get_gti_shapes_connection(), max(1, min(limit, 5000)))
-
-
-# --- GTFS layers -------------------------------------------------------------
-@app.get("/api/hvv/gtfs/positions.geojson", tags=["hvv_gtfs"])
-def get_gtfs_positions():
-    return _read_cached_json("hvv:gtfs:positions")
-
-
-@app.get("/api/hvv/gtfs/lines.geojson", tags=["hvv_gtfs"])
-def get_gtfs_lines(request: Request):
-    return _gtfs_lines_cache.response(request)
-
-
-@app.get("/api/hvv/gtfs/stops.geojson", tags=["hvv_gtfs"])
-def get_gtfs_stops(request: Request):
-    return _gtfs_stops_cache.response(request)
 
 
 if __name__ == "__main__":
