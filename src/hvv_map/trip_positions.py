@@ -164,8 +164,11 @@ def _feature(
     # second line: the U-Bahn units if known, else the vehicle model
     detail = (row.get("vehicles") if row["mode"] == "U" else None) or row.get("model")
     text = f"{destination}<br>{detail}" if detail else destination
-    if row["mode"] == "U" and row.get("train_number"):
-        text = f"{text}<br>{_train_number_text(row['train_number'])}"
+    if row.get("train_number"):
+        if row["mode"] == "U":
+            text = f"{text}<br>{_train_number_text(row['train_number'])}"
+        else:
+            text = f"{text}<br>Zugnr. {row['train_number']}"
     if minutes > 0:
         text = f"{text}<br>+{minutes} Minuten"
     icon = (
@@ -220,10 +223,12 @@ def _swapped_rows(rows: list[dict]) -> list[dict]:
     """Rows ending where a train in their path (Zugnummer +7000) starts, if
     cancelled after that stop: GTI lists a train swapped in Farmsen one stop
     further (341625 to Trabrennbahn, 348625 from Farmsen Gleis 4)."""
-    by_number = {r["train_number"]: r for r in rows if r.get("train_number")}
+    by_number = {
+        r["train_number"]: r for r in rows if r.get("mode") == "U" and r.get("train_number")
+    }
     out = []
     for row in rows:
-        number = row.get("train_number") or ""
+        number = (row.get("train_number") or "") if row.get("mode") == "U" else ""
         other = None
         if (
             number.isdigit()

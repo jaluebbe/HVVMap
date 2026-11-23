@@ -633,3 +633,10 @@ def test_train_swapped_in_farmsen_ends_where_the_train_in_its_path_starts():
 
     ids = {f["properties"]["journeyID"] for f in features}
     assert ids == {"new"}  # the old train stays in Farmsen, gone at 16:41
+
+
+def test_train_number_of_an_s_bahn_without_the_in_path_note():
+    [feature] = _positions(_row(line="S1", mode="S", train_number="47028"))
+
+    assert "Zugnr. 47028" in feature["properties"]["text"]
+    assert "Lage" not in feature["properties"]["text"]

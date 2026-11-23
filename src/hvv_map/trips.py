@@ -9,6 +9,7 @@ from collections import defaultdict
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
+from hvv_map import train_numbers
 from hvv_map.departure_pairing import pair
 from hvv_map.gtilive_geojson import mode_for_line
 from hvv_map.departures_tree import (
@@ -101,6 +102,7 @@ def _plan_trips(by_service: dict, plan_anchor: datetime) -> list[dict]:
                     "stops": [
                         {
                             "station_id": (s.get("station") or {}).get("id"),
+                            "global_id": (s.get("station") or {}).get("globalId"),
                             "station": _station_name(s.get("station") or {}),
                             "direction": s.get("direction"),
                             "platform": s.get("realtimePlatform") or s.get("platform"),
@@ -466,6 +468,15 @@ def _vehicle_fields(
         "vehicles_remembered": False,
         "vehicles_from_course": False,
     }
+
+
+def _number_stops(trip: dict, course: dict | None) -> list[tuple]:
+    """(station globalId, planned departure) of the anchor and course stops."""
+    stops = {(s.get("global_id"), s["planned"]) for s in trip["stops"]}
+    for stop in (course or {}).get("stops") or []:
+        if stop.get("global_id") and stop.get("dep"):
+            stops.add((stop["global_id"], datetime.fromisoformat(stop["dep"])))
+    return sorted(stops, key=lambda s: s[1])
 
 
 def _course_failed(course: dict | None) -> bool:
@@ -1145,6 +1156,10 @@ def build_trip_table(
         unify_shared_delays(
             rows[-1]["stops"], rows[-1]["course_fetched_at"], rows[-1]["alias_courses"]
         )
+        if rows[-1]["mode"] in train_numbers.MODES and not rows[-1]["train_number"]:
+            rows[-1]["train_number"] = train_numbers.lookup(
+                trip["line"], _number_stops(trip, course)
+            )
         per_line[trip["line"]]["trips"] += 1
         per_line[trip["line"]][_COUNTER_KEY[status]] += 1
 
