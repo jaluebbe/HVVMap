@@ -9,12 +9,13 @@ const RAIL_BASEMAP_LAYERS = [
     'railway_service_dashline', 'railway', 'railway_dashline',
 ];
 
-// Above the basemap's roads and rails, below its labels and the live layers.
+// Above the basemap's roads, rails and street names, below its place names
+// and the live layers; rail labels win collisions with street names.
 function railInsertBeforeId(map) {
     const layers = map.getStyle().layers;
     let lastTransport = -1;
     layers.forEach((l, i) => {
-        if (l['source-layer'] === 'transportation' && l.type !== 'symbol') {
+        if (['transportation', 'transportation_name'].includes(l['source-layer'])) {
             lastTransport = i;
         }
     });
