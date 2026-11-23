@@ -28,6 +28,7 @@ from hvv_map.trip_position import (
     apply_delay,
     locate,
     stops_from_row,
+    timed_stops,
     timeline,
 )
 from hvv_map.trips import (
@@ -224,7 +225,9 @@ def _swapped_rows(rows: list[dict]) -> list[dict]:
     cancelled after that stop: GTI lists a train swapped in Farmsen one stop
     further (341625 to Trabrennbahn, 348625 from Farmsen Gleis 4)."""
     by_number = {
-        r["train_number"]: r for r in rows if r.get("mode") == "U" and r.get("train_number")
+        r["train_number"]: r
+        for r in rows
+        if r.get("mode") == "U" and r.get("train_number")
     }
     out = []
     for row in rows:
@@ -543,6 +546,79 @@ def _single_track(
             f["properties"]["straight"] = False
 
 
+# Modes whose platforms are one track each: two trains on the same platform
+# or track section cannot pass each other.
+BLOCK_MODES = {"S", "U", "AKN"}
+
+
+def _block(row: dict, position: Position, times: list) -> tuple | None:
+    """(track key, entered, hold position) of a rail trip at an intermediate
+    stop or between two stops with known platforms, else None. The hold
+    position is the stop before, where a following train waits."""
+    if row["mode"] not in BLOCK_MODES:
+        return None
+    stops, i = row["stops"], position.index
+    if position.state == AT_STOP:
+        if not 0 < i < len(stops) - 1 or not stops[i].get("platform"):
+            return None
+        here = stops[i]
+        key = ("at", row["mode"], here["station_id"], here["platform"])
+        return key, times[i][0], Position(AT_STOP, i - 1)
+    a, b = stops[i], stops[i + 1]
+    if not a.get("platform") or not b.get("platform"):
+        return None
+    key = (
+        "between",
+        row["mode"],
+        a["station_id"],
+        a["platform"],
+        b["station_id"],
+        b["platform"],
+    )
+    return key, times[i][1], Position(AT_STOP, i)
+
+
+def _block_following(
+    features: list[dict],
+    blocks: dict[int, tuple],
+    meta: dict[int, tuple],
+    stations: dict,
+    shapes_conn,
+    cache: dict,
+) -> None:
+    """A train cannot catch up with the one ahead on the same track: of
+    trains at one platform, or on one section with the later one not behind,
+    the later one (to enter, or with the smaller delay) waits at its previous
+    stop. Realtime per minute shows a knock-on delay only late. blocks:
+    feature -> (track key, entered, hold position, stop ids)."""
+    by_key: dict[tuple, list[dict]] = defaultdict(list)
+    for f in features:
+        if id(f) in blocks:
+            by_key[blocks[id(f)][0]].append(f)
+    for trains in by_key.values():
+        if len(trains) < 2:
+            continue
+        trains.sort(key=lambda f: (blocks[id(f)][1], -f["properties"]["delay"]))
+        ahead = trains[0]
+        for f in trains[1:]:
+            if meta[id(f)][5] == meta[id(ahead)][5]:
+                continue  # coupled parts drawn on their own
+            between = blocks[id(f)][0][0] == "between"
+            if (
+                between
+                and f["properties"]["progress"] < ahead["properties"]["progress"]
+            ):
+                ahead = f
+                continue
+            _, _, hold, ids = blocks[id(f)]
+            placed = _coordinates(hold, ids, stations, shapes_conn, cache)
+            if not placed:
+                continue
+            f["geometry"]["coordinates"] = list(placed[0])
+            f["properties"]["progress"] = 0
+            f["properties"]["straight"] = False
+
+
 def build_positions(
     table: dict,
     now: datetime,
@@ -559,6 +635,7 @@ def build_positions(
     skip, hidden = _drawn_by_others(rows, now)
     meta: dict[int, tuple] = {}  # see _one_per_train
     occupants: dict[int, tuple] = {}  # see _single_track
+    blocks: dict[int, tuple] = {}  # see _block_following
     for row in rows:
         # a cancelled trip still runs its served part (partial cancellation)
         if row["status"] == STATUS_MISSING or id(row) in skip:
@@ -593,10 +670,12 @@ def build_positions(
                     ),
                 )
                 features.append(feature)
+                times = timeline(apply_delay(timed_stops(stops)), ferry)
+                if block := _block(row, position, times):
+                    blocks[id(feature)] = (*block, ids)
                 names = [s["station"] for s in row["stops"]]
                 if found := _in_section(names, position):
                     sec, way, entry = found
-                    times = timeline(apply_delay(stops), ferry)
                     occupants[id(feature)] = (sec, way, times[entry][1], ids[entry])
         for alias in row["alias_courses"]:
             if alias["service_id"] in hidden:
@@ -625,6 +704,7 @@ def build_positions(
                 )
     _align_coupled(features, meta)
     features = _one_feature_per_unit(_one_per_train(features, meta), rows)
+    _block_following(features, blocks, meta, stations, shapes_conn, cache)
     _single_track(features, occupants, stations)
     return {"type": "FeatureCollection", "features": features}
 
