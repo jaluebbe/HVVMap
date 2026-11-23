@@ -4,7 +4,7 @@ from datetime import datetime
 import pytest
 
 from hvv_map import train_numbers
-from hvv_map.trips import build_trip_table
+from hvv_map.trips import alias_course_key, build_trip_table
 
 
 @pytest.fixture
@@ -72,3 +72,40 @@ def test_trip_table_rows_of_s_bahn_get_the_number(tables):
     live = {"anchor": {"date": "2026-10-17", "time": "09:00:00"}, "departures": []}
     table = build_trip_table(plan, datetime(2026, 10, 17, 4, 0), live)
     assert table["trips"][0]["train_number"] == "41021"
+
+
+def test_course_stops_tell_apart_trains_leaving_an_anchor_together(tables):
+    tables("20261017", {
+        "A3|de:01056:99960|2026-10-17T09:02": [["268903", "de:01056:37994"], ["269912", "de:01056:8007069"]],
+        "A3|de:01056:8007069|2026-10-17T09:03": [["269912", "de:01056:99962"]],
+    })  # fmt: skip
+    plan = {
+        "1": {
+            "line": {"name": "A3", "id": "L:A3", "type": {"shortInfo": "A"}},
+            "directionId": 1,
+            "destination": "Elmshorn",
+            "stops": [
+                {"timeOffset": 302, "station": {"id": "Master:1", "globalId": "de:01056:99960", "name": "Barmstedt"}},
+            ],
+        }
+    }  # fmt: skip
+    fields = {"arr": None, "arr_delay": None, "dep_delay": 0, "platform": None, "cancelled": False}
+    course = {
+        "stops": [
+            {"id": "Master:1", "global_id": "de:01056:99960", "name": "Barmstedt", "dep": "2026-10-17T09:02", **fields},
+            {"id": "Master:2", "global_id": "de:01056:8007069", "name": "B", "dep": "2026-10-17T09:03", **fields},
+        ]
+    }  # fmt: skip
+    dep = {
+        "line": {"name": "A3", "type": {"shortInfo": "A"}, "direction": "Elmshorn"},
+        "station": {"id": "Master:1", "name": "Barmstedt"},
+        "timeOffset": 2,
+        "directionId": 1,
+        "serviceId": 900,
+    }
+    live = {"anchor": {"date": "2026-10-17", "time": "09:00:00"}, "departures": [dep]}
+    without = build_trip_table(plan, datetime(2026, 10, 17, 4, 0), live)
+    assert without["trips"][0]["train_number"] == ""
+    courses = {alias_course_key("900"): course}
+    table = build_trip_table(plan, datetime(2026, 10, 17, 4, 0), live, courses)
+    assert table["trips"][0]["train_number"] == "269912"

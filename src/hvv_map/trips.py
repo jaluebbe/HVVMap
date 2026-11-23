@@ -470,6 +470,15 @@ def _vehicle_fields(
     }
 
 
+def _number_stops(trip: dict, course: dict | None) -> list[tuple]:
+    """(station globalId, planned departure) of the anchor and course stops."""
+    stops = {(s.get("global_id"), s["planned"]) for s in trip["stops"]}
+    for stop in (course or {}).get("stops") or []:
+        if stop.get("global_id") and stop.get("dep"):
+            stops.add((stop["global_id"], datetime.fromisoformat(stop["dep"])))
+    return sorted(stops, key=lambda s: s[1])
+
+
 def _course_failed(course: dict | None) -> bool:
     """A fetch was tried but gave no stops (GTI error or a discarded answer)."""
     return course is not None and not course.get("stops")
@@ -1149,7 +1158,7 @@ def build_trip_table(
         )
         if rows[-1]["mode"] in train_numbers.MODES and not rows[-1]["train_number"]:
             rows[-1]["train_number"] = train_numbers.lookup(
-                trip["line"], [(s.get("global_id"), s["planned"]) for s in trip["stops"]]
+                trip["line"], _number_stops(trip, course)
             )
         per_line[trip["line"]]["trips"] += 1
         per_line[trip["line"]][_COUNTER_KEY[status]] += 1

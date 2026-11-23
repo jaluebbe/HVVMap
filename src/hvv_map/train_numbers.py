@@ -42,10 +42,13 @@ def lookup(line: str, stops: list[tuple[str | None, datetime]]) -> str:
     stops: the numbers listed at every stop found ("11163/11263" for coupled
     trains), "" if none or ambiguous."""
     numbers, nexts, found_at = None, set(), 0
-    for global_id, planned in stops:
-        if not global_id:
-            continue
-        key = f"{line}|{_station(global_id)}|{planned:%Y-%m-%dT%H:%M}"
+    keys = {
+        (_station(global_id), planned.replace(second=0, microsecond=0))
+        for global_id, planned in stops
+        if global_id
+    }
+    for station, planned in keys:
+        key = f"{line}|{station}|{planned:%Y-%m-%dT%H:%M}"
         # trips after midnight are in the previous service day's table
         for day in (planned.date(), planned.date() - timedelta(days=1)):
             entry = _table(day).get(key)
