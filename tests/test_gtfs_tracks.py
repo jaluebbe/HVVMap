@@ -29,8 +29,6 @@ def _schedule(route_short_name="RE1", shape=SHAPE):
         stops={"s1": stop("s1", 10.0005), "s2": stop("s2", 10.2)},
         trips={"t": {"trip_id": "t", "route_id": "r", "shape_id": "sh"}},
         trip_stop_times={"t": [(1, "s1", 0, 0), (2, "s2", 600, 600)]},
-        calendar_rows=[],
-        calendar_dates={},
         shapes={"sh": shape},
     )
 

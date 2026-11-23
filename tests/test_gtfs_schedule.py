@@ -1,14 +1,6 @@
-from datetime import date
-
 import pytest
 
-from hvv_map.gtfs_schedule import (
-    active_service_ids,
-    find_current_segment,
-    head_position,
-    load_schedule,
-    mode_for_trip,
-)
+from hvv_map.gtfs_schedule import load_schedule, mode_for_trip
 
 
 def _write_csv(path, fieldnames, rows):
@@ -142,65 +134,3 @@ def test_load_schedule_only_keeps_trips_of_interesting_routes(gtfs_dir):
 def test_mode_for_trip_maps_route_type_to_mode(gtfs_dir):
     schedule = load_schedule(gtfs_dir)
     assert mode_for_trip(schedule, schedule.trips["T1"]) == "U"
-
-
-def test_active_service_ids_respects_weekday_and_date_range(gtfs_dir):
-    schedule = load_schedule(gtfs_dir)
-    monday = date(2025, 6, 2)
-    saturday = date(2025, 6, 7)
-    assert "WEEKDAYS" in active_service_ids(schedule, monday)
-    assert "WEEKDAYS" not in active_service_ids(schedule, saturday)
-
-
-def test_active_service_ids_exception_removes_service(gtfs_dir):
-    schedule = load_schedule(gtfs_dir)
-    new_years_day = date(2025, 1, 1)  # a Wednesday, but removed via calendar_dates
-    assert "WEEKDAYS" not in active_service_ids(schedule, new_years_day)
-
-
-def test_active_service_ids_exception_adds_service_without_calendar_row(gtfs_dir):
-    schedule = load_schedule(gtfs_dir)
-    special_day = date(2025, 7, 6)  # a Sunday, added purely via calendar_dates
-    assert "SPECIAL" in active_service_ids(schedule, special_day)
-
-
-def test_find_current_segment_returns_matching_pair():
-    rows = [(1, "A", 100, 100), (2, "B", 200, 200), (3, "C", 300, 300)]
-    assert find_current_segment(rows, 150) == ((1, "A", 100, 100), (2, "B", 200, 200))
-
-
-def test_find_current_segment_none_before_first_departure():
-    rows = [(1, "A", 100, 100), (2, "B", 200, 200)]
-    assert find_current_segment(rows, 50) is None
-
-
-def test_find_current_segment_none_after_last_arrival():
-    rows = [(1, "A", 100, 100), (2, "B", 200, 200)]
-    assert find_current_segment(rows, 250) is None
-
-
-def test_head_position_midway():
-    coords = [(0.0, 0.0), (0.0, 2.0)]
-    progress, head = head_position(coords, actual_start=0, actual_end=100, now_ts=50)
-    assert progress == pytest.approx(0.5)
-    assert head[1] == pytest.approx(1.0, abs=0.01)
-
-
-def test_head_position_clamps_before_start():
-    coords = [(0.0, 0.0), (0.0, 2.0)]
-    progress, head = head_position(coords, actual_start=100, actual_end=200, now_ts=0)
-    assert progress == 0.0
-    assert head == coords[0]
-
-
-def test_head_position_clamps_after_end():
-    coords = [(0.0, 0.0), (0.0, 2.0)]
-    progress, head = head_position(coords, actual_start=0, actual_end=100, now_ts=500)
-    assert progress == 1.0
-    assert head == coords[1]
-
-
-def test_head_position_none_for_single_point():
-    assert (
-        head_position([(0.0, 0.0)], actual_start=0, actual_end=100, now_ts=50) is None
-    )

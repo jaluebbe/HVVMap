@@ -17,12 +17,8 @@ one Redis instance:
   `hvv:positions_gtilive`. A third thread (`hvv_map.ais`) polls the HADAG
   ferries' AIS positions (Open Waters API, by MMSI) into `hvv:ais:hadag`; it
   does nothing without `AIS_TOKEN`. Needs GTI credentials, no web-facing port.
-- **gtfs-fetcher** (`hvv_map.gtfs_fetcher`) - background loop building the
-  same kind of layers purely from a static GTFS feed on disk - no GTI
-  credentials, no live API, no disruptions (a static feed has none). Writes
-  `hvv:gtfs:positions`, `hvv:gtfs:reference_lines`, `hvv:gtfs:reference_stops`.
 - **api** (`hvv_map.api`) - FastAPI app serving all of the above under
-  `/api/hvv/live/*`, `/api/hvv/gtilive/*` and `/api/hvv/gtfs/*`, plus a
+  `/api/hvv/live/*` and `/api/hvv/gtilive/*`, plus a
   background vector basemap (a single `.mbtiles` file) and the static
   frontend. Needs only Redis, no GTI credentials, no GTFS feed.
 
@@ -43,18 +39,18 @@ Supporting modules (all under `src/hvv_map/`):
 | `announcement_categories.py` | our own SPERRUNG/BARRIEREFREIHEIT/SONSTIGE classification per announcement - dependency-free (stdlib only), importable by both the fetcher and the API server |
 | `disruptions.py` | builds `hvv:disruptions` from a `getAnnouncements` response, using `announcement_categories.py` for classification |
 | `ais.py` | HADAG ferry positions from the Open Waters AIS API (`hvv:ais:hadag`), independent of the GTI data |
-| `gtfs_schedule.py` | parses a static GTFS feed into an in-memory schedule, locates a trip's position at a given time |
-| `gtfs_geojson.py` | builds the three `hvv:gtfs:*` layers from a loaded `Schedule` |
+| `gtfs_schedule.py` | parses a static GTFS feed into an in-memory schedule |
+| `gtfs_tracks.py` | cuts rail hops without a GTI track from the GTFS shapes |
 
 ## Development
 
 No `requirements.txt` - dependencies live in `pyproject.toml`, grouped into
 optional extras so each deployable only pulls in what it needs (`fetcher`
-needs `requests`, `gtfs-fetcher` and `api` need nothing beyond `redis`/
+needs `requests`, `api` needs nothing beyond `redis`/
 `fastapi`+`uvicorn`). Pick the extras you need, comma-separated, no spaces:
 
 ```
-pip install -e ".[fetcher,gtfs-fetcher,api,dev]"
+pip install -e ".[fetcher,api,dev]"
 ```
 
 (`dev` adds `pytest`/`ruff`/`httpx2` for running the tests below; skip it in
@@ -86,14 +82,11 @@ sets another file; an empty value turns the archive off.
 (coupled parts drawn as one train); an empty value turns it off, so every
 part is drawn on its own and stacked with the others.
 
-Run the GTFS fetcher (needs a static GTFS feed - `agency.txt`, `routes.txt`,
-`trips.txt`, `stop_times.txt`, `stops.txt`, `calendar.txt`/
-`calendar_dates.txt`, `shapes.txt` - unzipped into one directory):
-```
-GTFS_DIR=/path/to/gtfs hvvmap-gtfs-fetcher
-```
-`GTFS_DIR` defaults to `data/gtfs`, relative like `GTI_SHAPES_DB_PATH` above
-- same caveat about the current working directory applies.
+The fetcher's track step reads a static GTFS feed (`routes.txt`,
+`trips.txt`, `stop_times.txt`, `stops.txt`, `shapes.txt`, unzipped into one
+directory) from `GTFS_DIR`, default `data/gtfs`, relative like
+`GTI_SHAPES_DB_PATH` above - same caveat about the current working directory
+applies.
 
 Run the API:
 ```
@@ -134,18 +127,14 @@ they're built directly from the static feed on first run.
   `redis-cli`
 - `hvvmap-ais` - one AIS request for the HADAG fleet (needs `AIS_TOKEN`),
   prints the number of vessels found
-- `hvvmap-gtfs-fetch-once` - one-shot GTFS layer build, same idea for the
-  `hvv:gtfs:*` keys
 
 ## Frontend
 
 `static/` ships map pages built on MapLibre GL JS, all served by the same
 `api.py`:
 
-- `maplibre_map_hvv_live.html` - all modes; the data source (`gtilive`,
-  `gtfs`) is switched at runtime via a dropdown, no page reload needed; see
-  `maplibre_map_hvv_base.js`'s `SOURCES`. Defaults to `gtilive`. The
-  checkbox "AIS" (off by default) adds the HADAG ferries' AIS positions
+- `maplibre_map_hvv_gtilive.html` - all modes; this is the public map, also
+  served at `/`. The checkbox "AIS" (off by default) adds the HADAG ferries' AIS positions
   (`maplibre_map_hvv_ais.js`, `/api/hvv/ais/hadag.geojson`): a hull icon per
   vessel, green while under way, pale green for up to 5 min after it stopped or
   was made fast (`HALTED_SECONDS` in `ais.py`) and grey while moored; the page option
@@ -173,8 +162,6 @@ they're built directly from the static feed on first run.
 - `maplibre_map_hvv_sbahn.html` - the same for the S-Bahn: `gtilive` only,
   centered on Hamburg Hbf, S1-S7 toggleable individually, destination labels
   on, no unit numbers; also served at `/sbahn`.
-- `maplibre_map_hvv_gtilive.html` - only the `gtilive` source, no dropdown;
-  this is the public map, also served at `/`.
 
 The Leaflet pages were removed; the last state with them is tagged
 `legacy-leaflet-vehiclemap` (`git checkout legacy-leaflet-vehiclemap`, or
@@ -210,11 +197,10 @@ labeled "eigene Kategorie" so it's never mistaken for an HVV API field.
 
 ## Docker
 
-Three images, three Dockerfiles:
+Two images, two Dockerfiles:
 
 ```
 docker build -f Dockerfile.fetcher -t hvvmap-fetcher .
-docker build -f Dockerfile.gtfs-fetcher -t hvvmap-gtfs-fetcher .
 docker build -f Dockerfile.api -t hvvmap-api .
 ```
 
@@ -236,11 +222,8 @@ and, mounted as a volume at runtime:
   `standard_railway_text_stations_med`).
   Without it the frontend simply offers no OpenRailwayMap toggle.
 
-The **gtfs-fetcher** image needs a static GTFS feed mounted at `GTFS_DIR`
-(default `data/gtfs`) - unzipped, not the raw `.zip`.
-
-The **fetcher** image reads the same feed (read-only mount at `GTFS_DIR`) if it
-is there: rail hops GTI delivers no track for are then cut from the GTFS
+The **fetcher** image reads a static GTFS feed (unzipped, read-only mount at
+`GTFS_DIR`) if it is there: rail hops GTI delivers no track for are then cut from the GTFS
 shapes (`gtfs_tracks.py`). Without a feed this step is skipped.
 
 All images read `REDIS_HOST`/`REDIS_DB` (default `127.0.0.1`/`0`); only the
@@ -261,6 +244,11 @@ The `getVehicleMap` implementation (fetcher job, `segment_cache`,
 removed to save API requests. The last state with it is tagged
 `legacy-vehiclemap` (`git show legacy-vehiclemap:src/hvv_map/fetcher.py`).
 
+The GTFS-only view (`gtfs-fetcher`, `gtfs_geojson.py`, `/api/hvv/gtfs/*`,
+`maplibre_map_hvv_live.html` with its source dropdown) was removed as well;
+the last state with it is commit `85caf4e`
+(`git show 85caf4e:src/hvv_map/gtfs_fetcher.py`).
+
 ## Notable data quirks
 
 - GTI delivers vehicle numbers only for the U-Bahn and only with the matched
@@ -270,16 +258,7 @@ removed to save API requests. The last state with it is tagged
   have no seconds), so vehicles departing in the same minute move in sync.
 - Straight links (shapes with sparse points, e.g. replacement buses) are
   flagged `straight` and only drawn with the "Luftlinien" checkbox.
-- GTFS-based positions interpolate linearly between two consecutive stops,
-  not along the actual `shapes.txt` geometry - matching a trip's stops to
-  its shape reliably would need `shape_dist_traveled`, which isn't
-  guaranteed present/accurate in the feed. The reference **lines** layer
-  doesn't have this problem: it draws each trip's full `shapes.txt`
-  polyline directly, since `trips.txt` links a trip to its shape_id with no
-  matching needed.
 - GTFS mode assignment (U/S/AKN/ferry) is mostly a direct `route_type`
   lookup, but replacement buses run under `route_type=3` (regular bus) like
   any other bus line - `gtfs_schedule.py`'s `SPECIAL_BUS_ROUTES` maps their
   route_ids to the mode they replace.
-- `calendar_dates.txt` exceptions (added/removed single-day services) are
-  respected in `gtfs_schedule.py`.
