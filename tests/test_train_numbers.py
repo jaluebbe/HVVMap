@@ -47,6 +47,14 @@ def test_single_stop_with_trains_to_different_next_stations(tables):
     assert train_numbers.lookup("S7", [("de:02000:10952", at("05:17"))]) == ""
 
 
+def test_one_of_several_stops_matching_another_train_gives_no_number(tables):
+    # special train (ET 472) at Elbbrücken in the minute of a regular S5
+    tables("20261123", {"S5|de:02000:2|2026-11-23T11:34": [["45106", "x"]]})
+    times = ((1, "11:32"), (2, "11:34"), (3, "11:37"))
+    stops = [(f"de:02000:{i}", at(t)) for i, t in times]
+    assert train_numbers.lookup("S5", stops) == ""
+
+
 def test_after_midnight_from_the_previous_service_day(tables):
     tables("20261122", {"S1|de:02000:1|2026-11-23T00:33": [["41021", "x"]]})
     assert train_numbers.lookup("S1", [("de:02000:1:1:1", at("00:33"))]) == "41021"
