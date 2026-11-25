@@ -40,8 +40,9 @@ def _station(global_id: str) -> str:
 
 def lookup(line: str, stops: list[tuple[str | None, datetime]]) -> str:
     """Train number of a trip from its (station globalId, planned departure)
-    stops: the number(s) found at most of them, more than half ("11163/11263"
-    for coupled trains); "" if none or ambiguous."""
+    stops: the number(s) found at most of them, more than half and at least
+    two if several stops are known ("11163/11263" for coupled trains); "" if
+    none or ambiguous."""
     counts: Counter = Counter()
     nexts, found_at = set(), 0
     keys = {
@@ -66,6 +67,8 @@ def lookup(line: str, stops: list[tuple[str | None, datetime]]) -> str:
     top = max(counts.values())
     if top * 2 <= found_at:
         return ""
+    if top < 2 and len(keys) > 1:
+        return ""  # one stop of several: a train of the line at the same minute
     numbers = [n for n, c in counts.items() if c == top]
     if len(numbers) > 1 and found_at < 2 and len(nexts) > 1:
         return ""  # one stop: same-minute trains to different next stations
